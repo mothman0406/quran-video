@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, useState, useSyncExternalStore } from "react";
+import { type ChangeEvent, useEffect, useState } from "react";
 import { analyzeTranscript, type RecognitionAnalysis, type RecognitionResult } from "@/lib/recognition/core";
 import {
   LOCAL_WHISPER_APPROXIMATE_DOWNLOAD_MB,
@@ -21,13 +21,8 @@ function formatTime(value: number) {
 
 const INITIAL_RUNTIME_SUPPORT = { supported: false, reason: "Checking browser capabilities…" };
 
-function subscribeToRuntimeSupport(onChange: () => void) {
-  const frame = requestAnimationFrame(onChange);
-  return () => cancelAnimationFrame(frame);
-}
-
 export default function RecognitionSpikePage() {
-  const support = useSyncExternalStore(subscribeToRuntimeSupport, localTranscriptionSupport, () => INITIAL_RUNTIME_SUPPORT);
+  const [support, setSupport] = useState(INITIAL_RUNTIME_SUPPORT);
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [result, setResult] = useState<LocalTranscriptionResult | null>(null);
@@ -35,6 +30,11 @@ export default function RecognitionSpikePage() {
   const [analysis, setAnalysis] = useState<RecognitionAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setSupport(localTranscriptionSupport()));
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   function selectFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
