@@ -26,6 +26,11 @@ export const VerseAlignmentSchema = VerseKeySchema.extend({
   startSeconds: PositiveNumber,
   endSeconds: PositiveNumber,
   confidence: z.number().finite().min(0).max(1).optional(),
+  timingEvidence: z.strictObject({
+    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation"]) }),
+    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation"]) }),
+    matchedText: z.string(),
+  }).optional(),
 });
 
 export const CaptionSegmentSchema = z.strictObject({

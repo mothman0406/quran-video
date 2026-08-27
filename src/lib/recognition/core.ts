@@ -51,10 +51,19 @@ export type RecognitionAnalysis = {
 
 type CorpusChapter = {
   id: number;
+  name: string;
+  transliteration: string;
   verses: Array<{ id: number; text: string }>;
 };
 
 const corpus = hafsCorpus as CorpusChapter[];
+
+export const hafsSurahs = corpus.map((chapter) => ({
+  number: chapter.id,
+  name: chapter.name,
+  transliteration: chapter.transliteration,
+  verseCount: chapter.verses.length,
+}));
 
 export const hafsVerses: readonly QuranCorpusVerse[] = corpus.flatMap((chapter) =>
   chapter.verses.map((verse) => ({ verseKey: `${chapter.id}:${verse.id}`, text: verse.text })),

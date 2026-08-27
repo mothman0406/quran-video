@@ -23,6 +23,7 @@ The project schema is the handoff boundary between upload, recognition, editing,
 - Quran Foundation Content API supplies canonical Hafs text, Saheeh International by default, transliteration, and font metadata. Font files are loaded directly from the Quran Foundation CDN at runtime.
 - `src/lib/quran/content.ts` defines the content abstraction and profiles for Uthmani/QPC Hafs, Madinah/QCF, IndoPak, and KFGQPC style.
 - M3B local recognition uses a browser-only Transformers.js Whisper adapter. It decodes the selected `File` through Web Audio, runs `onnx-community/whisper-base` on WebGPU when available (otherwise local WASM), and returns timestamped transcript chunks to the deterministic matcher. It does not send source audio to an application server or inference API.
+- M3C/M4 editor integration converts matcher output into browser-local verse alignments, fetches canonical display content through the existing Quran Foundation route, and derives the active caption directly from video playback time. The `/recognition` route remains a developer diagnostic surface; the main editor is the normal entry point.
 - Supabase owns auth and explicitly saved project metadata/settings; it is not the default source-video or export store.
 - Stripe handles quotas and subscriptions after core editing/export works.
 

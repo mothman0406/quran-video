@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: M3C/M4 — Automatic Quran detection in the editor
+
+Complete:
+
+- The main local video flow now exposes `Detect Quran`; recognition dependencies and the Whisper model load only after that action.
+- User-facing progress covers audio preparation, local model loading, local transcription, Quran matching, and caption preparation. The selected audio is explicitly processed locally and never uploaded.
+- Recognized matches become browser-local verse alignments with verse keys, millisecond timing, confidence, and timing evidence metadata. Playback and scrubbing select the active alignment without treating Whisper chunk or breath boundaries as caption changes.
+- Captions fetch canonical Quran Foundation content for display: Hafs Arabic, Saheeh International, and available transliteration. Missing credentials leave recognition intact and show setup guidance.
+- Added basic correction, rerun detection, retryable failures, and video replacement/clear invalidation and object-URL cleanup. The developer `/recognition` diagnostics route remains available.
+
+Verification: full `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass.
+
 ## Current milestone: M3B — Local browser transcription spike
 
 Complete:
