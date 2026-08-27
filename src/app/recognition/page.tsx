@@ -1,7 +1,7 @@
 "use client";
 
-import { type ChangeEvent, useMemo, useState } from "react";
-import { recognizeTranscript, type RecognitionResult } from "@/lib/recognition/core";
+import { type ChangeEvent, useState, useSyncExternalStore } from "react";
+import { analyzeTranscript, type RecognitionAnalysis, type RecognitionResult } from "@/lib/recognition/core";
 import {
   LOCAL_WHISPER_APPROXIMATE_DOWNLOAD_MB,
   LOCAL_WHISPER_MODEL,
@@ -19,12 +19,20 @@ function formatTime(value: number) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+const INITIAL_RUNTIME_SUPPORT = { supported: false, reason: "Checking browser capabilities…" };
+
+function subscribeToRuntimeSupport(onChange: () => void) {
+  const frame = requestAnimationFrame(onChange);
+  return () => cancelAnimationFrame(frame);
+}
+
 export default function RecognitionSpikePage() {
-  const support = useMemo(() => localTranscriptionSupport(), []);
+  const support = useSyncExternalStore(subscribeToRuntimeSupport, localTranscriptionSupport, () => INITIAL_RUNTIME_SUPPORT);
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [result, setResult] = useState<LocalTranscriptionResult | null>(null);
   const [matches, setMatches] = useState<RecognitionResult>([]);
+  const [analysis, setAnalysis] = useState<RecognitionAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
 
@@ -33,6 +41,7 @@ export default function RecognitionSpikePage() {
     setFile(next);
     setResult(null);
     setMatches([]);
+    setAnalysis(null);
     setError(null);
     setProgress(null);
   }
@@ -46,7 +55,9 @@ export default function RecognitionSpikePage() {
     try {
       const output = await localWhisperTranscriber.transcribe(file, setProgress);
       setResult(output);
-      setMatches(recognizeTranscript(output.chunks));
+      const nextAnalysis = analyzeTranscript(output.chunks);
+      setAnalysis(nextAnalysis);
+      setMatches(nextAnalysis.matches);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Local transcription failed.");
     } finally {
@@ -87,6 +98,7 @@ export default function RecognitionSpikePage() {
             <div><dt className="text-xs font-bold uppercase tracking-wide text-[#8b928b]">Detected ayah range</dt><dd className="mt-1 font-semibold">{firstMatch && lastMatch ? `${firstMatch.verseKey} – ${lastMatch.verseKey}` : "—"}</dd></div>
           </dl>
           {matches.length > 0 ? <div className="mt-5 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b text-[#68716a]"><tr><th className="py-2">Ayah</th><th className="py-2">Approximate start</th><th className="py-2">Approximate end</th><th className="py-2">Confidence</th></tr></thead><tbody>{matches.map((match) => <tr className="border-b border-[#e3e0d8]" key={`${match.verseKey}-${match.startMs}`}><td className="py-2 font-semibold">{match.verseKey}</td><td className="py-2">{formatTime(match.startMs)}</td><td className="py-2">{formatTime(match.endMs)}</td><td className="py-2">{Math.round(match.confidence * 100)}%</td></tr>)}</tbody></table></div> : <p className="mt-5 text-sm text-[#68716a]">The transcript did not reach the deterministic matcher confidence threshold.</p>}
+          {matches.length === 0 && analysis && <details className="mt-4 text-sm text-[#68716a]"><summary className="cursor-pointer font-semibold text-[#35604f]">Matcher diagnostics</summary>{analysis.diagnostics.map((diagnostic) => <p className="mt-2" key={`${diagnostic.startMs}-${diagnostic.endMs}`}>Top candidate: {diagnostic.topCandidate ? `${diagnostic.topCandidate.startVerseKey} – ${diagnostic.topCandidate.endVerseKey} (${Math.round(diagnostic.topCandidate.confidence * 100)}%)` : "none"}. Rejection: {diagnostic.rejectionReason ?? "none"}.</p>)}</details>}
           <details className="mt-5"><summary className="cursor-pointer text-sm font-semibold text-[#35604f]">Raw transcript ({result.chunks.length} timestamped chunks)</summary><p className="mt-3 whitespace-pre-wrap rounded-lg bg-[#f7f5ef] p-3 text-sm leading-7" dir="rtl" lang="ar">{result.rawTranscript || "No speech was returned."}</p></details>
         </section>}
       </div>

@@ -20,6 +20,24 @@ export type RecognitionMatch = {
 
 export type RecognitionResult = RecognitionMatch[];
 
+export type RecognitionDiagnostic = {
+  startMs: number;
+  endMs: number;
+  normalizedText: string;
+  topCandidate?: {
+    startVerseKey: string;
+    endVerseKey: string;
+    score: number;
+    confidence: number;
+  };
+  rejectionReason: "empty transcript" | "invalid timestamps" | "no candidate sequence" | "ambiguous short phrase" | "below confidence threshold" | null;
+};
+
+export type RecognitionAnalysis = {
+  matches: RecognitionResult;
+  diagnostics: RecognitionDiagnostic[];
+};
+
 type CorpusChapter = {
   id: number;
   verses: Array<{ id: number; text: string }>;
@@ -96,9 +114,18 @@ function confidenceFor(score: number, normalizedText: string): number {
 function candidateStarts(normalizedText: string, verses: readonly QuranCorpusVerse[]): number[] {
   const words = normalizedText.split(" ");
   const firstWord = words[0];
-  return verses.reduce<number[]>((result, verse, index) => {
+  const exact = verses.reduce<number[]>((result, verse, index) => {
     const verseWords = normalizeArabic(verse.text).split(" ");
     if (verseWords.includes(firstWord)) result.push(index);
+    return result;
+  }, []);
+  if (exact.length > 0) return exact;
+  // Whisper frequently drops the leading conjunction or article in the first
+  // word (for example, وضحى for والضحى). Use this fallback only when an exact
+  // seed is unavailable; full contiguous-sequence scoring still decides.
+  return verses.reduce<number[]>((result, verse, index) => {
+    const verseWords = normalizeArabic(verse.text).split(" ");
+    if (verseWords.some((word) => editSimilarity(firstWord, word) >= 0.65)) result.push(index);
     return result;
   }, []);
 }
@@ -115,22 +142,39 @@ function splitTiming(chunk: TranscriptChunk, verses: readonly QuranCorpusVerse[]
   });
 }
 
-export function recognizeTranscript(
+export function analyzeTranscript(
   chunks: readonly TranscriptChunk[],
   options: { corpus?: readonly QuranCorpusVerse[]; minConfidence?: number; maxVersesPerChunk?: number } = {},
-): RecognitionResult {
+): RecognitionAnalysis {
   const verses = options.corpus ?? hafsVerses;
   const minConfidence = options.minConfidence ?? 0.52;
-  const maxVersesPerChunk = options.maxVersesPerChunk ?? 4;
+  const maxVersesPerChunk = options.maxVersesPerChunk ?? 5;
   const orderedChunks = [...chunks].sort((left, right) => left.startMs - right.startMs);
   const matches: RecognitionMatch[] = [];
+  const diagnostics: RecognitionDiagnostic[] = [];
   let cursor = 0;
 
   for (const chunk of orderedChunks) {
     const normalizedChunk = normalizeArabic(chunk.text);
-    if (!normalizedChunk || chunk.endMs < chunk.startMs) continue;
+    const diagnostic: RecognitionDiagnostic = {
+      startMs: chunk.startMs,
+      endMs: chunk.endMs,
+      normalizedText: normalizedChunk,
+      rejectionReason: null,
+    };
+    if (!normalizedChunk) {
+      diagnostics.push({ ...diagnostic, rejectionReason: "empty transcript" });
+      continue;
+    }
+    if (chunk.endMs < chunk.startMs) {
+      diagnostics.push({ ...diagnostic, rejectionReason: "invalid timestamps" });
+      continue;
+    }
     const starts = candidateStarts(normalizedChunk, verses).filter((start) => start >= cursor);
-    if (starts.length === 0) continue;
+    if (starts.length === 0) {
+      diagnostics.push({ ...diagnostic, rejectionReason: "no candidate sequence" });
+      continue;
+    }
     let best: { start: number; end: number; score: number } | null = null;
     for (const start of starts) {
       let combined = "";
@@ -143,9 +187,21 @@ export function recognizeTranscript(
       }
     }
     if (!best) continue;
-    if (normalizedChunk.split(" ").length === 1 && starts.length > 1) continue;
     const confidence = confidenceFor(best.score, normalizedChunk);
-    if (confidence < minConfidence) continue;
+    diagnostic.topCandidate = {
+      startVerseKey: verses[best.start].verseKey,
+      endVerseKey: verses[best.end].verseKey,
+      score: Number(best.score.toFixed(4)),
+      confidence: Number(confidence.toFixed(4)),
+    };
+    if (normalizedChunk.split(" ").length === 1 && starts.length > 1) {
+      diagnostics.push({ ...diagnostic, rejectionReason: "ambiguous short phrase" });
+      continue;
+    }
+    if (confidence < minConfidence) {
+      diagnostics.push({ ...diagnostic, rejectionReason: "below confidence threshold" });
+      continue;
+    }
     const selected = verses.slice(best.start, best.end + 1);
     const timed = splitTiming(chunk, selected);
     timed.forEach((match) => {
@@ -159,6 +215,14 @@ export function recognizeTranscript(
       }
     });
     cursor = Math.max(cursor, best.end + 1);
+    diagnostics.push(diagnostic);
   }
-  return matches;
+  return { matches, diagnostics };
+}
+
+export function recognizeTranscript(
+  chunks: readonly TranscriptChunk[],
+  options: { corpus?: readonly QuranCorpusVerse[]; minConfidence?: number; maxVersesPerChunk?: number } = {},
+): RecognitionResult {
+  return analyzeTranscript(chunks, options).matches;
 }
