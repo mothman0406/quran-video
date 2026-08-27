@@ -153,10 +153,17 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       for (const item of timestamped) {
         const midpoint = (item.timestamp[0] + item.timestamp[1]) / 2;
         if (midpoint < chunk.trimBeforeSeconds) continue;
+        const text = item.text.trim();
+        const startMs = Math.round((chunk.offsetSeconds + item.timestamp[0]) * 1_000);
+        const endMs = Math.round((chunk.offsetSeconds + item.timestamp[1]) * 1_000);
+        // Transformers.js commonly returns word chunks for this mode. Treat a
+        // single returned word as direct ASR timing; multi-word spans remain
+        // conservative chunk evidence and are aligned internally later.
         transcriptChunks.push({
-          text: item.text.trim(),
-          startMs: Math.round((chunk.offsetSeconds + item.timestamp[0]) * 1_000),
-          endMs: Math.round((chunk.offsetSeconds + item.timestamp[1]) * 1_000),
+          text,
+          startMs,
+          endMs,
+          words: text.split(/\s+/).filter(Boolean).length === 1 ? [{ text, startMs, endMs }] : undefined,
         });
       }
     }

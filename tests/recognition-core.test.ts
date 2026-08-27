@@ -68,6 +68,34 @@ test("splits one timestamped chunk containing multiple consecutive ayat", () => 
   assert.equal(result[1]?.endMs, 1_400);
 });
 
+test("reconstructs a contiguous passage and aligns ayah timing across mid-ayah breaths", () => {
+  const text = (key: string, start?: number, end?: number) => {
+    const words = verse(key).text.split(" ");
+    return words.slice(start, end).join(" ");
+  };
+  const analysis = analyzeTranscript([
+    // These two adjacent ASR chunks deliberately meet at a breath inside 6:74.
+    { startMs: 7_000, endMs: 16_000, text: text("6:74", 0, 7) },
+    { startMs: 16_000, endMs: 20_000, text: text("6:74", 7) },
+    // Standalone evidence for 6:75 is intentionally weak, but its canonical place
+    // is retained between the accepted 6:74 and 6:76 sequence evidence.
+    { startMs: 21_000, endMs: 30_000, text: "وكذلك نري ابراهيم" },
+    // This boundary is another breath inside 6:76, not an ayah boundary.
+    { startMs: 32_000, endMs: 38_000, text: text("6:76", 0, 6) },
+    { startMs: 38_000, endMs: 44_000, text: text("6:76", 6) },
+    { startMs: 45_000, endMs: 66_000, text: verse("6:77").text },
+  ]);
+  assert.deepEqual(analysis.matches.map((item) => item.verseKey), ["6:74", "6:75", "6:76", "6:77"]);
+  const [v74, v75, v76, v77] = analysis.matches;
+  assert.ok(v74.startMs >= 6_500, "initial non-Quran silence must not become 6:74");
+  assert.ok(v74.endMs >= 19_000, "the 0:16 breath remains inside 6:74");
+  assert.ok(v76.startMs <= 33_000 && v76.endMs >= 43_000, "the 0:38 breath remains inside 6:76");
+  assert.ok(v74.endMs <= v75.startMs && v75.endMs <= v76.startMs && v76.endMs <= v77.startMs);
+  assert.ok(v74.endMs - v74.startMs !== v77.endMs - v77.startMs, "ayah timing must not be evenly distributed");
+  assert.equal(v74.timing.start.source, "chunk-text-alignment");
+  assert.ok(v75.timing.matchedText.length > 0, "weak interior text should contribute to timing");
+});
+
 test("maps a clip beginning mid-ayah to the containing ayah", () => {
   const result = recognizeTranscript([{ startMs: 250, endMs: 800, text: "رب العالمين" }]);
   assert.equal(result[0]?.verseKey, "1:2");

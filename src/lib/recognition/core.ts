@@ -4,6 +4,8 @@ export type TranscriptChunk = {
   startMs: number;
   endMs: number;
   text: string;
+  /** Optional ASR word offsets. Chunk offsets are used when the runtime does not expose these. */
+  words?: Array<{ text: string; startMs: number; endMs: number }>;
 };
 
 export type QuranCorpusVerse = {
@@ -16,6 +18,11 @@ export type RecognitionMatch = {
   startMs: number;
   endMs: number;
   confidence: number;
+  timing: {
+    start: { timestampMs: number; source: "direct-asr-word" | "chunk-text-alignment" | "interpolation" };
+    end: { timestampMs: number; source: "direct-asr-word" | "chunk-text-alignment" | "interpolation" };
+    matchedText: string;
+  };
 };
 
 export type RecognitionResult = RecognitionMatch[];
@@ -225,15 +232,146 @@ function candidateStarts(
   return { starts: [...starts], path: "character-fallback" };
 }
 
-function splitTiming(chunk: TranscriptChunk, verses: readonly QuranCorpusVerse[]): RecognitionMatch[] {
-  const weights = verses.map((verse) => Math.max(1, normalizedVerseText(verse).length));
-  const total = weights.reduce((sum, weight) => sum + weight, 0);
-  let elapsed = chunk.startMs;
-  return verses.map((verse, index) => {
-    const endMs = index === verses.length - 1 ? chunk.endMs : Math.round(elapsed + (chunk.endMs - chunk.startMs) * weights[index] / total);
-    const result = { verseKey: verse.verseKey, startMs: elapsed, endMs, confidence: 0 };
-    elapsed = endMs;
-    return result;
+type TimedToken = {
+  text: string;
+  startMs: number;
+  endMs: number;
+  source: "direct-asr-word" | "chunk-text-alignment";
+};
+
+function timedTokens(chunks: readonly TranscriptChunk[]): TimedToken[] {
+  return chunks.reduce<TimedToken[]>((all, chunk) => {
+    if (chunk.words?.length) {
+      all.push(...chunk.words.flatMap<TimedToken>((word) => {
+        const text = normalizeArabic(word.text);
+        return text ? [{ text, startMs: word.startMs, endMs: word.endMs, source: "direct-asr-word" as const }] : [];
+      }));
+      return all;
+    }
+    const words = normalizeArabic(chunk.text).split(" ").filter(Boolean);
+    const weight = words.reduce((sum, word) => sum + Math.max(1, word.length), 0);
+    let cursor = chunk.startMs;
+    all.push(...words.map<TimedToken>((text, index) => {
+      const endMs = index === words.length - 1 ? chunk.endMs : Math.round(cursor + (chunk.endMs - chunk.startMs) * Math.max(1, text.length) / weight);
+      const token = { text, startMs: cursor, endMs, source: "chunk-text-alignment" as const };
+      cursor = endMs;
+      return token;
+    }));
+    return all;
+  }, []).filter((token) => token.endMs >= token.startMs);
+}
+
+/**
+ * Monotonic fuzzy alignment of ASR tokens to the canonical passage. It deliberately
+ * has no pause or chunk-boundary input: those are timestamps on evidence, never ayah
+ * separators. Canonical gaps are inexpensive so clips may begin/end inside an ayah.
+ */
+function alignTokens(canonical: string[], asr: TimedToken[]) {
+  const rows = canonical.length + 1;
+  const columns = asr.length + 1;
+  const scores = Array.from({ length: rows }, () => new Float64Array(columns));
+  const moves = Array.from({ length: rows }, () => new Uint8Array(columns)); // 1 diag, 2 canonical gap, 3 ASR gap
+  for (let i = 1; i < rows; i += 1) { scores[i][0] = 0; moves[i][0] = 2; }
+  for (let j = 1; j < columns; j += 1) { scores[0][j] = 0; moves[0][j] = 3; }
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < columns; j += 1) {
+      const similarity = tokenSimilarity(canonical[i - 1], asr[j - 1].text);
+      const diagonal = scores[i - 1][j - 1] + (similarity >= 0.58 ? similarity * 2 : -1.2);
+      const skipCanonical = scores[i - 1][j] - 0.12;
+      const skipAsr = scores[i][j - 1] - 0.35;
+      if (diagonal >= skipCanonical && diagonal >= skipAsr) { scores[i][j] = diagonal; moves[i][j] = 1; }
+      else if (skipCanonical >= skipAsr) { scores[i][j] = skipCanonical; moves[i][j] = 2; }
+      else { scores[i][j] = skipAsr; moves[i][j] = 3; }
+    }
+  }
+  const aligned = new Map<number, TimedToken[]>();
+  let i = canonical.length;
+  let j = asr.length;
+  while (i > 0 || j > 0) {
+    const move = moves[i]?.[j] ?? 0;
+    if (move === 1) {
+      if (tokenSimilarity(canonical[i - 1], asr[j - 1].text) >= 0.58) {
+        const current = aligned.get(i - 1) ?? [];
+        current.unshift(asr[j - 1]);
+        aligned.set(i - 1, current);
+      }
+      i -= 1; j -= 1;
+    } else if (move === 2) i -= 1;
+    else if (move === 3) j -= 1;
+    else break;
+  }
+  return aligned;
+}
+
+function reconstructPassage(
+  accepted: ScoredCandidate[],
+  acceptedConfidence: number[],
+  chunks: readonly TranscriptChunk[],
+  verses: readonly QuranCorpusVerse[],
+): RecognitionMatch[] {
+  if (!accepted.length) return [];
+  // A confirmed span is higher-level evidence than any individual weak chunk.
+  // Fill only interior ayat in the same surah, preserving Quran order.
+  const sameSurah = accepted.filter((candidate) => verses[candidate.start].verseKey.split(":")[0] === verses[accepted[0].start].verseKey.split(":")[0]);
+  if (!sameSurah.length) return [];
+  const start = Math.min(...sameSurah.map((candidate) => candidate.start));
+  const end = Math.max(...sameSurah.map((candidate) => candidate.end));
+  const passage = verses.slice(start, end + 1);
+  const canonical: Array<{ word: string; ayah: number }> = [];
+  passage.forEach((verse, ayah) => normalizedVerseWords(verse).forEach((word) => canonical.push({ word, ayah })));
+  const evidence = timedTokens(chunks);
+  const aligned = alignTokens(canonical.map((token) => token.word), evidence);
+  const byAyah = passage.map(() => [] as TimedToken[]);
+  const textByAyah = passage.map(() => [] as string[]);
+  aligned.forEach((tokens, canonicalIndex) => {
+    const ayah = canonical[canonicalIndex].ayah;
+    byAyah[ayah].push(...tokens);
+    textByAyah[ayah].push(...tokens.map((token) => token.text));
+  });
+  // Candidate scoring may retain a harmless trailing canonical verse with no text
+  // support. Do not report unsupported outer edges; interior ayat remain intact.
+  const firstSupported = byAyah.findIndex((tokens) => tokens.length > 0);
+  const lastSupported = byAyah.findLastIndex((tokens) => tokens.length > 0);
+  if (firstSupported < 0 || lastSupported < firstSupported) return [];
+  const activeStart = firstSupported;
+  const activeEnd = lastSupported;
+  const sourceDuration = Math.max(0, ...chunks.map((chunk) => chunk.endMs));
+  const rawStarts = byAyah.map((tokens) => tokens.length ? Math.min(...tokens.map((token) => token.startMs)) : null);
+  const rawEnds = byAyah.map((tokens) => tokens.length ? Math.max(...tokens.map((token) => token.endMs)) : null);
+  const starts = [...rawStarts];
+  const ends = [...rawEnds];
+  // Missing evidence is interpolated between textual neighbours, never assigned to a
+  // silence gap. This is what retains weak interior ayat such as 6:75.
+  for (let index = 0; index < passage.length; index += 1) {
+    if (starts[index] !== null && ends[index] !== null) continue;
+    let previous = index - 1;
+    while (previous >= 0 && ends[previous] === null) previous -= 1;
+    let next = index + 1;
+    while (next < passage.length && starts[next] === null) next += 1;
+    const left = previous >= 0 ? ends[previous]! : evidence[0]?.startMs ?? 0;
+    const right = next < passage.length ? starts[next]! : evidence.at(-1)?.endMs ?? sourceDuration;
+    const share = (right - left) / (next - previous);
+    starts[index] = Math.round(left + share * (index - previous - 1));
+    ends[index] = Math.round(left + share * (index - previous));
+  }
+  return passage.slice(activeStart, activeEnd + 1).map((verse, offset) => {
+    const index = activeStart + offset;
+    const tokens = byAyah[index];
+    const direct = tokens.some((token) => token.source === "direct-asr-word");
+    const source = tokens.length ? (direct ? "direct-asr-word" : "chunk-text-alignment") : "interpolation";
+    const startMs = Math.max(0, Math.min(sourceDuration, starts[index] ?? 0));
+    const endMs = Math.max(startMs + 1, Math.min(sourceDuration, ends[index] ?? startMs + 1));
+    return {
+      verseKey: verse.verseKey,
+      startMs,
+      endMs,
+      confidence: Number((acceptedConfidence.reduce((sum, value) => sum + value, 0) / acceptedConfidence.length).toFixed(4)),
+      timing: {
+        start: { timestampMs: startMs, source },
+        end: { timestampMs: endMs, source },
+        matchedText: textByAyah[index].join(" "),
+      },
+    };
   });
 }
 
@@ -287,8 +425,9 @@ export function analyzeTranscript(
   const minConfidence = options.minConfidence ?? 0.52;
   const maxVersesPerChunk = options.maxVersesPerChunk ?? 5;
   const orderedChunks = [...chunks].sort((left, right) => left.startMs - right.startMs);
-  const matches: RecognitionMatch[] = [];
   const diagnostics: RecognitionDiagnostic[] = [];
+  const accepted: ScoredCandidate[] = [];
+  const acceptedConfidence: number[] = [];
   let cursor = 0;
 
   for (const chunk of orderedChunks) {
@@ -328,22 +467,12 @@ export function analyzeTranscript(
       diagnostics.push({ ...diagnostic, rejectionReason: "below confidence threshold" });
       continue;
     }
-    const selected = verses.slice(best.start, best.end + 1);
-    const timed = splitTiming(chunk, selected);
-    timed.forEach((match) => {
-      match.confidence = Number(confidence.toFixed(4));
-      const previous = matches[matches.length - 1];
-      if (previous?.verseKey === match.verseKey) {
-        previous.endMs = match.endMs;
-        previous.confidence = Math.max(previous.confidence, match.confidence);
-      } else {
-        matches.push(match);
-      }
-    });
+    accepted.push(best);
+    acceptedConfidence.push(confidence);
     cursor = Math.max(cursor, best.end + 1);
     diagnostics.push(diagnostic);
   }
-  return { matches, diagnostics };
+  return { matches: reconstructPassage(accepted, acceptedConfidence, orderedChunks, verses), diagnostics };
 }
 
 export function recognizeTranscript(
