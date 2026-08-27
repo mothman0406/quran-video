@@ -1,6 +1,6 @@
 # Status
 
-## Current milestone: M2 — Quran Foundation content/fonts
+## Current milestone: M3A — Deterministic Quran matcher
 
 Complete:
 
@@ -14,6 +14,14 @@ Complete:
 - Added normalization and supported-script/font profile tests.
 - Object URLs are revoked when the selected video changes or the page unmounts.
 
+M3A complete:
+
+- Added a deterministic, UI-independent Hafs Quran matcher for timestamped Arabic transcript chunks.
+- Matching normalization removes diacritics and selected orthographic differences without changing canonical display text.
+- Monotonic contiguous sequence preference, fuzzy character matching, mid-ayah clips, confidence thresholds, and short-phrase ambiguity handling are covered by tests.
+- Added a concise JSON CLI harness at `npm run recognize` (stdin or a JSON file path).
+- Added the full offline corpus asset with source/license provenance in the corpus package boundary.
+
 Verification: `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` all pass. The build uses Webpack because this environment cannot run the default Turbopack CSS worker process.
 
-Not in M2: recognition, timeline/editor controls, animations, rendering/export, auth, saved-project persistence, server processing, storage cleanup workers, or billing.
+Not in M3A: audio transcription, browser transcription, UI integration, timeline/editor controls, animations, rendering/export, auth, saved-project persistence, server processing, storage cleanup workers, or billing.
