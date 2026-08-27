@@ -9,7 +9,6 @@ export const SourceVideoSchema = z.strictObject({
   durationSeconds: PositiveNumber.optional(),
   width: PositiveInteger.optional(),
   height: PositiveInteger.optional(),
-  storageKey: z.string().min(1).optional(),
 });
 
 export const ProjectFormatSchema = z.strictObject({
@@ -72,7 +71,7 @@ export const TransitionSettingsSchema = z.strictObject({
 });
 
 export const ProjectSchema = z.strictObject({
-  version: z.literal(1),
+  version: z.literal(2),
   id: z.string().min(1),
   title: z.string().min(1),
   sourceVideo: SourceVideoSchema.nullable(),
@@ -87,5 +86,10 @@ export const ProjectSchema = z.strictObject({
   updatedAt: z.string().min(1),
 });
 
+/** Durable project data excludes the browser-local source video. */
+export const SavedProjectSchema = ProjectSchema.omit({ sourceVideo: true });
+
 export type Project = z.infer<typeof ProjectSchema>;
 export type ProjectInput = z.input<typeof ProjectSchema>;
+export type SavedProject = z.infer<typeof SavedProjectSchema>;
+export type SavedProjectInput = z.input<typeof SavedProjectSchema>;
