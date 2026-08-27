@@ -1,6 +1,11 @@
 "use client";
 
 import { ChangeEvent, SyntheticEvent, useEffect, useState } from "react";
+import {
+  isQuranScript,
+  quranFontDefinitions,
+} from "@/lib/quran/content";
+import type { QuranContentResponse, QuranScript } from "@/lib/quran/content";
 
 type VideoMetadata = {
   durationSeconds: number;
@@ -8,11 +13,7 @@ type VideoMetadata = {
   height: number;
 };
 
-const hardcodedCaption = {
-  reference: "Ad-Duha · 93:1",
-  arabic: "وَالضُّحَىٰ",
-  translation: "By the morning brightness",
-};
+const defaultVerseKey = "93:1";
 
 function formatDuration(durationSeconds: number) {
   if (!Number.isFinite(durationSeconds)) {
@@ -33,6 +34,33 @@ export default function Home() {
     null,
   );
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [quranContent, setQuranContent] = useState<QuranContentResponse | null>(null);
+  const [quranScript, setQuranScript] = useState<QuranScript>("uthmani");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/quran/verse?key=${defaultVerseKey}`)
+      .then(async (response) => (await response.json()) as QuranContentResponse)
+      .then((result) => {
+        if (!cancelled) setQuranContent(result);
+      })
+      .catch(() => {
+        if (!cancelled) setQuranContent({ status: "error", message: "Could not load Quran Foundation content." });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (quranContent?.status !== "ready") return;
+    const font = quranFontDefinitions[quranScript];
+    const style = document.createElement("style");
+    style.textContent = `@font-face { font-family: "${font.family}"; src: url("${font.source}") format("woff2"); font-display: swap; }`;
+    document.head.appendChild(style);
+    return () => style.remove();
+  }, [quranContent, quranScript]);
 
   useEffect(() => {
     return () => {
@@ -107,14 +135,14 @@ export default function Home() {
           <section className="flex min-w-0 flex-col justify-center">
             <div className="mb-8 max-w-2xl">
               <p className="mb-4 text-xs font-bold uppercase tracking-[0.22em] text-[#a06b31]">
-                M1 · Video + caption
+                M2 · Canonical Quran content
               </p>
               <h1 className="max-w-xl font-serif text-4xl leading-[1.08] tracking-[-0.03em] text-[#173c32] sm:text-5xl lg:text-6xl">
                 Begin with a recitation.
               </h1>
               <p className="mt-5 max-w-lg text-base leading-7 text-[#68716a]">
-                Select a video from your device to preview it with a fixed Quran
-                caption. Your source stays in this browser session.
+                Select a video from your device to preview it with canonical Quran
+                content. Your source stays in this browser session.
               </p>
             </div>
 
@@ -139,19 +167,35 @@ export default function Home() {
 
                   <div className="pointer-events-none absolute inset-x-0 bottom-8 flex justify-center px-5 sm:bottom-12">
                     <div className="max-w-[90%] rounded-2xl border border-white/20 bg-[#10221dcc] px-5 py-4 text-center text-white shadow-lg backdrop-blur-md sm:px-8 sm:py-5">
-                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#f7d88b]">
-                        {hardcodedCaption.reference}
-                      </p>
-                      <p
-                        className="font-serif text-3xl leading-tight sm:text-4xl"
-                        dir="rtl"
-                        lang="ar"
-                      >
-                        {hardcodedCaption.arabic}
-                      </p>
-                      <p className="mt-2 text-sm text-white/75">
-                        {hardcodedCaption.translation}
-                      </p>
+                      {quranContent?.status === "ready" ? (
+                        <div translate="no">
+                          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#f7d88b]">
+                            {quranContent.verse.verseKey}
+                          </p>
+                          <p
+                            className="text-3xl leading-tight sm:text-4xl"
+                            dir="rtl"
+                            lang="ar"
+                            style={{ fontFamily: quranFontDefinitions[quranScript].family }}
+                          >
+                            {quranContent.verse.arabic[quranScript]}
+                          </p>
+                          {quranContent.verse.transliteration && (
+                            <p className="mt-2 text-sm italic text-white/70">
+                              {quranContent.verse.transliteration}
+                            </p>
+                          )}
+                          {quranContent.verse.translation && (
+                            <p className="mt-2 text-sm text-white/75">
+                              {quranContent.verse.translation}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-[#f7d88b]">
+                          {quranContent?.message ?? "Loading canonical Quran content…"}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -208,6 +252,28 @@ export default function Home() {
                 <span className="rounded-full bg-[#f4e7c6] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-[#8d642f]">
                   Browser only
                 </span>
+              </div>
+
+              <div className="mb-6 rounded-2xl border border-[#e3e0d8] bg-[#f7f5ef] p-4">
+                <label className="block text-[11px] font-bold uppercase tracking-[0.16em] text-[#8b928b]" htmlFor="quran-script">
+                  Quran typography
+                </label>
+                <select
+                  className="mt-2 w-full rounded-xl border border-[#c8d4cc] bg-white px-3 py-2 text-sm text-[#35443b]"
+                  id="quran-script"
+                  value={quranScript}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (isQuranScript(value)) setQuranScript(value);
+                  }}
+                >
+                  {Object.entries(quranFontDefinitions).map(([value, font]) => (
+                    <option key={value} value={value}>{font.label}</option>
+                  ))}
+                </select>
+                <p className="mt-2 text-xs leading-5 text-[#737b73]">
+                  Arabic, Saheeh International translation, and optional transliteration come from Quran Foundation.
+                </p>
               </div>
 
               {videoFile ? (

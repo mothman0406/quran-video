@@ -2,9 +2,11 @@
   "name": "quran-video",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "next dev",
     "build": "next build --webpack",
+    "test": "node --experimental-strip-types --test",
     "start": "next start",
     "lint": "eslint"
   },
