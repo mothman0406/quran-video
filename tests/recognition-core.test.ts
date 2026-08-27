@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { performance } from "node:perf_hooks";
 import { analyzeTranscript, hafsVerses, normalizeArabic, recognizeTranscript } from "../src/lib/recognition/core.ts";
+import { quranRecognitionUnits } from "../src/lib/recognition/quran-recitation.ts";
 
 const verse = (key: string) => hafsVerses.find((item) => item.verseKey === key)!;
 
@@ -17,6 +18,37 @@ test("matches clean exact text and keeps canonical display text separate", () =>
 test("matches missing diacritics and conservative orthographic variants", () => {
   const result = recognizeTranscript([{ startMs: 0, endMs: 900, text: "والضحي" }]);
   assert.equal(result[0]?.verseKey, "93:1");
+});
+
+test("uses a separate Hafs recitation representation for connected and assimilated speech", () => {
+  const sunArticle = quranRecognitionUnits(normalizeArabic("وَٱلشَّمۡسِ"), "وَٱلشَّمۡسِ");
+  const assimilatedAsr = quranRecognitionUnits(normalizeArabic("وشمس"), "وشمس");
+  assert.notEqual(sunArticle.orthographic, assimilatedAsr.orthographic);
+  assert.equal(sunArticle.recitation, assimilatedAsr.recitation, "lam shamsiyyah should align in the internal form");
+
+  const wasl = quranRecognitionUnits(normalizeArabic("قُلِ ٱدۡعُواْ"), "قُلِ ٱدۡعُواْ");
+  const connectedAsr = quranRecognitionUnits(normalizeArabic("قل دعوا"), "قل دعوا");
+  assert.notEqual(wasl.orthographic, connectedAsr.orthographic);
+  assert.equal(wasl.recitation, connectedAsr.recitation, "hamzat al-wasl should be optional in connected speech");
+
+  const geminatedAsr = quranRecognitionUnits(normalizeArabic("رببك"), "رببك");
+  const canonical = quranRecognitionUnits(normalizeArabic("ربك"), "ربك");
+  assert.equal(geminatedAsr.recitation, canonical.recitation, "ASR-expanded shadda should be tolerated internally");
+
+  const hamzaCarrier = quranRecognitionUnits(normalizeArabic("مؤمنين"), "مؤمنين");
+  const carrierAsr = quranRecognitionUnits(normalizeArabic("مومنين"), "مومنين");
+  assert.equal(hamzaCarrier.recitation, carrierAsr.recitation, "hamza carrier ambiguity should not split a match");
+});
+
+test("recitation representation does not make a short unrelated Arabic phrase a Quran match", () => {
+  const result = recognizeTranscript([{ startMs: 0, endMs: 700, text: "وشم الحافلة" }]);
+  assert.deepEqual(result, []);
+});
+
+test("uses recitation-aware evidence to retrieve an assimilated article that orthography alone scores weakly", () => {
+  const corpus = [{ verseKey: "x:1", text: "وَٱلشَّمۡسِ" }];
+  const result = recognizeTranscript([{ startMs: 0, endMs: 700, text: "وشمس" }], { corpus, minConfidence: 0.7 });
+  assert.equal(result[0]?.verseKey, "x:1");
 });
 
 test("tolerates a minor transcription error", () => {

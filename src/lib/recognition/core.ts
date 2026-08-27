@@ -1,4 +1,5 @@
 import hafsCorpus from "../quran/hafs-corpus.json" with { type: "json" };
+import { normalizeQuranRecitation, quranRecognitionUnits, type QuranRecognitionUnits } from "./quran-recitation.ts";
 
 export type TranscriptChunk = {
   startMs: number;
@@ -63,6 +64,8 @@ const ARABIC_DIACRITICS = /[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed]/g;
 const ARABIC_PUNCTUATION = /[ۖۗۚۛۜۙۘ۝۞]/g;
 const normalizedVerseCache = new WeakMap<QuranCorpusVerse, string>();
 const verseWordCache = new WeakMap<QuranCorpusVerse, string[]>();
+const recitationVerseCache = new WeakMap<QuranCorpusVerse, string>();
+const recitationVerseWordCache = new WeakMap<QuranCorpusVerse, string[]>();
 
 /** Matching-only normalization. Callers must retain the original Arabic for display. */
 export function normalizeArabic(value: string): string {
@@ -92,6 +95,35 @@ function normalizedVerseWords(verse: QuranCorpusVerse): string[] {
   const words = normalizedVerseText(verse).split(" ");
   verseWordCache.set(verse, words);
   return words;
+}
+
+function recitationVerseText(verse: QuranCorpusVerse): string {
+  const cached = recitationVerseCache.get(verse);
+  if (cached !== undefined) return cached;
+  const normalized = normalizeQuranRecitation(verse.text);
+  recitationVerseCache.set(verse, normalized);
+  return normalized;
+}
+
+function recitationVerseWords(verse: QuranCorpusVerse): string[] {
+  const cached = recitationVerseWordCache.get(verse);
+  if (cached !== undefined) return cached;
+  const words = recitationVerseText(verse).split(" ").filter(Boolean);
+  recitationVerseWordCache.set(verse, words);
+  return words;
+}
+
+function combinedScore(orthographic: number, recitation: number): number {
+  // Orthographic evidence remains the floor. Recitation-only evidence can
+  // improve a candidate, but only as a limited corroborating signal.
+  return Math.max(orthographic, orthographic * 0.6 + recitation * 0.4);
+}
+
+function combinedTextSimilarity(units: QuranRecognitionUnits, verse: QuranRecognitionUnits): number {
+  return combinedScore(
+    bestTextSimilarity(units.orthographic, verse.orthographic),
+    bestTextSimilarity(units.recitation, verse.recitation),
+  );
 }
 
 function editSimilarity(left: string, right: string): number {
@@ -142,6 +174,10 @@ function tokenSimilarity(left: string, right: string): number {
   return editSimilarity(left, right);
 }
 
+function recognitionUnitSimilarity(left: QuranRecognitionUnits, right: QuranRecognitionUnits): number {
+  return combinedScore(tokenSimilarity(left.orthographic, right.orthographic), tokenSimilarity(left.recitation, right.recitation));
+}
+
 /**
  * Rewards an ordered run of matching tokens, while still allowing Whisper to
  * insert, omit, or slightly corrupt individual words. Unlike a bag-of-words
@@ -175,6 +211,13 @@ function tokenSequenceSimilarity(transcript: string, verseText: string): number 
   return matchedWords === 0 ? 0 : matchedScore / transcriptWords.length;
 }
 
+function combinedTokenSequenceSimilarity(units: QuranRecognitionUnits, verse: QuranRecognitionUnits): number {
+  return combinedScore(
+    tokenSequenceSimilarity(units.orthographic, verse.orthographic),
+    tokenSequenceSimilarity(units.recitation, verse.recitation),
+  );
+}
+
 function confidenceFor(score: number, normalizedText: string): number {
   if (score === 1) return 1;
   const wordCount = normalizedText ? normalizedText.split(" ").length : 0;
@@ -188,11 +231,12 @@ type CandidateStarts = {
 };
 
 function candidateStarts(
-  normalizedText: string,
+  units: QuranRecognitionUnits,
   verses: readonly QuranCorpusVerse[],
   maxVersesPerChunk: number,
 ): CandidateStarts {
-  const words = normalizedText.split(" ").filter((word) => word.length >= 3);
+  const orthographicWords = units.orthographic.split(" ").filter((word) => word.length >= 3);
+  const recitationWords = units.recitation.split(" ").filter((word) => word.length >= 3);
   const starts = new Set<number>();
 
   // Search every meaningful transcript token, not just the first one. A hit in
@@ -200,7 +244,9 @@ function candidateStarts(
   // so a corrupted first ayah can be recovered from strong evidence in ayah N+1.
   const rankedTokenHits = verses.map((verse, index) => {
     const verseWords = normalizedVerseWords(verse);
-    const scores = words.map((word) => Math.max(...verseWords.map((verseWord) => tokenSimilarity(word, verseWord))))
+    const recitationWordsForVerse = recitationVerseWords(verse);
+    const scores = orthographicWords.map((word) => Math.max(...verseWords.map((verseWord) => tokenSimilarity(word, verseWord))))
+      .concat(recitationWords.map((word) => Math.max(...recitationWordsForVerse.map((verseWord) => tokenSimilarity(word, verseWord)))))
       .filter((score) => score >= 0.7);
     return { index, score: scores.reduce((sum, score) => sum + score, 0), count: scores.length };
   }).filter((hit) => hit.count > 0)
@@ -220,7 +266,7 @@ function candidateStarts(
   // the later contiguous-window score and normal confidence rejection remain
   // responsible for accepting a result.
   const fallback = verses
-    .map((verse, index) => ({ index, score: bestTextSimilarity(normalizedText, normalizedVerseText(verse)) }))
+    .map((verse, index) => ({ index, score: combinedTextSimilarity(units, { orthographic: normalizedVerseText(verse), recitation: recitationVerseText(verse) }) }))
     .sort((left, right) => right.score - left.score)
     .slice(0, 24);
   fallback.forEach(({ index }) => {
@@ -233,7 +279,9 @@ function candidateStarts(
 }
 
 type TimedToken = {
-  text: string;
+  units: QuranRecognitionUnits;
+  /** Original ASR surface text; this is the only token text eligible for UI. */
+  displayText: string;
   startMs: number;
   endMs: number;
   source: "direct-asr-word" | "chunk-text-alignment";
@@ -243,17 +291,17 @@ function timedTokens(chunks: readonly TranscriptChunk[]): TimedToken[] {
   return chunks.reduce<TimedToken[]>((all, chunk) => {
     if (chunk.words?.length) {
       all.push(...chunk.words.flatMap<TimedToken>((word) => {
-        const text = normalizeArabic(word.text);
-        return text ? [{ text, startMs: word.startMs, endMs: word.endMs, source: "direct-asr-word" as const }] : [];
+        const orthographic = normalizeArabic(word.text);
+        return orthographic ? [{ units: quranRecognitionUnits(orthographic, word.text), displayText: word.text.trim(), startMs: word.startMs, endMs: word.endMs, source: "direct-asr-word" as const }] : [];
       }));
       return all;
     }
-    const words = normalizeArabic(chunk.text).split(" ").filter(Boolean);
-    const weight = words.reduce((sum, word) => sum + Math.max(1, word.length), 0);
+    const words = chunk.text.split(/\s+/).map((displayText) => ({ displayText, orthographic: normalizeArabic(displayText) })).filter((word) => word.orthographic);
+    const weight = words.reduce((sum, word) => sum + Math.max(1, word.orthographic.length), 0);
     let cursor = chunk.startMs;
-    all.push(...words.map<TimedToken>((text, index) => {
-      const endMs = index === words.length - 1 ? chunk.endMs : Math.round(cursor + (chunk.endMs - chunk.startMs) * Math.max(1, text.length) / weight);
-      const token = { text, startMs: cursor, endMs, source: "chunk-text-alignment" as const };
+    all.push(...words.map<TimedToken>((word, index) => {
+      const endMs = index === words.length - 1 ? chunk.endMs : Math.round(cursor + (chunk.endMs - chunk.startMs) * Math.max(1, word.orthographic.length) / weight);
+      const token = { units: quranRecognitionUnits(word.orthographic, word.displayText), displayText: word.displayText, startMs: cursor, endMs, source: "chunk-text-alignment" as const };
       cursor = endMs;
       return token;
     }));
@@ -266,7 +314,7 @@ function timedTokens(chunks: readonly TranscriptChunk[]): TimedToken[] {
  * has no pause or chunk-boundary input: those are timestamps on evidence, never ayah
  * separators. Canonical gaps are inexpensive so clips may begin/end inside an ayah.
  */
-function alignTokens(canonical: string[], asr: TimedToken[]) {
+function alignTokens(canonical: QuranRecognitionUnits[], asr: TimedToken[]) {
   const rows = canonical.length + 1;
   const columns = asr.length + 1;
   const scores = Array.from({ length: rows }, () => new Float64Array(columns));
@@ -275,7 +323,7 @@ function alignTokens(canonical: string[], asr: TimedToken[]) {
   for (let j = 1; j < columns; j += 1) { scores[0][j] = 0; moves[0][j] = 3; }
   for (let i = 1; i < rows; i += 1) {
     for (let j = 1; j < columns; j += 1) {
-      const similarity = tokenSimilarity(canonical[i - 1], asr[j - 1].text);
+      const similarity = recognitionUnitSimilarity(canonical[i - 1], asr[j - 1].units);
       const diagonal = scores[i - 1][j - 1] + (similarity >= 0.58 ? similarity * 2 : -1.2);
       const skipCanonical = scores[i - 1][j] - 0.12;
       const skipAsr = scores[i][j - 1] - 0.35;
@@ -290,7 +338,7 @@ function alignTokens(canonical: string[], asr: TimedToken[]) {
   while (i > 0 || j > 0) {
     const move = moves[i]?.[j] ?? 0;
     if (move === 1) {
-      if (tokenSimilarity(canonical[i - 1], asr[j - 1].text) >= 0.58) {
+      if (recognitionUnitSimilarity(canonical[i - 1], asr[j - 1].units) >= 0.58) {
         const current = aligned.get(i - 1) ?? [];
         current.unshift(asr[j - 1]);
         aligned.set(i - 1, current);
@@ -317,16 +365,23 @@ function reconstructPassage(
   const start = Math.min(...sameSurah.map((candidate) => candidate.start));
   const end = Math.max(...sameSurah.map((candidate) => candidate.end));
   const passage = verses.slice(start, end + 1);
-  const canonical: Array<{ word: string; ayah: number }> = [];
-  passage.forEach((verse, ayah) => normalizedVerseWords(verse).forEach((word) => canonical.push({ word, ayah })));
+  const canonical: Array<{ units: QuranRecognitionUnits; ayah: number }> = [];
+  passage.forEach((verse, ayah) => {
+    const orthographicWords = normalizedVerseWords(verse);
+    const recitationWords = recitationVerseWords(verse);
+    orthographicWords.forEach((word, index) => canonical.push({
+      units: { orthographic: word, recitation: recitationWords[index] ?? normalizeQuranRecitation(word) },
+      ayah,
+    }));
+  });
   const evidence = timedTokens(chunks);
-  const aligned = alignTokens(canonical.map((token) => token.word), evidence);
+  const aligned = alignTokens(canonical.map((token) => token.units), evidence);
   const byAyah = passage.map(() => [] as TimedToken[]);
   const textByAyah = passage.map(() => [] as string[]);
   aligned.forEach((tokens, canonicalIndex) => {
     const ayah = canonical[canonicalIndex].ayah;
     byAyah[ayah].push(...tokens);
-    textByAyah[ayah].push(...tokens.map((token) => token.text));
+    textByAyah[ayah].push(...tokens.map((token) => token.displayText));
   });
   // Candidate scoring may retain a harmless trailing canonical verse with no text
   // support. Do not report unsupported outer edges; interior ayat remain intact.
@@ -384,18 +439,21 @@ type ScoredCandidate = {
 };
 
 function bestCandidateForStarts(
-  normalizedChunk: string,
+  units: QuranRecognitionUnits,
   starts: readonly number[],
   verses: readonly QuranCorpusVerse[],
   maxVersesPerChunk: number,
 ): ScoredCandidate | null {
   let best: ScoredCandidate | null = null;
   for (const start of starts) {
-    let combined = "";
+    let combinedOrthographic = "";
+    let combinedRecitation = "";
     for (let end = start; end < Math.min(verses.length, start + maxVersesPerChunk); end += 1) {
-      combined = `${combined} ${normalizedVerseText(verses[end])}`.trim();
-      const textSimilarity = bestTextSimilarity(normalizedChunk, combined);
-      const sequenceSimilarity = tokenSequenceSimilarity(normalizedChunk, combined);
+      combinedOrthographic = `${combinedOrthographic} ${normalizedVerseText(verses[end])}`.trim();
+      combinedRecitation = `${combinedRecitation} ${recitationVerseText(verses[end])}`.trim();
+      const candidateUnits = { orthographic: combinedOrthographic, recitation: combinedRecitation };
+      const textSimilarity = combinedTextSimilarity(units, candidateUnits);
+      const sequenceSimilarity = combinedTokenSequenceSimilarity(units, candidateUnits);
       const score = textSimilarity * 0.45 + sequenceSimilarity * 0.55;
       if (!best || score > best.score || (score === best.score && end - start < best.end - best.start)) {
         best = { start, end, score, textSimilarity, tokenSequenceSimilarity: sequenceSimilarity };
@@ -446,20 +504,22 @@ export function analyzeTranscript(
       diagnostics.push({ ...diagnostic, rejectionReason: "invalid timestamps" });
       continue;
     }
-    const candidates = candidateStarts(normalizedChunk, verses, maxVersesPerChunk);
+    const units = quranRecognitionUnits(normalizedChunk, chunk.text);
+    const candidates = candidateStarts(units, verses, maxVersesPerChunk);
     diagnostic.candidateGenerationPath = candidates.path;
     const starts = candidates.starts.filter((start) => start >= cursor);
     if (starts.length === 0) {
-      const rejectedBest = bestCandidateForStarts(normalizedChunk, candidates.starts, verses, maxVersesPerChunk);
+      const rejectedBest = bestCandidateForStarts(units, candidates.starts, verses, maxVersesPerChunk);
       if (rejectedBest) diagnostic.topCandidate = diagnosticCandidate(rejectedBest, verses, normalizedChunk);
       diagnostics.push({ ...diagnostic, rejectionReason: "no candidate sequence" });
       continue;
     }
-    const best = bestCandidateForStarts(normalizedChunk, starts, verses, maxVersesPerChunk);
+    const best = bestCandidateForStarts(units, starts, verses, maxVersesPerChunk);
     if (!best) continue;
     const confidence = confidenceFor(best.score, normalizedChunk);
     diagnostic.topCandidate = diagnosticCandidate(best, verses, normalizedChunk);
-    if (normalizedChunk.split(" ").length === 1 && starts.length > 1) {
+    const exactSingleVerse = verses.some((verse) => normalizedVerseText(verse) === normalizedChunk);
+    if (normalizedChunk.split(" ").length === 1 && starts.length > 1 && !exactSingleVerse) {
       diagnostics.push({ ...diagnostic, rejectionReason: "ambiguous short phrase" });
       continue;
     }
