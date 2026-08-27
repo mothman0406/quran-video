@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { performance } from "node:perf_hooks";
 import { analyzeTranscript, hafsVerses, normalizeArabic, recognizeTranscript } from "../src/lib/recognition/core.ts";
 
 const verse = (key: string) => hafsVerses.find((item) => item.verseKey === key)!;
@@ -24,14 +25,29 @@ test("tolerates a minor transcription error", () => {
   assert.ok((result[0]?.confidence ?? 0) > 0.7);
 });
 
-test("matches the first real Whisper Ad-Duha transcript across five contiguous ayat", () => {
+const liveAdDuhaTranscript = "وضحة واللي إذا أسجى ما ودعك ربك وما قلى والأخرة خير لك من الأولات ولسوفة وعطيك ربك فترضى";
+
+test("matches the exact live Whisper Ad-Duha transcript across five contiguous ayat", () => {
   const result = recognizeTranscript([{
     startMs: 0,
     endMs: 20_000,
-    text: "وضحى واللي إذا اسجى ما ودعك ربك وما قلى والآخرة خير لك من الأولات ولسوف يعطيك ربك فترضى",
+    text: liveAdDuhaTranscript,
   }]);
   assert.deepEqual(result.map((item) => item.verseKey), ["93:1", "93:2", "93:3", "93:4", "93:5"]);
   assert.ok((result[0]?.confidence ?? 0) >= 0.52);
+});
+
+test("matches the exact live Whisper transcript when timestamped in two chunks", () => {
+  const analysis = analyzeTranscript([
+    { startMs: 0, endMs: 9_500, text: "وضحة واللي إذا أسجى ما ودعك ربك وما قلى" },
+    { startMs: 9_500, endMs: 20_000, text: "والأخرة خير لك من الأولات ولسوفة وعطيك ربك فترضى" },
+  ]);
+  assert.deepEqual(analysis.matches.map((item) => item.verseKey), ["93:1", "93:2", "93:3", "93:4", "93:5"]);
+  assert.equal(analysis.diagnostics[0]?.topCandidate?.startVerseKey, "93:1");
+  assert.equal(analysis.diagnostics[0]?.topCandidate?.endVerseKey, "93:3");
+  assert.equal(analysis.diagnostics[1]?.topCandidate?.startVerseKey, "93:4");
+  assert.equal(analysis.diagnostics[1]?.candidateGenerationPath, "token-retrieval");
+  assert.ok((analysis.diagnostics[1]?.topCandidate?.tokenSequenceSimilarity ?? 0) > 0.8);
 });
 
 test("prefers monotonic contiguous ayat for consecutive chunks", () => {
@@ -69,9 +85,28 @@ test("does not overclaim an ambiguous short phrase", () => {
   assert.deepEqual(result, []);
 });
 
+test("rejects unrelated Arabic prose even when approximate retrieval runs", () => {
+  const analysis = analyzeTranscript([{
+    startMs: 0,
+    endMs: 1_000,
+    text: "كانت الحافلة متأخرة والطريق مزدحما والطلاب ينتظرون عند المحطة",
+  }]);
+  assert.deepEqual(analysis.matches, []);
+  assert.ok(analysis.diagnostics[0]?.topCandidate);
+  assert.equal(analysis.diagnostics[0]?.rejectionReason, "below confidence threshold");
+});
+
 test("reports the best rejected candidate for developer recognition diagnostics", () => {
   const analysis = analyzeTranscript([{ startMs: 0, endMs: 500, text: "الحمد لله رب العلمين" }], { minConfidence: 1.01 });
   assert.deepEqual(analysis.matches, []);
   assert.equal(analysis.diagnostics[0]?.topCandidate?.startVerseKey, "1:2");
   assert.equal(analysis.diagnostics[0]?.rejectionReason, "below confidence threshold");
+});
+
+test("bounds approximate candidate retrieval for the live-sized noisy transcript", () => {
+  const startedAt = performance.now();
+  const result = recognizeTranscript([{ startMs: 0, endMs: 20_000, text: liveAdDuhaTranscript }]);
+  const elapsedMs = performance.now() - startedAt;
+  assert.deepEqual(result.map((item) => item.verseKey), ["93:1", "93:2", "93:3", "93:4", "93:5"]);
+  assert.ok(elapsedMs < 1_500, `expected bounded search under 1500ms, received ${elapsedMs.toFixed(1)}ms`);
 });
