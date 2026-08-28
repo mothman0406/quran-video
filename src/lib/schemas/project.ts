@@ -116,6 +116,14 @@ export const TransitionSettingsSchema = z.strictObject({
   fadeOutMs: z.number().int().nonnegative(),
 });
 
+/** Styling-only state used by built-in and browser-local caption styles. */
+export const CaptionStyleSchema = z.strictObject({
+  typography: TypographySchema,
+  positioning: CaptionPositioningSchema,
+  captionBackground: CaptionBackgroundSchema,
+  transitionSettings: TransitionSettingsSchema,
+});
+
 export const ProjectSchema = z.strictObject({
   version: z.literal(2),
   id: z.string().min(1),

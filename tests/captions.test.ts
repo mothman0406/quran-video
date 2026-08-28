@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { captionBackgroundStyle, clampNormalizedPosition, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetCaptionBackground, resetCaptionSegmentTiming, resetTypography, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { captionBackgroundStyle, captionOpacityAtTime, captionVisualStatesAtTime, clampNormalizedPosition, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -170,4 +170,46 @@ test("split and merge remain valid after manual timing edits", () => {
   const merged = mergeCaptionWithNext(split, 0);
   assert.equal(merged[0].startMs, 200);
   assert.equal(merged[0].endMs, 900);
+});
+
+test("default transition settings use a restrained 225ms fade", () => {
+  assert.deepEqual(DEFAULT_TRANSITION_SETTINGS, { type: "fade", fadeInMs: 225, fadeOutMs: 225 });
+  assert.deepEqual(resetTransitionSettings(), DEFAULT_TRANSITION_SETTINGS);
+  assert.notEqual(resetTransitionSettings(), DEFAULT_TRANSITION_SETTINGS);
+});
+
+test("fade opacity is deterministic at the start, middle, and end of a segment", () => {
+  const segment = { startMs: 1_000, endMs: 2_000 };
+  assert.equal(captionOpacityAtTime(segment, 1_000), 0);
+  assert.equal(captionOpacityAtTime(segment, 1_112), 112 / 225);
+  assert.equal(captionOpacityAtTime(segment, 1_500), 1);
+  assert.equal(captionOpacityAtTime(segment, 1_888), 112 / 225);
+  assert.equal(captionOpacityAtTime(segment, 2_000), 0);
+  // A seek directly into the fade region is a pure calculation, not a timer.
+  assert.equal(captionOpacityAtTime(segment, 1_112), captionOpacityAtTime(segment, 1_112));
+});
+
+test("none transition is fully opaque only inside the editable segment", () => {
+  const segment = { startMs: 1_000, endMs: 2_000 };
+  const none = { ...DEFAULT_TRANSITION_SETTINGS, type: "none" as const };
+  assert.equal(captionOpacityAtTime(segment, 999, none), 0);
+  assert.equal(captionOpacityAtTime(segment, 1_001, none), 1);
+  assert.equal(captionOpacityAtTime(segment, 1_999, none), 1);
+  assert.equal(captionOpacityAtTime(segment, 2_000, none), 0);
+});
+
+test("touching segments crossfade visually without overlapping editable timing", () => {
+  const first = { id: "a", startMs: 0, endMs: 1_000 };
+  const second = { id: "b", startMs: 1_000, endMs: 2_000 };
+  const states = captionVisualStatesAtTime([first, second], 1_050, DEFAULT_TRANSITION_SETTINGS);
+  assert.deepEqual(states.map((state) => state.segment.id), ["a", "b"]);
+  assert.equal(states.every((state) => state.opacity > 0 && state.opacity < 1), true);
+  assert.equal(first.endMs, second.startMs);
+});
+
+test("caption background shares the animated caption layer opacity", () => {
+  const segment = { id: "caption", startMs: 0, endMs: 1_000 };
+  const state = captionVisualStatesAtTime([segment], 112, DEFAULT_TRANSITION_SETTINGS)[0];
+  assert.equal(state.opacity, captionOpacityAtTime(segment, 112));
+  assert.equal(DEFAULT_CAPTION_BACKGROUND.enabled, false);
 });

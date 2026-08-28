@@ -1,25 +1,22 @@
 import type { QuranVerseContent } from "../quran/content.ts";
 import type { VerseAlignment } from "./recognition.ts";
 import type { z } from "zod";
-import type { CaptionBackgroundSchema, TypographySchema } from "../schemas/project.ts";
+import type { CaptionBackgroundSchema, CaptionPositioningSchema, TransitionSettingsSchema, TypographySchema } from "../schemas/project.ts";
 
 export type Typography = z.infer<typeof TypographySchema>;
 export type CaptionBackground = z.infer<typeof CaptionBackgroundSchema>;
-
-export type CaptionPositioning = {
-  x: number;
-  y: number;
-  translationX: number;
-  translationY: number;
-  translationPositionLinked: boolean;
-};
+export type CaptionPositioning = z.infer<typeof CaptionPositioningSchema>;
+export type TransitionSettings = z.infer<typeof TransitionSettingsSchema>;
 
 export const DEFAULT_CAPTION_POSITIONING: CaptionPositioning = {
+  anchor: "bottom",
   x: 0.5,
   y: 0.74,
   translationX: 0.5,
   translationY: 0.86,
   translationPositionLinked: true,
+  maxWidthPercent: 0.9,
+  translationGapPx: 8,
 };
 
 export const DEFAULT_TYPOGRAPHY: Typography = {
@@ -63,12 +60,22 @@ export const DEFAULT_CAPTION_BACKGROUND: CaptionBackground = {
   verticalPadding: 16,
 };
 
+export const DEFAULT_TRANSITION_SETTINGS: TransitionSettings = {
+  type: "fade",
+  fadeInMs: 225,
+  fadeOutMs: 225,
+};
+
 export function resetTypography(): Typography {
   return { ...DEFAULT_TYPOGRAPHY };
 }
 
 export function resetCaptionBackground(): CaptionBackground {
   return { ...DEFAULT_CAPTION_BACKGROUND };
+}
+
+export function resetTransitionSettings(): TransitionSettings {
+  return { ...DEFAULT_TRANSITION_SETTINGS };
 }
 
 export function clampNormalizedPosition(value: number, minimum = 0.06, maximum = 0.94): number {
@@ -115,6 +122,55 @@ export function captionBackgroundStyle(background: CaptionBackground): {
     borderRadius: `${background.cornerRadius}px`,
     padding: `${background.verticalPadding}px ${background.horizontalPadding}px`,
   };
+}
+
+function clampOpacity(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+/**
+ * Returns the deterministic opacity for a segment at a video timestamp.
+ * It intentionally has no timers or playback state, so seeking is equivalent
+ * to playback at the same timestamp.
+ */
+export function captionOpacityAtTime(
+  segment: Pick<CaptionSegment, "startMs" | "endMs">,
+  timeMs: number,
+  settings: TransitionSettings = DEFAULT_TRANSITION_SETTINGS,
+): number {
+  if (!Number.isFinite(timeMs) || timeMs < segment.startMs || timeMs >= segment.endMs) return 0;
+  if (settings.type === "none") return 1;
+  const fadeIn = settings.fadeInMs > 0 ? clampOpacity((timeMs - segment.startMs) / settings.fadeInMs) : 1;
+  const fadeOut = settings.fadeOutMs > 0 ? clampOpacity((segment.endMs - timeMs) / settings.fadeOutMs) : 1;
+  return Math.min(fadeIn, fadeOut);
+}
+
+export type CaptionVisualState<T extends { startMs: number; endMs: number }> = {
+  segment: T;
+  opacity: number;
+};
+
+/**
+ * Computes the visible caption layers for preview. Adjacent segments get a
+ * short visual crossfade when their editable timings touch; their stored
+ * timing ranges remain non-overlapping.
+ */
+export function captionVisualStatesAtTime<T extends { startMs: number; endMs: number }>(
+  segments: readonly T[],
+  timeMs: number,
+  settings: TransitionSettings = DEFAULT_TRANSITION_SETTINGS,
+): CaptionVisualState<T>[] {
+  return segments.flatMap((segment, index) => {
+    let opacity = captionOpacityAtTime(segment, timeMs, settings);
+    const next = segments[index + 1];
+    const adjacent = settings.type === "fade" && next && next.startMs - segment.endMs <= Math.max(settings.fadeOutMs, settings.fadeInMs);
+    if (adjacent && settings.fadeOutMs > 0 && timeMs >= segment.endMs - settings.fadeOutMs && timeMs < segment.endMs + settings.fadeOutMs) {
+      // Start at the normal fade-out boundary, then carry the outgoing layer
+      // briefly past its editable end so an adjacent incoming layer can fade in.
+      opacity = clampOpacity((segment.endMs + settings.fadeOutMs - timeMs) / (settings.fadeOutMs * 2));
+    }
+    return opacity > 0 ? [{ segment, opacity }] : [];
+  });
 }
 
 export type CaptionTimingSource = "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "derived";

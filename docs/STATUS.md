@@ -1,6 +1,17 @@
 # Status
 
-## Current milestone: M5B — Caption positioning and timeline editing
+## Current milestone: M6 — Caption animations and style presets
+
+Complete:
+
+- Added editor transition state with deterministic `none` and `fade` opacity calculation from each editable `CaptionSegment` range. The default is a restrained 225 ms fade in/out, with controls and reset; adjacent segments can visually crossfade without overlapping stored timing.
+- Arabic, linked translation, and enabled caption backgrounds render from the same time-derived caption-layer opacity. Seeking/scrubbing computes the correct state directly from `currentTime`; no playback timers or interval loops are used.
+- Added styling-only `CaptionStyleSchema`, four editable built-in presets (Minimal, Classic Mushaf, Cinematic, Social), and browser-local custom styles with save, apply, rename, delete, and validated JSON loading. Local styles contain no video, Quran text, or recognition data.
+- Added regression coverage for transition defaults, fade/seek/none behavior, adjacent crossfade, animated backgrounds, preset application/editability, local-style lifecycle, and media-data exclusion.
+
+Verification: targeted M6 tests, full `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass.
+
+## Previous milestone: M5B — Caption positioning and timeline editing
 
 Implemented:
 
@@ -10,8 +21,6 @@ Implemented:
 - Keyboard basics include Space play/pause and 500ms left/right seeking outside text fields.
 
 Boundary behavior: adjacent segment boundaries are clamped so segments remain ordered and non-overlapping; shared boundaries are not automatically moved.
-
-Verification is pending the final M5B check suite below.
 
 ## Current milestone: Configurable caption background
 
