@@ -1,6 +1,18 @@
 # Status
 
-## Current milestone: M6.5 — Multi-aspect-ratio preview and safe-area behavior
+## Current milestone: M7A — Client-side video export technical spike
+
+Complete:
+
+- Added a lazy-loaded, modular `LocalVideoRenderer` interface and the first browser-local Canvas + MediaRecorder implementation. It composes the local source video and editor caption state into a 1080×1920 9:16 canvas, captures the canvas and original source audio locally, and exposes a direct browser download.
+- The renderer maps editable `CaptionSegment` timings, canonical Arabic, enabled Saheeh translation and transliteration, typography, caption background, linked/unlinked translation positions, optional verse numbers, and the existing pure `captionVisualStatesAtTime` fade/interpolation function. Safe-area guides and all editor controls are intentionally absent from export configuration and rendering.
+- Chosen output is WebM (`VP9/Opus` preferred, `VP8/Opus` fallback) because this browser-native path has a reliable recorder/container pairing. WebCodecs was evaluated but is not used for this spike: browser-native MP4 muxing and source audio remuxing are not dependable enough without adding a muxer or FFmpeg/WASM. No server rendering or media upload path exists.
+- Export code loads only after clicking Export Video. It reports capability, preparing, rendering progress, finalizing, success, errors, and cancellation; cleanup stops tracks, closes the audio context, and revokes temporary object URLs. Frames are composited progressively rather than retaining uncompressed video frames, though the encoded WebM blob is accumulated until download.
+- Requirements: a browser with Canvas `captureStream`, `MediaRecorder` WebM support, and `AudioContext` (tested implementation target: current Chromium desktop). The page-specific Madinah/QCF font is explicitly rejected rather than risking corrupt Quran glyphs; choose Uthmani, IndoPak, or KFGQPC style. Export currently runs in real time and only supports the 9:16 preset.
+
+Verification: targeted export mapping tests and `npx tsc --noEmit` pass. Manual browser verification is pending: no local short test video/browser media recorder fixture is available in this environment, so output speed and A/V sync have not yet been measured. Source media never leaves the device.
+
+## Previous milestone: M6.5 — Multi-aspect-ratio preview and safe-area behavior
 
 Complete:
 
