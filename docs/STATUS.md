@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Local canonical Hafs corpus
+
+Complete:
+
+- Replaced the prior quran-json display corpus with a verbatim Tanzil Uthmani Hafs source copy containing all 114 surahs and 6,236 ayat.
+- Added synchronous `getVerse`, `getVerses`, and `getSurah` local content APIs. Recognition normalization remains derived and display-only canonical text is never mutated.
+- The homepage resolves recognized ayat locally without Quran Foundation credentials. Translation remains unavailable rather than blocking Arabic.
+- Quran Foundation support remains optional for enrichment, and font selection remains independent with explicit Unicode text/font compatibility.
+
+Verification: `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass.
+
 ## Current milestone: M3C/M4 — Automatic Quran detection in the editor
 
 Complete:
@@ -7,7 +18,7 @@ Complete:
 - The main local video flow now exposes `Detect Quran`; recognition dependencies and the Whisper model load only after that action.
 - User-facing progress covers audio preparation, local model loading, local transcription, Quran matching, and caption preparation. The selected audio is explicitly processed locally and never uploaded.
 - Recognized matches become browser-local verse alignments with verse keys, millisecond timing, confidence, and timing evidence metadata. Playback and scrubbing select the active alignment without treating Whisper chunk or breath boundaries as caption changes.
-- Captions fetch canonical Quran Foundation content for display: Hafs Arabic, Saheeh International, and available transliteration. Missing credentials leave recognition intact and show setup guidance.
+- Captions use the canonical local Hafs corpus; Saheeh International and available transliteration remain optional Quran Foundation enrichment.
 - Added basic correction, rerun detection, retryable failures, and video replacement/clear invalidation and object-URL cleanup. The developer `/recognition` diagnostics route remains available.
 
 Verification: full `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass.

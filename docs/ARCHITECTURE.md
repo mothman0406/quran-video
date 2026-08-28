@@ -19,12 +19,12 @@ The project schema is the handoff boundary between upload, recognition, editing,
 
 ## Planned service boundaries
 
-- `src/lib/quran/server.ts` is the server-only Quran Foundation adapter. It obtains a cached OAuth client-credentials token and calls the Content API; `src/app/api/quran/verse/route.ts` exposes only sanitized verse content to the browser.
-- Quran Foundation Content API supplies canonical Hafs text, Saheeh International by default, transliteration, and font metadata. Font files are loaded directly from the Quran Foundation CDN at runtime.
+- `src/lib/quran/local.ts` is the synchronous canonical provider. It indexes the immutable Tanzil Uthmani Hafs corpus by verse key and exposes `getVerse`, `getVerses`, and `getSurah`; the API route is only a local compatibility boundary.
+- `src/lib/quran/server.ts` remains an optional Quran Foundation enrichment adapter for translations and transliteration. Its credentials and availability cannot affect Arabic display. Fonts remain runtime CDN assets.
 - `src/lib/quran/content.ts` defines the content abstraction and profiles for Uthmani/QPC Hafs, Madinah/QCF, IndoPak, and KFGQPC style.
 - M3B local recognition uses a browser-only Transformers.js Whisper adapter. It decodes the selected `File` through Web Audio, runs `onnx-community/whisper-base` on WebGPU when available (otherwise local WASM), and returns timestamped transcript chunks to the deterministic matcher. It does not send source audio to an application server or inference API.
-- M3C/M4 editor integration converts matcher output into browser-local verse alignments, fetches canonical display content through the existing Quran Foundation route, and derives the active caption directly from video playback time. The `/recognition` route remains a developer diagnostic surface; the main editor is the normal entry point.
+- M3C/M4 editor integration converts matcher output into browser-local verse alignments, resolves canonical Arabic locally at once, and derives the active caption directly from video playback time. Optional translation enrichment can fail independently. The `/recognition` route remains a developer diagnostic surface; the main editor is the normal entry point.
 - Supabase owns auth and explicitly saved project metadata/settings; it is not the default source-video or export store.
 - Stripe handles quotas and subscriptions after core editing/export works.
 
-M2 implements the Quran Foundation content boundary while preserving browser-local video behavior. Missing server credentials return setup state; secrets and access tokens never cross the route boundary.
+Canonical Arabic is local-first and credential-free. Quran Foundation remains an optional enrichment boundary; secrets and access tokens never cross the route boundary.

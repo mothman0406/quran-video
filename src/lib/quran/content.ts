@@ -61,6 +61,8 @@ export type QuranVerseContent = {
   transliteration: string | null;
   font: QuranFontDefinition;
   translationEdition: "Saheeh International";
+  source: "local-tanzil" | "quran-foundation";
+  compatibleScripts: readonly QuranScript[];
 };
 
 export type QuranContentResponse =
@@ -115,5 +117,15 @@ export function buildVerseContent(input: {
     transliteration: stripTranslationMarkup(input.transliteration),
     font: quranFontDefinitions.uthmani,
     translationEdition: "Saheeh International",
+    source: "quran-foundation",
+    compatibleScripts: Object.keys(quranFontDefinitions) as QuranScript[],
   };
+}
+
+/** Selects a font/text pairing without pretending page or IndoPak fonts use Unicode Uthmani text. */
+export function arabicForScript(verse: QuranVerseContent, script: QuranScript): { text: string; font: QuranFontDefinition; compatible: boolean } {
+  if (verse.compatibleScripts.includes(script)) {
+    return { text: verse.arabic[script], font: quranFontDefinitions[script], compatible: true };
+  }
+  return { text: verse.arabic.uthmani, font: quranFontDefinitions.uthmani, compatible: false };
 }
