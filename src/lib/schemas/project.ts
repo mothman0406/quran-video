@@ -41,6 +41,11 @@ export const CaptionSegmentSchema = z.strictObject({
   arabic: z.string().min(1),
   translation: z.string().nullable(),
   transliteration: z.string().nullable(),
+  timingEvidence: z.strictObject({
+    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation", "derived"]) }),
+    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation", "derived"]) }),
+    derived: z.boolean(),
+  }).optional(),
 });
 
 export const CaptionVisibilitySchema = z.strictObject({
@@ -67,6 +72,24 @@ export const TypographySchema = z.strictObject({
   translationFontSize: z.number().finite().positive(),
   transliterationFontSize: z.number().finite().positive(),
   textColor: z.string().min(1),
+  arabicOutlineEnabled: z.boolean(),
+  arabicOutlineWidth: z.number().finite().nonnegative(),
+  arabicOutlineColor: z.string().min(1),
+  arabicShadowEnabled: z.boolean(),
+  arabicShadowBlur: z.number().finite().nonnegative(),
+  arabicOpacity: z.number().finite().min(0).max(1),
+  textAlign: z.enum(["left", "center", "right"]),
+  arabicLineSpacing: z.number().finite().positive(),
+  translationVisible: z.boolean(),
+  translationTextColor: z.string().min(1),
+  translationOutlineEnabled: z.boolean(),
+  translationOutlineWidth: z.number().finite().nonnegative(),
+  translationOutlineColor: z.string().min(1),
+  translationShadowEnabled: z.boolean(),
+  translationShadowBlur: z.number().finite().nonnegative(),
+  translationOpacity: z.number().finite().min(0).max(1),
+  translationSpacingBelowArabic: z.number().finite().nonnegative(),
+  transliterationVisible: z.boolean(),
 });
 
 export const TransitionSettingsSchema = z.strictObject({

@@ -10,6 +10,8 @@ export type VerseAlignment = {
   timingEvidence: RecognitionMatch["timing"];
 };
 
+export type { CaptionSegment } from "@/lib/editor/captions";
+
 export function recognitionToVerseAlignments(matches: readonly RecognitionMatch[]): VerseAlignment[] {
   return matches.map((match) => {
     const [surahNumber, ayahNumber] = match.verseKey.split(":").map(Number);

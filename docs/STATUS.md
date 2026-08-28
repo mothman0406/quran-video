@@ -104,6 +104,17 @@ M3B Quran-text timing alignment hardening:
 - Deterministic 6:74–77 regression coverage verifies ordered reconstruction including 6:75, the two mid-ayah breath cases, non-Quran leading silence, monotonic timing, and unequal durations. Existing noisy 93:1–5 and unrelated-Arabic rejection regressions continue to pass.
 - Known limitation: word-level offsets depend on what the browser's Transformers.js Whisper build returns; multi-word ASR spans use token-position timing and interpolation is approximate for weakly transcribed ayat. Manual browser/WebGPU retest with the real 6:74–77 clip remains required.
 
+## Current milestone: M5A — Editable caption segmentation and foundational styling
+
+Complete:
+
+- Recognition `VerseAlignment` remains separate from presentation `CaptionSegment` state. Long ayat are split at canonical Quran word boundaries into readable eight-word segments by default; short ayat remain whole.
+- Segment split/merge operations preserve exact canonical Arabic word order, source verse keys, monotonic timing, and explicit derived-timing labels. Split translation text is not fabricated or duplicated; it remains associated with the parent verse key.
+- The preview now uses segments for playback selection and exposes split-at-word, merge-previous, and merge-next controls.
+- Structured editor typography state provides Quran-safe Arabic font selection, size/color/opacity/alignment/line spacing, optional outline and shadow controls, independent translation visibility/font/size/color/opacity/spacing/outline/shadow controls, a transliteration placeholder, and reset-to-defaults. The former mandatory green outline is removed.
+
+Verification: targeted caption tests, `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check`.
+
 M3B Quran-aware recognition normalization:
 
 - Added a cached, internal-only Hafs recitation representation beside canonical display text and existing orthographic normalization. It deterministically tolerates hamzat al-wasl in connected speech, lam shamsiyyah assimilation, ASR-expanded shadda, silent Uthmani marks, and common hamza carrier spelling ambiguity. Madd letters and cross-word idgham consonants remain lexical evidence.
