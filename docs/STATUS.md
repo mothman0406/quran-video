@@ -120,10 +120,12 @@ M3B Quran-text timing alignment hardening:
 
 Complete:
 
-- Recognition `VerseAlignment` remains separate from presentation `CaptionSegment` state. Long ayat are split at canonical Quran word boundaries into readable eight-word segments by default; short ayat remain whole.
+- Recognition `VerseAlignment` remains separate from presentation `CaptionSegment` state. Long ayat are split at canonical Quran word boundaries into balanced readable chunks (up to eight words by default), avoiding tiny tail fragments; short ayat remain whole.
 - Segment split/merge operations preserve exact canonical Arabic word order, source verse keys, monotonic timing, and explicit derived-timing labels. Split translation text is not fabricated or duplicated; it remains associated with the parent verse key.
 - The preview now uses segments for playback selection and exposes split-at-word, merge-previous, and merge-next controls.
 - Structured editor typography state provides Quran-safe Arabic font selection, size/color/opacity/alignment/line spacing, optional outline and shadow controls, independent translation visibility/font/size/color/opacity/spacing/outline/shadow controls, a transliteration placeholder, and reset-to-defaults. The former mandatory green outline is removed.
+- Translation associations remain parent-verse associations; automatic split segments do not fabricate sub-verse English, and the preview only displays a full parent translation on a complete-ayah segment.
+- Segment and typography schemas now validate the editor’s millisecond timing, source verse keys, word metadata, and structured style defaults directly.
 
 Verification: targeted caption tests, `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check`.
 

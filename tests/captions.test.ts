@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { createCaptionSegments, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, splitCaptionSegment, translationForCaptionSegment } from "../src/lib/editor/captions.ts";
+import { createCaptionSegments, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetTypography, splitCaptionSegment, translationForCaptionSegment } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -31,6 +31,14 @@ test("splits long ayat only at Quran word boundaries with monotonic derived timi
   assert.equal(segments.every((segment) => segment.verseKeys.join() === "93:1"), true);
 });
 
+test("short ayat stay intact and automatic chunks avoid a tiny tail", () => {
+  const short = createCaptionSegments([alignment], { "93:1": { ...content["93:1"], arabic: { ...content["93:1"].arabic, uthmani: "وَالضُّحَى" } } }, 3);
+  assert.equal(short.length, 1);
+  const nineWords = "وَالضُّحَى وَاللَّيْلِ إِذَا سَجَى وَمَا وَدَّعَكَ رَبُّكَ وَمَا قَلَى";
+  const balanced = createCaptionSegments([alignment], { "93:1": { ...content["93:1"], arabic: { ...content["93:1"].arabic, uthmani: nineWords } } }, 8);
+  assert.deepEqual(balanced.map((segment) => segment.arabic.split(" ").length), [5, 4]);
+});
+
 test("translation survives editor conversion and long-ayah splitting through the parent verse key", () => {
   const segments = createCaptionSegments([alignment], content, 3);
   assert.equal(translationForCaptionSegment(segments[1], content), "By the morning brightness");
@@ -54,6 +62,22 @@ test("split and merge round-trip preserves canonical Arabic and source identity"
   assert.deepEqual(merged.verseKeys, ["93:1"]);
 });
 
+test("invalid split boundaries do not alter canonical text", () => {
+  const original = createCaptionSegments([alignment], content, 99)[0];
+  assert.deepEqual(splitCaptionSegment(original, 0), [original]);
+  assert.deepEqual(splitCaptionSegment(original, original.arabic.split(" ").length), [original]);
+  assert.equal(splitCaptionSegment(original, 3).map((segment) => segment.arabic).join(" "), original.arabic);
+});
+
+test("adjacent merges preserve verse keys and the full timing range", () => {
+  const first = createCaptionSegments([alignment], content, 3);
+  const merged = mergeCaptionWithPrevious(first, 1);
+  assert.deepEqual(merged[0].verseKeys, ["93:1"]);
+  assert.equal(merged[0].startMs, alignment.startMs);
+  assert.equal(merged[0].endMs, first[1].endMs);
+  assert.deepEqual(mergeCaptionWithNext(first, 0)[0].verseKeys, ["93:1"]);
+});
+
 test("playback selects the correct caption after splitting", () => {
   const original = createCaptionSegments([alignment], content, 99)[0];
   const split = splitCaptionSegment(original, 3);
@@ -71,4 +95,12 @@ test("typography defaults are neutral and independently configurable", () => {
   assert.equal(reset.translationVisible, true);
   assert.equal(changed.arabicOutlineEnabled, true);
   assert.equal(changed.translationVisible, false);
+});
+
+test("reset restores the complete typography defaults", () => {
+  const reset = resetTypography();
+  assert.deepEqual(reset, DEFAULT_TYPOGRAPHY);
+  assert.notEqual(reset, DEFAULT_TYPOGRAPHY);
+  assert.equal(reset.arabicOutlineEnabled, false);
+  assert.equal(reset.translationOutlineEnabled, false);
 });

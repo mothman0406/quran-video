@@ -4,7 +4,7 @@ import { ChangeEvent, SyntheticEvent, useEffect, useRef, useState } from "react"
 import { analyzeTranscript, hafsSurahs } from "@/lib/recognition/core";
 import type { TranscriptionProgress } from "@/lib/recognition/transcriber";
 import { captionForPlaybackTime, recognitionToVerseAlignments, type VerseAlignment } from "@/lib/editor/recognition";
-import { createCaptionSegments, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, splitCaptionSegment, type CaptionSegment, type Typography } from "@/lib/editor/captions";
+import { createCaptionSegments, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetTypography as resetTypographyDefaults, splitCaptionSegment, type CaptionSegment, type Typography } from "@/lib/editor/captions";
 import { isQuranScript, quranFontDefinitions } from "@/lib/quran/content";
 import { getVerses } from "@/lib/quran/local";
 import type { QuranContentResponse } from "@/lib/quran/content";
@@ -108,11 +108,11 @@ export default function Home() {
   }
 
   function updateTime(event: SyntheticEvent<HTMLVideoElement>) { setCurrentTimeMs(event.currentTarget.currentTime * 1000); }
-  const active = captionForPlaybackTime(segments, currentTimeMs); const rawActiveContent = active ? content[active.verseKeys[0]] : null; const activeContent = rawActiveContent; const busy = busyStages.includes(stage);
+  const active = captionForPlaybackTime(segments, currentTimeMs); const activeContent = active ? content[active.verseKeys[0]] : null; const busy = busyStages.includes(stage);
   const selectedIndex = segments.findIndex((segment) => segment.id === selectedSegmentId); const selectedSegment = selectedIndex >= 0 ? segments[selectedIndex] : null;
-  const styleText = (kind: "arabic" | "translation") => { const outline = kind === "arabic" ? typography.arabicOutlineEnabled : typography.translationOutlineEnabled; const width = kind === "arabic" ? typography.arabicOutlineWidth : typography.translationOutlineWidth; const color = kind === "arabic" ? typography.arabicOutlineColor : typography.translationOutlineColor; const shadow = kind === "arabic" ? typography.arabicShadowEnabled : typography.translationShadowEnabled; const blur = kind === "arabic" ? typography.arabicShadowBlur : typography.translationShadowBlur; return { WebkitTextStroke: outline ? `${width}px ${color}` : "0 transparent", textShadow: shadow ? `0 2px ${blur}px rgba(0,0,0,0.65)` : "none" }; };
+  const styleText = (kind: "arabic" | "translation") => { const outline = kind === "arabic" ? typography.arabicOutlineEnabled : typography.translationOutlineEnabled; const width = kind === "arabic" ? typography.arabicOutlineWidth : typography.translationOutlineWidth; const color = kind === "arabic" ? typography.arabicOutlineColor : typography.translationOutlineColor; const shadow = kind === "arabic" ? typography.arabicShadowEnabled : typography.translationShadowEnabled; const blur = kind === "arabic" ? typography.arabicShadowBlur : typography.translationShadowBlur; const strength = kind === "arabic" ? typography.arabicShadowStrength : typography.translationShadowStrength; return { WebkitTextStroke: outline ? `${width}px ${color}` : "0 transparent", textShadow: shadow ? `0 2px ${blur}px rgba(0,0,0,${strength})` : "none", textAlign: kind === "arabic" ? typography.textAlign : typography.translationTextAlign }; };
   const updateTypography = <K extends keyof Typography>(key: K, value: Typography[K]) => setTypography((current) => ({ ...current, [key]: value }));
-  function resetTypography() { setTypography({ ...DEFAULT_TYPOGRAPHY }); }
+  function resetTypography() { setTypography(resetTypographyDefaults()); }
   function splitSelected() { if (!selectedSegment) return; setSegments((current) => { const index = current.findIndex((segment) => segment.id === selectedSegment.id); return index < 0 ? current : [...current.slice(0, index), ...splitCaptionSegment(selectedSegment, splitBoundary), ...current.slice(index + 1)]; }); setSelectedSegmentId(null); }
   function mergePrevious() { if (selectedIndex < 1) return; setSegments((current) => mergeCaptionWithPrevious(current, selectedIndex)); setSelectedSegmentId(null); }
   function mergeNext() { if (selectedIndex < 0 || selectedIndex >= segments.length - 1) return; setSegments((current) => mergeCaptionWithNext(current, selectedIndex)); setSelectedSegmentId(null); }

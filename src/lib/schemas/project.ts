@@ -35,12 +35,15 @@ export const VerseAlignmentSchema = VerseKeySchema.extend({
 
 export const CaptionSegmentSchema = z.strictObject({
   id: z.string().min(1),
-  verseKeys: z.array(VerseKeySchema).min(1),
-  startSeconds: PositiveNumber,
-  endSeconds: PositiveNumber,
+  verseKeys: z.array(z.string().regex(/^\d{1,3}:\d{1,3}$/)).min(1),
+  startMs: PositiveNumber,
+  endMs: PositiveNumber,
   arabic: z.string().min(1),
   translation: z.string().nullable(),
   transliteration: z.string().nullable(),
+  wordStart: z.number().int().nonnegative(),
+  wordEnd: z.number().int().positive(),
+  wordCount: z.number().int().positive(),
   timingEvidence: z.strictObject({
     start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation", "derived"]) }),
     end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation", "derived"]) }),
@@ -77,6 +80,7 @@ export const TypographySchema = z.strictObject({
   arabicOutlineColor: z.string().min(1),
   arabicShadowEnabled: z.boolean(),
   arabicShadowBlur: z.number().finite().nonnegative(),
+  arabicShadowStrength: z.number().finite().min(0).max(1),
   arabicOpacity: z.number().finite().min(0).max(1),
   textAlign: z.enum(["left", "center", "right"]),
   arabicLineSpacing: z.number().finite().positive(),
@@ -87,8 +91,10 @@ export const TypographySchema = z.strictObject({
   translationOutlineColor: z.string().min(1),
   translationShadowEnabled: z.boolean(),
   translationShadowBlur: z.number().finite().nonnegative(),
+  translationShadowStrength: z.number().finite().min(0).max(1),
   translationOpacity: z.number().finite().min(0).max(1),
   translationSpacingBelowArabic: z.number().finite().nonnegative(),
+  translationTextAlign: z.enum(["left", "center", "right"]),
   transliterationVisible: z.boolean(),
 });
 

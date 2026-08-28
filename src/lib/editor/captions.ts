@@ -19,6 +19,7 @@ export const DEFAULT_TYPOGRAPHY: Typography = {
   arabicOutlineColor: "#000000",
   arabicShadowEnabled: true,
   arabicShadowBlur: 8,
+  arabicShadowStrength: 0.65,
   arabicOpacity: 1,
   textAlign: "center",
   arabicLineSpacing: 1.35,
@@ -29,10 +30,16 @@ export const DEFAULT_TYPOGRAPHY: Typography = {
   translationOutlineColor: "#000000",
   translationShadowEnabled: true,
   translationShadowBlur: 5,
+  translationShadowStrength: 0.55,
   translationOpacity: 0.82,
   translationSpacingBelowArabic: 8,
+  translationTextAlign: "center",
   transliterationVisible: false,
 };
+
+export function resetTypography(): Typography {
+  return { ...DEFAULT_TYPOGRAPHY };
+}
 
 export type CaptionTimingSource = "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "derived";
 
@@ -72,6 +79,21 @@ function unique(values: readonly string[]): string[] {
   return values.filter((value, index) => values.indexOf(value) === index);
 }
 
+function chunkBoundaries(totalWords: number, maxWords: number): Array<[number, number]> {
+  if (totalWords <= maxWords) return [[0, totalWords]];
+  const chunkCount = Math.ceil(totalWords / maxWords);
+  const baseSize = Math.floor(totalWords / chunkCount);
+  const largerChunks = totalWords % chunkCount;
+  const boundaries: Array<[number, number]> = [];
+  let start = 0;
+  for (let index = 0; index < chunkCount; index += 1) {
+    const size = baseSize + (index < largerChunks ? 1 : 0);
+    boundaries.push([start, start + size]);
+    start += size;
+  }
+  return boundaries;
+}
+
 function segmentTiming(alignment: VerseAlignment, startWord: number, endWord: number, totalWords: number) {
   const duration = Math.max(0, alignment.endMs - alignment.startMs);
   const startMs = Math.round(alignment.startMs + duration * startWord / totalWords);
@@ -99,11 +121,10 @@ export function createCaptionSegments(
     const verseWords = words(arabic);
     if (!verseWords.length) return [];
     const chunks: CaptionSegment[] = [];
-    for (let start = 0, index = 0; start < verseWords.length; start += maxWordsPerSegment, index += 1) {
-      const end = Math.min(verseWords.length, start + maxWordsPerSegment);
+    for (const [start, end] of chunkBoundaries(verseWords.length, maxWordsPerSegment)) {
       const timing = segmentTiming(alignment, start, end, verseWords.length);
       chunks.push({
-        id: `${alignment.verseKey}#${index + 1}`,
+        id: `${alignment.verseKey}#${chunks.length + 1}`,
         verseKeys: [alignment.verseKey],
         ...timing,
         arabic: verseWords.slice(start, end).join(" "),
@@ -111,7 +132,7 @@ export function createCaptionSegments(
         transliteration: verseWords.length <= maxWordsPerSegment ? verse?.transliteration ?? null : null,
         wordStart: start,
         wordEnd: end,
-        wordCount: verseWords.length,
+        wordCount: end - start,
       });
     }
     return chunks;
@@ -147,7 +168,7 @@ function mergeSegments(left: CaptionSegment, right: CaptionSegment): CaptionSegm
     ...left,
     id: `${left.id}+${right.id}`,
     verseKeys: unique([...left.verseKeys, ...right.verseKeys]),
-    endMs: Math.max(left.endMs, right.endMs),
+    endMs: right.endMs,
     arabic: `${left.arabic} ${right.arabic}`.trim(),
     translation: left.translation ?? right.translation,
     transliteration: null,
