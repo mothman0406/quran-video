@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   description: "A Quran-first video caption editor",
   other: {
     google: "notranslate",
+    "quran-translation-attribution": "Saheeh International via QuranEnc.com; source version shown when available",
   },
 };
 

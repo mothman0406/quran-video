@@ -1,5 +1,15 @@
 # Status
 
+## Current milestone: Saheeh International translation provider
+
+Complete:
+
+- Added the independent `getVerseArabic` / `getTranslation` content boundary.
+- Added the QuranEnc `english_saheeh` provider as the default runtime translation source, with surah-level server cache, concurrent request reuse, and version metadata when QuranEnc supplies it.
+- Arabic remains local and available when translation fetches fail; translation visibility is independently toggleable on the homepage.
+- Quran Foundation remains available as an optional enrichment adapter.
+- Added mocked deterministic provider tests and QuranEnc attribution/republication terms.
+
 ## Current milestone: Local canonical Hafs corpus
 
 Complete:

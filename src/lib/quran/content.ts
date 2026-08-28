@@ -1,5 +1,6 @@
 export const DEFAULT_TRANSLATION_ID = 20;
 export const TRANSLITERATION_ID = 57;
+export const DEFAULT_TRANSLATION_KEY = "english_saheeh";
 
 export const quranScriptValues = [
   "uthmani",
@@ -16,6 +17,13 @@ export type QuranFontDefinition = {
   source: string;
   mode: "unicode" | "page";
   fallbackFamily: string;
+};
+
+export type QuranTranslationMetadata = {
+  edition: "Saheeh International";
+  source: "quranenc" | "quran-foundation";
+  translationKey?: string;
+  version?: string;
 };
 
 const QURAN_FONT_CDN = "https://verses.quran.foundation/fonts/quran/hafs";
@@ -58,6 +66,7 @@ export type QuranVerseContent = {
   pageNumber: number | null;
   arabic: Record<QuranScript, string>;
   translation: string | null;
+  translationMetadata: QuranTranslationMetadata | null;
   transliteration: string | null;
   font: QuranFontDefinition;
   translationEdition: "Saheeh International";
@@ -97,6 +106,7 @@ export function buildVerseContent(input: {
   textQpcHafs?: string | null;
   textIndopak?: string | null;
   translation?: string | null;
+  translationMetadata?: QuranTranslationMetadata | null;
   transliteration?: string | null;
 }): QuranVerseContent {
   const parsed = parseVerseKey(input.verseKey);
@@ -114,12 +124,18 @@ export function buildVerseContent(input: {
       kfgqpc: input.textQpcHafs ?? fallback,
     },
     translation: stripTranslationMarkup(input.translation),
+    translationMetadata: input.translationMetadata ?? (input.translation ? { edition: "Saheeh International", source: "quran-foundation" } : null),
     transliteration: stripTranslationMarkup(input.transliteration),
     font: quranFontDefinitions.uthmani,
     translationEdition: "Saheeh International",
     source: "quran-foundation",
     compatibleScripts: Object.keys(quranFontDefinitions) as QuranScript[],
   };
+}
+
+/** Presentation-only whitespace cleanup; translation wording and markup are not rewritten. */
+export function preserveTranslationText(value: string | null | undefined): string | null {
+  return value?.trim() || null;
 }
 
 /** Selects a font/text pairing without pretending page or IndoPak fonts use Unicode Uthmani text. */

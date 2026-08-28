@@ -7,6 +7,7 @@ import { captionForPlaybackTime, recognitionToVerseAlignments, type VerseAlignme
 import { arabicForScript, isQuranScript, quranFontDefinitions } from "@/lib/quran/content";
 import { getVerses } from "@/lib/quran/local";
 import type { QuranContentResponse, QuranScript } from "@/lib/quran/content";
+import type { QuranTranslation } from "@/lib/quran/translations";
 import { localTranscriptionSupport } from "@/lib/recognition/local-whisper";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
@@ -29,6 +30,7 @@ export default function Home() {
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
   const [quranScript, setQuranScript] = useState<QuranScript>("uthmani");
   const [showCorrection, setShowCorrection] = useState(false);
+  const [showTranslation, setShowTranslation] = useState(true);
   const [surah, setSurah] = useState(93);
   const [startAyah, setStartAyah] = useState(1);
   const [endAyah, setEndAyah] = useState(5);
@@ -49,6 +51,23 @@ export default function Home() {
     if (job === generation.current) setContent(Object.fromEntries(verses.map((verse) => [verse.verseKey, { status: "ready", verse } satisfies QuranContentResponse])));
   }
 
+  async function loadTranslations(keys: string[], job: number) {
+    if (!keys.length) return;
+    try {
+      const params = new URLSearchParams();
+      keys.forEach((key) => params.append("key", key));
+      const response = await fetch(`/api/quran/verse?${params.toString()}`);
+      if (!response.ok) return;
+      const payload = await response.json() as { translations?: Record<string, QuranTranslation | null> };
+      if (job !== generation.current || !payload.translations) return;
+      setContent((current) => Object.fromEntries(Object.entries(current).map(([key, item]) => {
+        const translation = payload.translations?.[key];
+        if (item.status !== "ready" || !translation) return [key, item];
+        return [key, { ...item, verse: { ...item.verse, translation: translation.text, translationMetadata: translation.metadata } }];
+      })));
+    } catch { /* Arabic remains available when translation enrichment fails. */ }
+  }
+
   async function detect() {
     if (!videoFile || !support?.supported || busyStages.includes(stage)) return;
     const job = ++generation.current;
@@ -61,7 +80,7 @@ export default function Home() {
       if (analysis.matches.length === 0) throw new Error("No confident Quran passage was detected. You can try again or correct it manually.");
       const next = recognitionToVerseAlignments(analysis.matches); const first = next[0]; const last = next.at(-1)!;
       setAlignments(next); setSurah(first.surahNumber); setStartAyah(first.ayahNumber); setEndAyah(last.ayahNumber); setStage("captions");
-      await loadCanonical(next.map((item) => item.verseKey), job); if (job === generation.current) setStage("complete");
+      const keys = next.map((item) => item.verseKey); await loadCanonical(keys, job); await loadTranslations(keys, job); if (job === generation.current) setStage("complete");
     } catch (caught) { if (job === generation.current) { setStage("error"); setErrorMessage(caught instanceof Error ? caught.message : "Local recognition failed. Try again."); } }
   }
 
@@ -78,17 +97,17 @@ export default function Home() {
     const job = ++generation.current; const rangeStart = alignments[0]?.startMs ?? 0; const rangeEnd = alignments.at(-1)?.endMs ?? (videoMetadata?.durationSeconds ?? 1) * 1000; const count = endAyah - startAyah + 1;
     const next = Array.from({ length: count }, (_, index) => ({ verseKey: `${surah}:${startAyah + index}`, surahNumber: surah, ayahNumber: startAyah + index, startMs: Math.round(rangeStart + (rangeEnd - rangeStart) * index / count), endMs: Math.round(rangeStart + (rangeEnd - rangeStart) * (index + 1) / count), confidence: 0, timingEvidence: { start: { timestampMs: rangeStart, source: "interpolation" as const }, end: { timestampMs: rangeEnd, source: "interpolation" as const }, matchedText: "" } }));
     setAlignments(next); setStage("captions"); setErrorMessage(null);
-    try { await loadCanonical(next.map((item) => item.verseKey), job); if (job === generation.current) { setStage("complete"); setShowCorrection(false); } } catch { if (job === generation.current) { setStage("error"); setErrorMessage("Canonical captions could not be loaded locally."); } }
+    try { const keys = next.map((item) => item.verseKey); await loadCanonical(keys, job); await loadTranslations(keys, job); if (job === generation.current) { setStage("complete"); setShowCorrection(false); } } catch { if (job === generation.current) { setStage("error"); setErrorMessage("Canonical captions could not be loaded locally."); } }
   }
 
   function updateTime(event: SyntheticEvent<HTMLVideoElement>) { setCurrentTimeMs(event.currentTarget.currentTime * 1000); }
-  const active = captionForPlaybackTime(alignments, currentTimeMs); const activeContent = active ? content[active.verseKey] : null; const activeArabic = activeContent?.status === "ready" ? arabicForScript(activeContent.verse, quranScript) : null; const busy = busyStages.includes(stage);
+  const active = captionForPlaybackTime(alignments, currentTimeMs); const rawActiveContent = active ? content[active.verseKey] : null; const activeContent = rawActiveContent?.status === "ready" && !showTranslation ? { ...rawActiveContent, verse: { ...rawActiveContent.verse, translation: null } } : rawActiveContent; const activeArabic = activeContent?.status === "ready" ? arabicForScript(activeContent.verse, quranScript) : null; const busy = busyStages.includes(stage);
 
   return <main className="min-h-screen bg-[#f5f2eb] text-[#17211b]"><div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-5 py-5 sm:px-8 lg:px-12 lg:py-8">
     <header className="flex items-center justify-between border-b border-[#d8d5cc] pb-5"><div><p className="font-serif text-lg font-semibold text-[#173c32]">Quran Video</p><p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a8179]">Recitation editor</p></div><span className="rounded-full border border-[#c8d4cc] bg-[#edf4ef] px-3 py-2 text-xs font-medium text-[#2e6250]">Local session</span></header>
     <div className="grid flex-1 gap-8 py-8 lg:grid-cols-[minmax(0,1fr)_330px] lg:gap-12 lg:py-12"><section className="flex min-w-0 flex-col justify-center"><div className="mb-8 max-w-2xl"><p className="mb-4 text-xs font-bold uppercase tracking-[0.22em] text-[#a06b31]">M3C/M4 · Automatic Quran detection</p><h1 className="max-w-xl font-serif text-4xl leading-[1.08] tracking-[-0.03em] text-[#173c32] sm:text-5xl">Begin with a recitation.</h1><p className="mt-5 max-w-lg text-base leading-7 text-[#68716a]">Select a video, detect its Quran passage, and preview canonical captions timed to the recitation. Audio stays in this browser and is never uploaded.</p></div>
       {videoUrl ? <div className="overflow-hidden rounded-[28px] border border-[#d8d5cc] bg-[#16231e] p-2 shadow-[0_20px_60px_rgba(23,60,50,0.12)]"><div className="relative aspect-video overflow-hidden rounded-[22px] bg-[#0e1713]"><video className="h-full w-full object-contain" controls playsInline preload="metadata" src={videoUrl} onLoadedMetadata={(event) => setVideoMetadata({ durationSeconds: event.currentTarget.duration, width: event.currentTarget.videoWidth, height: event.currentTarget.videoHeight })} onTimeUpdate={updateTime} onSeeked={updateTime} onError={() => setErrorMessage("This video could not be previewed in your browser.")}>Your browser does not support video playback.</video>{activeContent?.status === "ready" && <div className="pointer-events-none absolute inset-x-0 bottom-8 flex justify-center px-5 sm:bottom-12"><div className="max-w-[90%] rounded-2xl border border-white/20 bg-[#10221dcc] px-5 py-4 text-center text-white shadow-lg backdrop-blur-md" translate="no"><p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#f7d88b]">{activeContent.verse.verseKey}</p><p className="text-3xl leading-tight sm:text-4xl" dir="rtl" lang="ar" style={{ fontFamily: activeArabic?.font.family }}>{activeArabic?.text}</p>{activeContent.verse.transliteration && <p className="mt-2 text-sm italic text-white/70">{activeContent.verse.transliteration}</p>}{activeContent.verse.translation && <p className="mt-2 text-sm text-white/75">{activeContent.verse.translation}</p>}{!activeContent.verse.translation && <p className="mt-2 text-xs text-white/60">Translation unavailable offline.</p>}</div></div>}</div></div> : <label className="group flex min-h-[360px] cursor-pointer flex-col items-center justify-center rounded-[28px] border border-dashed border-[#b9b9aa] bg-[#eeece4] px-6 text-center hover:border-[#6b907e] hover:bg-[#e7ebe4]"><span className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-[#173c32] text-3xl text-[#f7d88b]">↑</span><span className="font-serif text-2xl font-semibold text-[#173c32]">Choose a video</span><span className="mt-2 max-w-xs text-sm leading-6 text-[#737b73]">MP4, WebM, or another video supported by your browser</span><span className="mt-6 rounded-full bg-[#173c32] px-5 py-2.5 text-sm font-semibold text-white">Browse files</span><input accept="video/*" className="sr-only" type="file" onChange={selectVideo} /></label>}
-      {videoFile && <div className="mt-4 flex flex-wrap items-center gap-3"><button className="rounded-full bg-[#173c32] px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || !support?.supported} type="button" onClick={detect}>{stage === "complete" ? "Detect again" : "Detect Quran"}</button>{stage === "complete" && alignments.length > 0 && <button className="rounded-full border border-[#c8d4cc] px-4 py-2.5 text-sm font-semibold text-[#35604f]" type="button" onClick={() => setShowCorrection((value) => !value)}>Correct detection</button>}<button className="rounded-full border border-[#c8d4cc] px-4 py-2.5 text-sm font-semibold text-[#35604f]" type="button" onClick={clearVideo}>Choose a different video</button></div>}
+      {videoFile && <div className="mt-4 flex flex-wrap items-center gap-3"><button className="rounded-full bg-[#173c32] px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={busy || !support?.supported} type="button" onClick={detect}>{stage === "complete" ? "Detect again" : "Detect Quran"}</button>{stage === "complete" && alignments.length > 0 && <button className="rounded-full border border-[#c8d4cc] px-4 py-2.5 text-sm font-semibold text-[#35604f]" type="button" onClick={() => setShowCorrection((value) => !value)}>Correct detection</button>}<label className="flex items-center gap-2 text-sm text-[#35604f]"><input checked={showTranslation} type="checkbox" onChange={(event) => setShowTranslation(event.target.checked)} /> Show Saheeh International</label><button className="rounded-full border border-[#c8d4cc] px-4 py-2.5 text-sm font-semibold text-[#35604f]" type="button" onClick={clearVideo}>Choose a different video</button></div>}
       {busy && <div aria-live="polite" className="mt-4 rounded-2xl border border-[#c8d4cc] bg-[#edf4ef] px-4 py-3 text-sm text-[#35604f]"><p className="font-semibold">{stageLabel(stage)}</p><p className="mt-1 text-xs">Audio is processed locally and is not uploaded.{progress?.phase === "transcribing" && progress.total ? ` ${progress.completed ?? 0}/${progress.total} audio chunks.` : ""}</p></div>}
       {stage === "complete" && alignments.length > 0 && <div className="mt-4 rounded-2xl border border-[#c8d4cc] bg-[#edf4ef] p-4 text-sm text-[#35604f]"><p className="font-semibold">Detected: Surah {alignments[0].surahNumber} ({hafsSurahs.find((item) => item.number === alignments[0].surahNumber)?.transliteration}) · ayat {alignments[0].ayahNumber}–{alignments.at(-1)?.ayahNumber}</p><p className="mt-1">{Math.round(alignments.reduce((sum, item) => sum + item.confidence, 0) / alignments.length * 100)}% overall confidence</p><p className="mt-2 text-xs">Canonical Arabic is loaded locally from the verified Tanzil Hafs corpus.</p></div>}
       {showCorrection && <div className="mt-4 rounded-2xl border border-[#d8d5cc] bg-[#fbfaf6] p-4"><p className="font-semibold text-[#173c32]">Correct detection</p><div className="mt-3 grid grid-cols-3 gap-2"><select aria-label="Surah" className="rounded-xl border px-2 py-2 text-sm" value={surah} onChange={(event) => setSurah(Number(event.target.value))}>{hafsSurahs.map((item) => <option key={item.number} value={item.number}>{item.number} · {item.name}</option>)}</select><input aria-label="First ayah" className="rounded-xl border px-2 py-2 text-sm" min={1} type="number" value={startAyah} onChange={(event) => setStartAyah(Number(event.target.value))} /><input aria-label="Last ayah" className="rounded-xl border px-2 py-2 text-sm" min={1} type="number" value={endAyah} onChange={(event) => setEndAyah(Number(event.target.value))} /></div><button className="mt-3 rounded-full bg-[#173c32] px-4 py-2 text-sm font-semibold text-white" type="button" onClick={correctDetection}>Use this range</button></div>}
