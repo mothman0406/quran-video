@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { captionBackgroundStyle, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetCaptionBackground, resetTypography, splitCaptionSegment, translationForCaptionSegment } from "../src/lib/editor/captions.ts";
+import { captionBackgroundStyle, clampNormalizedPosition, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetCaptionBackground, resetCaptionSegmentTiming, resetTypography, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -132,4 +132,42 @@ test("translation stays in the same linked caption segment container", () => {
   const segment = { verseKeys: ["93:1"] };
   const content = { "93:1": { translation: "By the morning brightness." } } as never;
   assert.equal(translationForCaptionSegment(segment, content), "By the morning brightness.");
+});
+
+test("normalized positioning is constrained and linked translation follows Arabic", () => {
+  assert.equal(clampNormalizedPosition(-1), 0.06);
+  const moved = updateCaptionPosition(DEFAULT_CAPTION_POSITIONING, "arabic", 0.8, 0.7);
+  assert.equal(moved.x, 0.8);
+  assert.equal(moved.translationX, 0.8);
+  assert.equal(moved.translationY, 0.82);
+  const unlinked = updateCaptionPosition({ ...moved, translationPositionLinked: false }, "arabic", 0.2, 0.2);
+  assert.equal(unlinked.translationX, 0.8);
+});
+
+test("manual timing clamps to duration and neighboring boundaries", () => {
+  const base = createCaptionSegments([alignment], content, 3);
+  const changed = updateCaptionSegmentTiming(base, base[1].id, { startMs: -100, endMs: 99_999 }, 2_000);
+  assert.equal(changed[1].startMs, base[0].endMs);
+  assert.equal(changed[1].endMs, base[2].startMs);
+  assert.equal(changed[0].startMs, alignment.startMs);
+  assert.equal(alignment.startMs, 100);
+});
+
+test("reset timing restores generated timing evidence without touching recognition alignment", () => {
+  const base = createCaptionSegments([alignment], content, 3);
+  const edited = updateCaptionSegmentTiming(base, base[0].id, { startMs: 400, endMs: 700 }, 2_000);
+  const reset = resetCaptionSegmentTiming(edited, base[0].id, 2_000);
+  assert.equal(reset[0].startMs, base[0].timingEvidence.start.timestampMs);
+  assert.equal(reset[0].endMs, base[0].timingEvidence.end.timestampMs);
+  assert.equal(alignment.startMs, 100);
+});
+
+test("split and merge remain valid after manual timing edits", () => {
+  const base = createCaptionSegments([alignment], content, 99);
+  const edited = updateCaptionSegmentTiming(base, base[0].id, { startMs: 200, endMs: 900 }, 2_000);
+  const split = splitCaptionSegment(edited[0], 3);
+  assert.equal(split[0].endMs <= split[1].startMs, true);
+  const merged = mergeCaptionWithNext(split, 0);
+  assert.equal(merged[0].startMs, 200);
+  assert.equal(merged[0].endMs, 900);
 });

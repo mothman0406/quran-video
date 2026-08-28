@@ -62,6 +62,9 @@ export const CaptionPositioningSchema = z.strictObject({
   anchor: z.enum(["top", "center", "bottom"]),
   x: z.number().finite().min(0).max(1),
   y: z.number().finite().min(0).max(1),
+  translationX: z.number().finite().min(0).max(1),
+  translationY: z.number().finite().min(0).max(1),
+  translationPositionLinked: z.boolean(),
   maxWidthPercent: z.number().finite().positive().max(1),
   translationGapPx: z.number().int().nonnegative(),
 });

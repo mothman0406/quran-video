@@ -6,6 +6,22 @@ import type { CaptionBackgroundSchema, TypographySchema } from "../schemas/proje
 export type Typography = z.infer<typeof TypographySchema>;
 export type CaptionBackground = z.infer<typeof CaptionBackgroundSchema>;
 
+export type CaptionPositioning = {
+  x: number;
+  y: number;
+  translationX: number;
+  translationY: number;
+  translationPositionLinked: boolean;
+};
+
+export const DEFAULT_CAPTION_POSITIONING: CaptionPositioning = {
+  x: 0.5,
+  y: 0.74,
+  translationX: 0.5,
+  translationY: 0.86,
+  translationPositionLinked: true,
+};
+
 export const DEFAULT_TYPOGRAPHY: Typography = {
   quranStyle: "uthmani",
   arabicFontFamily: "UthmanicHafs",
@@ -55,6 +71,32 @@ export function resetCaptionBackground(): CaptionBackground {
   return { ...DEFAULT_CAPTION_BACKGROUND };
 }
 
+export function clampNormalizedPosition(value: number, minimum = 0.06, maximum = 0.94): number {
+  if (!Number.isFinite(value)) return minimum;
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+export function updateCaptionPosition(
+  positioning: CaptionPositioning,
+  kind: "arabic" | "translation",
+  x: number,
+  y: number,
+): CaptionPositioning {
+  const next = { ...positioning };
+  if (kind === "arabic") {
+    next.x = clampNormalizedPosition(x);
+    next.y = clampNormalizedPosition(y);
+    if (next.translationPositionLinked) {
+      next.translationX = next.x;
+      next.translationY = clampNormalizedPosition(next.y + 0.12);
+    }
+  } else {
+    next.translationX = clampNormalizedPosition(x);
+    next.translationY = clampNormalizedPosition(y);
+  }
+  return next;
+}
+
 function hexToRgba(color: string, opacity: number): string {
   const value = color.replace("#", "");
   const hex = value.length === 3 ? value.split("").map((part) => `${part}${part}`).join("") : value;
@@ -94,6 +136,41 @@ export type CaptionSegment = {
     derived: boolean;
   };
 };
+
+export type CaptionTimingPatch = { startMs?: number; endMs?: number };
+
+/** Clamp editable display timing to duration and neighboring display segments. */
+export function updateCaptionSegmentTiming(
+  segments: readonly CaptionSegment[],
+  id: string,
+  patch: CaptionTimingPatch,
+  durationMs: number,
+): CaptionSegment[] {
+  const index = segments.findIndex((segment) => segment.id === id);
+  if (index < 0) return [...segments];
+  const current = segments[index];
+  const minimumStart = index > 0 ? segments[index - 1].endMs : 0;
+  const maximumEnd = index < segments.length - 1 ? segments[index + 1].startMs : Math.max(0, durationMs);
+  const lowerEnd = Math.min(maximumEnd, Math.max(minimumStart + 1, current.endMs));
+  let startMs = Math.round(Number.isFinite(patch.startMs ?? current.startMs) ? patch.startMs ?? current.startMs : current.startMs);
+  let endMs = Math.round(Number.isFinite(patch.endMs ?? current.endMs) ? patch.endMs ?? current.endMs : current.endMs);
+  startMs = Math.max(minimumStart, Math.min(startMs, lowerEnd - 1));
+  endMs = Math.min(maximumEnd, Math.max(endMs, startMs + 1));
+  if (endMs > maximumEnd) {
+    endMs = maximumEnd;
+    startMs = Math.min(startMs, endMs - 1);
+  }
+  return segments.map((segment, segmentIndex) => segmentIndex === index ? { ...segment, startMs, endMs } : segment);
+}
+
+export function resetCaptionSegmentTiming(segments: readonly CaptionSegment[], id: string, durationMs: number): CaptionSegment[] {
+  const segment = segments.find((item) => item.id === id);
+  if (!segment) return [...segments];
+  return updateCaptionSegmentTiming(segments, id, {
+    startMs: segment.timingEvidence.start.timestampMs,
+    endMs: segment.timingEvidence.end.timestampMs,
+  }, durationMs);
+}
 
 /** Translation remains attached to the parent verse when Arabic is visually split. */
 export function translationForCaptionSegment(

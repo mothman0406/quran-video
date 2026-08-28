@@ -1,5 +1,18 @@
 # Status
 
+## Current milestone: M5B — Caption positioning and timeline editing
+
+Implemented:
+
+- Caption position is editor state in normalized coordinates with constrained preview dragging, X/Y controls, reset, linked Arabic/translation layout, optional unlinked translation coordinates, and a non-rendered safe-area guide.
+- The simple timeline shows duration, playhead, caption blocks, selected state, click-to-select/seek, playback-following active captions, and draggable selected-segment edges.
+- Manual start/end edits are clamped to video bounds and neighboring segment boundaries, preserving `VerseAlignment` recognition timing. Reset timing restores each segment’s generated timing evidence; split/merge continues to use the edited display range.
+- Keyboard basics include Space play/pause and 500ms left/right seeking outside text fields.
+
+Boundary behavior: adjacent segment boundaries are clamped so segments remain ordered and non-overlapping; shared boundaries are not automatically moved.
+
+Verification is pending the final M5B check suite below.
+
 ## Current milestone: Configurable caption background
 
 Complete:
