@@ -3,6 +3,7 @@ import type { QuranVerseContent } from "../quran/content.ts";
 import type { VerseAlignment } from "./recognition.ts";
 import type { z } from "zod";
 import type { CaptionBackgroundSchema, CaptionPositioningSchema, TransitionSettingsSchema, TypographySchema } from "../schemas/project.ts";
+import type { ProjectFormat } from "../schemas/project.ts";
 
 export type Typography = z.infer<typeof TypographySchema>;
 export type CaptionBackground = z.infer<typeof CaptionBackgroundSchema>;
@@ -14,15 +15,23 @@ export const DEFAULT_CAPTION_PRESENTATION: CaptionPresentationSettings = {
   showVerseNumber: false,
 };
 
-export const DEFAULT_CAPTION_POSITIONING: CaptionPositioning = {
+const DEFAULT_VERTICAL_CAPTION_POSITIONING: CaptionPositioning = {
   anchor: "bottom",
   x: 0.5,
-  y: 0.74,
+  y: 0.62,
   translationX: 0.5,
-  translationY: 0.86,
+  translationY: 0.74,
   translationPositionLinked: true,
   maxWidthPercent: 0.9,
   translationGapPx: 8,
+};
+
+export const DEFAULT_CAPTION_POSITIONING: CaptionPositioning = { ...DEFAULT_VERTICAL_CAPTION_POSITIONING };
+
+export const DEFAULT_CAPTION_POSITIONING_BY_FORMAT: Record<ProjectFormat["preset"], CaptionPositioning> = {
+  vertical: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING },
+  landscape: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING, y: 0.68, translationY: 0.8 },
+  square: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING, y: 0.64, translationY: 0.76 },
 };
 
 export const DEFAULT_TYPOGRAPHY: Typography = {
@@ -95,23 +104,50 @@ export function clampNormalizedPosition(value: number, minimum = 0.06, maximum =
   return Math.min(maximum, Math.max(minimum, value));
 }
 
+export function captionPositionBounds(format: ProjectFormat, maxWidthPercent = DEFAULT_CAPTION_POSITIONING.maxWidthPercent): { x: [number, number]; y: [number, number] } {
+  const horizontalInset = Math.min(0.46, Math.max(0.06, maxWidthPercent / 2));
+  const socialBottom = format.preset === "vertical" ? 0.82 : 0.94;
+  const minimumY = 0.06;
+  return { x: [horizontalInset, 1 - horizontalInset], y: [minimumY, socialBottom] };
+}
+
+export function clampCaptionPositioning(positioning: CaptionPositioning, format: ProjectFormat): CaptionPositioning {
+  const bounds = captionPositionBounds(format, positioning.maxWidthPercent);
+  const next = { ...positioning };
+  next.x = clampNormalizedPosition(positioning.x, bounds.x[0], bounds.x[1]);
+  next.y = clampNormalizedPosition(positioning.y, bounds.y[0], bounds.y[1]);
+  next.translationX = clampNormalizedPosition(positioning.translationX, bounds.x[0], bounds.x[1]);
+  next.translationY = clampNormalizedPosition(positioning.translationY, bounds.y[0], bounds.y[1]);
+  if (next.translationPositionLinked) {
+    next.translationX = next.x;
+    next.translationY = clampNormalizedPosition(next.y + 0.12, bounds.y[0], bounds.y[1]);
+  }
+  return next;
+}
+
+export function resetCaptionPositioning(format: ProjectFormat): CaptionPositioning {
+  return clampCaptionPositioning(DEFAULT_CAPTION_POSITIONING_BY_FORMAT[format.preset], format);
+}
+
 export function updateCaptionPosition(
   positioning: CaptionPositioning,
   kind: "arabic" | "translation",
   x: number,
   y: number,
+  format?: ProjectFormat,
 ): CaptionPositioning {
   const next = { ...positioning };
+  const bounds = format ? captionPositionBounds(format, positioning.maxWidthPercent) : { x: [0.06, 0.94] as [number, number], y: [0.06, 0.94] as [number, number] };
   if (kind === "arabic") {
-    next.x = clampNormalizedPosition(x);
-    next.y = clampNormalizedPosition(y);
+    next.x = clampNormalizedPosition(x, bounds.x[0], bounds.x[1]);
+    next.y = clampNormalizedPosition(y, bounds.y[0], bounds.y[1]);
     if (next.translationPositionLinked) {
       next.translationX = next.x;
-      next.translationY = clampNormalizedPosition(next.y + 0.12);
+      next.translationY = clampNormalizedPosition(next.y + 0.12, bounds.y[0], bounds.y[1]);
     }
   } else {
-    next.translationX = clampNormalizedPosition(x);
-    next.translationY = clampNormalizedPosition(y);
+    next.translationX = clampNormalizedPosition(x, bounds.x[0], bounds.x[1]);
+    next.translationY = clampNormalizedPosition(y, bounds.y[0], bounds.y[1]);
   }
   return next;
 }

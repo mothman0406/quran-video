@@ -1,6 +1,17 @@
 # Status
 
-## Current milestone: M6 — Caption animations and style presets
+## Current milestone: M6.5 — Multi-aspect-ratio preview and safe-area behavior
+
+Complete:
+
+- Added validated 9:16 vertical (default), 16:9 landscape, and 1:1 square project formats with immediate preview canvas updates and source-video cover fitting.
+- Kept caption positioning normalized to the selected project canvas. Format changes preserve reachable relative positions, clamp wide caption blocks, preserve linked translation coordinates, and provide format-aware reset defaults.
+- Centralized title/action, vertical social UI avoidance, and center guides by format. The toggle-controlled safe-area overlay is editor-only, pointer-transparent, and explicitly excluded from export/render data.
+- Added regression coverage for all format dimensions/aspects, normalized position preservation and clamping, linked translation, safe-area configuration, editor-only overlay metadata, and recognition/timing immutability.
+
+Verification: targeted format tests, full `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass.
+
+## Previous milestone: M6 — Caption animations and style presets
 
 Complete:
 

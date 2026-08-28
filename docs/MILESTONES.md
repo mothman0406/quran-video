@@ -9,6 +9,7 @@
 - **M4 — Recognition integrated with upload UI:** run recognition for a selected video and populate alignments; if recognition needs server media, use a temporary job copy with guaranteed cleanup.
 - **M5 — Timeline/editor controls:** edit segments, split/merge, timing, text visibility, position, and style.
 - **M6 — Animations/templates:** editable smooth fades and reusable caption layouts.
+- **M6.5 — Multi-aspect-ratio preview:** preview vertical, landscape, and square projects with normalized caption positioning and editor-only safe-area guides.
 - **M7 — MP4 rendering/export:** render the edited composition with Remotion, clean up any temporary server media, and download the MP4 directly to the user.
 - **M8 — Supabase accounts/saved projects:** add auth and explicit opt-in persistence for lightweight project metadata/settings only; do not add default source-video or rendered-export storage.
 - **M9 — Stripe quotas/subscriptions:** add usage limits and paid plans.

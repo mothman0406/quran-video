@@ -17,6 +17,8 @@ export const ProjectFormatSchema = z.strictObject({
   height: PositiveInteger,
 });
 
+export type ProjectFormatPreset = z.infer<typeof ProjectFormatSchema>["preset"];
+
 export const VerseKeySchema = z.strictObject({
   surahNumber: z.number().int().min(1).max(114),
   ayahNumber: PositiveInteger,
@@ -147,6 +149,7 @@ export const ProjectSchema = z.strictObject({
 export const SavedProjectSchema = ProjectSchema.omit({ sourceVideo: true });
 
 export type Project = z.infer<typeof ProjectSchema>;
+export type ProjectFormat = z.infer<typeof ProjectFormatSchema>;
 export type ProjectInput = z.input<typeof ProjectSchema>;
 export type SavedProject = z.infer<typeof SavedProjectSchema>;
 export type SavedProjectInput = z.input<typeof SavedProjectSchema>;

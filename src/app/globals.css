@@ -29,6 +29,11 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+.project-preview-canvas {
+  width: min(100%, 720px);
+  max-height: min(78vh, 720px);
+}
+
 button,
 input {
   font: inherit;
