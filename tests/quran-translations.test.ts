@@ -10,13 +10,13 @@ function mockQuranEncFetch() {
     const url = String(input);
     if (url.includes("translations/list")) {
       metadataCalls += 1;
-      return Response.json([{ key: "english_saheeh", version: "1.0.9" }]);
+      return Response.json({ translations: [{ key: "english_saheeh", version: "1.0.9" }] });
     }
     surahCalls += 1;
-    return Response.json([
-      { sura: 93, aya: 1, translation: "By the morning brightness" },
-      { sura: 93, aya: 2, translation: "And [by] the night when it covers with darkness" },
-    ]);
+    return Response.json({ result: [
+      { sura: "93", aya: "1", translation: "By the morning brightness" },
+      { sura: "93", aya: "2", translation: "And [by] the night when it covers with darkness" },
+    ] });
   };
   return { fetchImpl, calls: () => ({ surahCalls, metadataCalls }) };
 }

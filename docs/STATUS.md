@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Restore Saheeh International translation display
+
+Complete:
+
+- Exact root cause: QuranEnc’s live surah endpoint returns `{ result: [...] }` and string ayah numbers, while the provider expected a bare array with numeric ayah values. Its metadata endpoint likewise returns `{ translations: [...] }`, so live provider responses were rejected as invalid and resolved to `null`.
+- The client also created caption segments from local Arabic before translation enrichment and never updated their translation field. The preview required that stale segment field, making translation invisible even after content enrichment.
+- QuranEnc `english_saheeh` now parses the live response shape, converts ayah strings to numbers, maps by surah-local ayah number to `verseKey`, caches each surah, and reuses concurrent requests. Arabic remains sourced locally and is unaffected by provider failure.
+- Translation enrichment updates caption state; split segments retain their parent `verseKeys` and full parent translation without inventing sub-verse text. Preview visibility is controlled independently by the Show translation toggle.
+- Added opt-in runtime verification: `npm run check:translation:live` confirms non-empty Saheeh text for 93:1 without Quran Foundation credentials.
+
+Manual retest still required: run the live check and exercise a recognized Surah 93 clip in the browser, including toggling translation off/on and splitting a long ayah.
+
 ## Current milestone: Saheeh International translation provider
 
 Complete:

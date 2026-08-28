@@ -54,6 +54,14 @@ export type CaptionSegment = {
   };
 };
 
+/** Translation remains attached to the parent verse when Arabic is visually split. */
+export function translationForCaptionSegment(
+  segment: Pick<CaptionSegment, "verseKeys">,
+  content: Readonly<Record<string, QuranVerseContent | undefined>>,
+): string | null {
+  return segment.verseKeys.map((verseKey) => content[verseKey]?.translation ?? null).find(Boolean) ?? null;
+}
+
 export const DEFAULT_MAX_WORDS_PER_SEGMENT = 8;
 
 function words(value: string): string[] {
@@ -121,7 +129,7 @@ export function splitCaptionSegment(segment: CaptionSegment, boundary: number): 
     startMs,
     endMs,
     arabic: verseWords.slice(start, end).join(" "),
-    translation: null,
+    translation: segment.translation,
     transliteration: null,
     wordStart: segment.wordStart + start,
     wordEnd: segment.wordStart + end,
@@ -141,7 +149,7 @@ function mergeSegments(left: CaptionSegment, right: CaptionSegment): CaptionSegm
     verseKeys: unique([...left.verseKeys, ...right.verseKeys]),
     endMs: Math.max(left.endMs, right.endMs),
     arabic: `${left.arabic} ${right.arabic}`.trim(),
-    translation: null,
+    translation: left.translation ?? right.translation,
     transliteration: null,
     wordEnd: right.wordEnd,
     wordCount: left.wordCount + right.wordCount,

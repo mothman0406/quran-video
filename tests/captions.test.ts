@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { createCaptionSegments, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, splitCaptionSegment } from "../src/lib/editor/captions.ts";
+import { createCaptionSegments, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, splitCaptionSegment, translationForCaptionSegment } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -29,6 +29,21 @@ test("splits long ayat only at Quran word boundaries with monotonic derived timi
   assert.equal(segments[0].endMs <= segments[1].startMs, true);
   assert.equal(segments[1].endMs <= segments[2].startMs, true);
   assert.equal(segments.every((segment) => segment.verseKeys.join() === "93:1"), true);
+});
+
+test("translation survives editor conversion and long-ayah splitting through the parent verse key", () => {
+  const segments = createCaptionSegments([alignment], content, 3);
+  assert.equal(translationForCaptionSegment(segments[1], content), "By the morning brightness");
+  assert.equal(segments[1].translation, null);
+  const split = splitCaptionSegment(createCaptionSegments([alignment], content, 99)[0], 3);
+  assert.equal(split.every((segment) => segment.verseKeys.includes("93:1")), true);
+  assert.equal(split.every((segment) => segment.translation === "By the morning brightness"), true);
+});
+
+test("translation visibility is independent from translation availability", () => {
+  assert.equal(DEFAULT_TYPOGRAPHY.translationVisible, true);
+  assert.equal({ ...DEFAULT_TYPOGRAPHY, translationVisible: false }.translationVisible, false);
+  assert.equal(content["93:1"].translation, "By the morning brightness");
 });
 
 test("split and merge round-trip preserves canonical Arabic and source identity", () => {

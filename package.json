@@ -8,6 +8,7 @@
     "build": "next build --webpack",
     "test": "node --experimental-strip-types --test",
     "recognize": "node --experimental-strip-types scripts/recognize.ts",
+    "check:translation:live": "LIVE_TRANSLATION_CHECK=1 node --experimental-strip-types scripts/check-translation.ts",
     "start": "next start",
     "lint": "eslint"
   },

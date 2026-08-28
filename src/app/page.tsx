@@ -68,6 +68,10 @@ export default function Home() {
         if (item.status !== "ready" || !translation) return [key, item];
         return [key, { ...item, verse: { ...item.verse, translation: translation.text, translationMetadata: translation.metadata } }];
       })));
+      setSegments((current) => current.map((segment) => {
+        const translation = segment.verseKeys.map((key) => payload.translations?.[key]?.text ?? null).find(Boolean) ?? null;
+        return translation ? { ...segment, translation } : segment;
+      }));
     } catch { /* Arabic remains available when translation enrichment fails. */ }
   }
 
@@ -104,7 +108,7 @@ export default function Home() {
   }
 
   function updateTime(event: SyntheticEvent<HTMLVideoElement>) { setCurrentTimeMs(event.currentTarget.currentTime * 1000); }
-  const active = captionForPlaybackTime(segments, currentTimeMs); const rawActiveContent = active ? content[active.verseKeys[0]] : null; const activeContent = rawActiveContent?.status === "ready" && active?.translation && !typography.translationVisible ? { ...rawActiveContent, verse: { ...rawActiveContent.verse, translation: null } } : rawActiveContent; const busy = busyStages.includes(stage);
+  const active = captionForPlaybackTime(segments, currentTimeMs); const rawActiveContent = active ? content[active.verseKeys[0]] : null; const activeContent = rawActiveContent; const busy = busyStages.includes(stage);
   const selectedIndex = segments.findIndex((segment) => segment.id === selectedSegmentId); const selectedSegment = selectedIndex >= 0 ? segments[selectedIndex] : null;
   const styleText = (kind: "arabic" | "translation") => { const outline = kind === "arabic" ? typography.arabicOutlineEnabled : typography.translationOutlineEnabled; const width = kind === "arabic" ? typography.arabicOutlineWidth : typography.translationOutlineWidth; const color = kind === "arabic" ? typography.arabicOutlineColor : typography.translationOutlineColor; const shadow = kind === "arabic" ? typography.arabicShadowEnabled : typography.translationShadowEnabled; const blur = kind === "arabic" ? typography.arabicShadowBlur : typography.translationShadowBlur; return { WebkitTextStroke: outline ? `${width}px ${color}` : "0 transparent", textShadow: shadow ? `0 2px ${blur}px rgba(0,0,0,0.65)` : "none" }; };
   const updateTypography = <K extends keyof Typography>(key: K, value: Typography[K]) => setTypography((current) => ({ ...current, [key]: value }));

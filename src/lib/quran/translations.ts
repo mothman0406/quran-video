@@ -8,8 +8,10 @@ export type QuranTranslation = { text: string; metadata: QuranTranslationMetadat
 const QURANENC_BASE_URL = "https://quranenc.com/api/v1";
 const CACHE_TTL_MS = 10 * 60 * 1000;
 type CacheEntry<T> = { value: T; expiresAt: number };
-type QuranEncAya = { sura?: number; aya?: number; translation?: string };
+type QuranEncAya = { sura?: number | string; aya?: number | string; translation?: string };
 type QuranEncTranslation = { key?: string; version?: string; title?: string; language_iso_code?: string };
+type QuranEncSurahResponse = { result?: QuranEncAya[] };
+type QuranEncMetadataResponse = { translations?: QuranEncTranslation[] };
 
 const surahCache = new Map<string, CacheEntry<Map<number, QuranEncAya>>>();
 const surahRequests = new Map<string, Promise<Map<number, QuranEncAya>>>();
@@ -20,15 +22,20 @@ function sourceMetadata(version?: string): QuranTranslationMetadata {
   return { edition: "Saheeh International", source: "quranenc", translationKey: DEFAULT_TRANSLATION_KEY, ...(version ? { version } : {}) };
 }
 
+function translationDebug(event: string, details: Record<string, string | number | boolean | undefined>) {
+  if (process.env.QURAN_TRANSLATION_DEBUG === "1") console.debug(`[quran-translation] ${event}`, details);
+}
+
 async function getMetadata(fetchImpl: typeof fetch): Promise<QuranEncTranslation[]> {
   if (metadataCache && metadataCache.expiresAt > Date.now()) return metadataCache.value;
   if (metadataRequest) return metadataRequest;
   metadataRequest = fetchImpl(`${QURANENC_BASE_URL}/translations/list/en?localization=en`)
     .then(async (response) => {
+      translationDebug("metadata-response", { status: response.status });
       if (!response.ok) throw new Error("QuranEnc translation metadata unavailable.");
       const payload = (await response.json()) as unknown;
-      if (!Array.isArray(payload)) throw new Error("Invalid QuranEnc translation metadata.");
-      const value = payload as QuranEncTranslation[];
+      const value = (payload as QuranEncMetadataResponse).translations;
+      if (!Array.isArray(value)) throw new Error("Invalid QuranEnc translation metadata.");
       metadataCache = { value, expiresAt: Date.now() + CACHE_TTL_MS };
       return value;
     }).finally(() => { metadataRequest = null; });
@@ -43,10 +50,15 @@ async function getSurah(surahNumber: number, fetchImpl: typeof fetch): Promise<M
   if (pending) return pending;
   const request = fetchImpl(`${QURANENC_BASE_URL}/translation/sura/${DEFAULT_TRANSLATION_KEY}/${surahNumber}`)
     .then(async (response) => {
+      translationDebug("surah-response", { surahNumber, status: response.status });
       if (!response.ok) throw new Error("QuranEnc translation unavailable.");
       const payload = (await response.json()) as unknown;
-      if (!Array.isArray(payload)) throw new Error("Invalid QuranEnc translation response.");
-      const value = new Map((payload as QuranEncAya[]).filter((aya) => Number.isInteger(aya.aya)).map((aya) => [aya.aya!, aya]));
+      const rows = (payload as QuranEncSurahResponse).result;
+      if (!Array.isArray(rows)) throw new Error("Invalid QuranEnc translation response.");
+      const value = new Map(rows.flatMap((aya) => {
+        const ayahNumber = Number(aya.aya);
+        return Number.isInteger(ayahNumber) ? [[ayahNumber, aya] as const] : [];
+      }));
       surahCache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
       return value;
     }).finally(() => { surahRequests.delete(key); });
@@ -65,10 +77,12 @@ export async function getTranslation(verseKey: string, translationId: Translatio
     const [surah, metadata] = await Promise.all([getSurah(parsed.surahNumber, fetchImpl), getMetadata(fetchImpl).catch(() => [])]);
     const aya = surah.get(parsed.ayahNumber);
     const text = preserveTranslationText(aya?.translation);
+    translationDebug("verse-result", { verseKey, provider: "quranenc", parsed: Boolean(text), reason: text ? undefined : "translation text missing" });
     if (!text) return null;
     const version = metadata.find((item) => item.key === DEFAULT_TRANSLATION_KEY)?.version;
     return { text, metadata: sourceMetadata(version) };
-  } catch {
+  } catch (error) {
+    translationDebug("failure", { verseKey, provider: "quranenc", reason: error instanceof Error ? error.message : "unknown error" });
     return null;
   }
 }
