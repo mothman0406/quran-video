@@ -1,9 +1,10 @@
 import type { QuranVerseContent } from "../quran/content.ts";
 import type { VerseAlignment } from "./recognition.ts";
 import type { z } from "zod";
-import type { TypographySchema } from "../schemas/project.ts";
+import type { CaptionBackgroundSchema, TypographySchema } from "../schemas/project.ts";
 
 export type Typography = z.infer<typeof TypographySchema>;
+export type CaptionBackground = z.infer<typeof CaptionBackgroundSchema>;
 
 export const DEFAULT_TYPOGRAPHY: Typography = {
   quranStyle: "uthmani",
@@ -37,8 +38,41 @@ export const DEFAULT_TYPOGRAPHY: Typography = {
   transliterationVisible: false,
 };
 
+export const DEFAULT_CAPTION_BACKGROUND: CaptionBackground = {
+  enabled: false,
+  color: "#10221d",
+  opacity: 0,
+  cornerRadius: 16,
+  horizontalPadding: 20,
+  verticalPadding: 16,
+};
+
 export function resetTypography(): Typography {
   return { ...DEFAULT_TYPOGRAPHY };
+}
+
+export function resetCaptionBackground(): CaptionBackground {
+  return { ...DEFAULT_CAPTION_BACKGROUND };
+}
+
+function hexToRgba(color: string, opacity: number): string {
+  const value = color.replace("#", "");
+  const hex = value.length === 3 ? value.split("").map((part) => `${part}${part}`).join("") : value;
+  if (!/^[\da-f]{6}$/i.test(hex)) return "transparent";
+  const [red, green, blue] = [0, 2, 4].map((index) => Number.parseInt(hex.slice(index, index + 2), 16));
+  return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
+}
+
+export function captionBackgroundStyle(background: CaptionBackground): {
+  backgroundColor: string;
+  borderRadius: string;
+  padding: string;
+} {
+  return {
+    backgroundColor: background.enabled ? hexToRgba(background.color, background.opacity) : "transparent",
+    borderRadius: `${background.cornerRadius}px`,
+    padding: `${background.verticalPadding}px ${background.horizontalPadding}px`,
+  };
 }
 
 export type CaptionTimingSource = "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "derived";

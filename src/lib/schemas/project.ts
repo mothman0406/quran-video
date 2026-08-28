@@ -66,6 +66,15 @@ export const CaptionPositioningSchema = z.strictObject({
   translationGapPx: z.number().int().nonnegative(),
 });
 
+export const CaptionBackgroundSchema = z.strictObject({
+  enabled: z.boolean(),
+  color: z.string().min(1),
+  opacity: z.number().finite().min(0).max(1),
+  cornerRadius: z.number().finite().nonnegative(),
+  horizontalPadding: z.number().finite().nonnegative(),
+  verticalPadding: z.number().finite().nonnegative(),
+});
+
 export const TypographySchema = z.strictObject({
   quranStyle: z.enum(["madinah-qcf", "uthmani", "indopak", "kfgqpc"]),
   arabicFontFamily: z.string().min(1),
@@ -114,6 +123,7 @@ export const ProjectSchema = z.strictObject({
   captionSegments: z.array(CaptionSegmentSchema),
   captions: CaptionVisibilitySchema,
   positioning: CaptionPositioningSchema,
+  captionBackground: CaptionBackgroundSchema,
   typography: TypographySchema,
   transitionSettings: TransitionSettingsSchema,
   createdAt: z.string().min(1),

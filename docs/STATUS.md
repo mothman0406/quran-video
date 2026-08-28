@@ -1,5 +1,13 @@
 # Status
 
+## Current milestone: Configurable caption background
+
+Complete:
+
+- Removed the hardcoded forest-green caption fill and added independent background enabled, color, opacity, corner radius, and padding state with transparent defaults.
+- Arabic/translation remain in one linked preview wrapper; background reset does not alter text outline settings.
+- Added caption background defaults, style, reset, and linked-translation regression tests.
+
 ## Current milestone: Restore Saheeh International translation display
 
 Complete:

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { createCaptionSegments, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetTypography, splitCaptionSegment, translationForCaptionSegment } from "../src/lib/editor/captions.ts";
+import { captionBackgroundStyle, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetCaptionBackground, resetTypography, splitCaptionSegment, translationForCaptionSegment } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -103,4 +103,33 @@ test("reset restores the complete typography defaults", () => {
   assert.notEqual(reset, DEFAULT_TYPOGRAPHY);
   assert.equal(reset.arabicOutlineEnabled, false);
   assert.equal(reset.translationOutlineEnabled, false);
+});
+
+test("caption background defaults to disabled and transparent", () => {
+  assert.equal(DEFAULT_CAPTION_BACKGROUND.enabled, false);
+  assert.equal(captionBackgroundStyle(DEFAULT_CAPTION_BACKGROUND).backgroundColor, "transparent");
+});
+
+test("enabling caption background renders its independent color and opacity", () => {
+  const enabled = { ...DEFAULT_CAPTION_BACKGROUND, enabled: true, color: "#336699", opacity: 0.4 };
+  assert.equal(captionBackgroundStyle(enabled).backgroundColor, "rgba(51, 102, 153, 0.4)");
+  assert.equal(captionBackgroundStyle({ ...enabled, opacity: 0 }).backgroundColor, "rgba(51, 102, 153, 0)");
+  assert.equal(DEFAULT_TYPOGRAPHY.arabicOutlineEnabled, false);
+});
+
+test("disabling caption background removes its fill without changing text outline", () => {
+  const background = { ...DEFAULT_CAPTION_BACKGROUND, enabled: false, color: "#ff0000", opacity: 1 };
+  assert.equal(captionBackgroundStyle(background).backgroundColor, "transparent");
+  assert.equal({ ...DEFAULT_TYPOGRAPHY, arabicOutlineEnabled: true }.arabicOutlineEnabled, true);
+});
+
+test("caption background reset restores transparent defaults", () => {
+  assert.deepEqual(resetCaptionBackground(), DEFAULT_CAPTION_BACKGROUND);
+  assert.notEqual(resetCaptionBackground(), DEFAULT_CAPTION_BACKGROUND);
+});
+
+test("translation stays in the same linked caption segment container", () => {
+  const segment = { verseKeys: ["93:1"] };
+  const content = { "93:1": { translation: "By the morning brightness." } } as never;
+  assert.equal(translationForCaptionSegment(segment, content), "By the morning brightness.");
 });
