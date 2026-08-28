@@ -99,6 +99,15 @@ export function stripTranslationMarkup(value: string | null | undefined): string
   return withoutTags.replace(/&amp;/g, "&").replace(/&quot;/g, '"').trim() || null;
 }
 
+/** Removes only end-of-ayah markers for presentation; the source text is unchanged. */
+export function stripAyahMarkers(value: string): string {
+  return value
+    .replace(/\s*\u06dd\s*[0-9٠-٩۰-۹]*/gu, "")
+    .replace(/[0-9٠-٩۰-۹]+\s*\u06dd/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
 export function buildVerseContent(input: {
   verseKey: string;
   pageNumber?: number | null;
@@ -136,6 +145,11 @@ export function buildVerseContent(input: {
 /** Presentation-only whitespace cleanup; translation wording and markup are not rewritten. */
 export function preserveTranslationText(value: string | null | undefined): string | null {
   return value?.trim() || null;
+}
+
+/** Returns display-safe Arabic without changing the canonical stored representation. */
+export function quranDisplayText(verse: QuranVerseContent, script: QuranScript = "uthmani"): string {
+  return stripAyahMarkers(verse.arabic[script]);
 }
 
 /** Selects a font/text pairing without pretending page or IndoPak fonts use Unicode Uthmani text. */

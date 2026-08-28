@@ -114,6 +114,8 @@ export const TransitionSettingsSchema = z.strictObject({
   type: z.enum(["none", "fade"]),
   fadeInMs: z.number().int().nonnegative(),
   fadeOutMs: z.number().int().nonnegative(),
+  blurFadeEnabled: z.boolean().default(false),
+  blurFadeMaxPx: z.number().finite().nonnegative().default(12),
 });
 
 /** Styling-only state used by built-in and browser-local caption styles. */

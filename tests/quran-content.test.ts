@@ -8,6 +8,7 @@ import {
   isQuranScript,
   parseVerseKey,
   quranFontDefinitions,
+  quranDisplayText,
   stripTranslationMarkup,
 } from "../src/lib/quran/content.ts";
 
@@ -32,6 +33,13 @@ test("normalizes API fields into every supported Quran script", () => {
   assert.equal(verse.translation, "By the morning brightness1");
   assert.equal(verse.translationEdition, "Saheeh International");
   assert.equal(verse.font.source.includes("quran.foundation"), true);
+});
+
+test("derives marker-free display text without changing canonical source text", () => {
+  const markedText = "وَٱلضُّحَىٰ ۝١";
+  const verse = buildVerseContent({ verseKey: "93:1", textUthmani: markedText });
+  assert.equal(verse.arabic.uthmani, markedText);
+  assert.equal(quranDisplayText(verse), "وَٱلضُّحَىٰ");
 });
 
 test("exposes the supported font profiles without local font assets", () => {

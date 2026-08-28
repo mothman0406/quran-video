@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { captionBackgroundStyle, captionOpacityAtTime, captionVisualStatesAtTime, clampNormalizedPosition, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -29,6 +29,16 @@ test("splits long ayat only at Quran word boundaries with monotonic derived timi
   assert.equal(segments[0].endMs <= segments[1].startMs, true);
   assert.equal(segments[1].endMs <= segments[2].startMs, true);
   assert.equal(segments.every((segment) => segment.verseKeys.join() === "93:1"), true);
+});
+
+test("verse numbers are optional presentation metadata and never part of Arabic text", () => {
+  const marked = { "93:1": { ...content["93:1"], arabic: { ...content["93:1"].arabic, uthmani: "وَالضُّحَىٰ ۝١" } } };
+  const segments = createCaptionSegments([alignment], marked, 99);
+  assert.equal(DEFAULT_CAPTION_PRESENTATION.showVerseNumber, false);
+  assert.equal(segments[0].arabic, "وَالضُّحَىٰ");
+  assert.equal(marked["93:1"].arabic.uthmani, "وَالضُّحَىٰ ۝١");
+  assert.equal(captionVerseNumberLabel(segments[0]), "1");
+  assert.equal(splitCaptionSegment(segments[0], 1)[0].arabic, segments[0].arabic);
 });
 
 test("short ayat stay intact and automatic chunks avoid a tiny tail", () => {
@@ -173,20 +183,36 @@ test("split and merge remain valid after manual timing edits", () => {
 });
 
 test("default transition settings use a restrained 225ms fade", () => {
-  assert.deepEqual(DEFAULT_TRANSITION_SETTINGS, { type: "fade", fadeInMs: 225, fadeOutMs: 225 });
+  assert.deepEqual(DEFAULT_TRANSITION_SETTINGS, { type: "fade", fadeInMs: 225, fadeOutMs: 225, blurFadeEnabled: false, blurFadeMaxPx: 12 });
   assert.deepEqual(resetTransitionSettings(), DEFAULT_TRANSITION_SETTINGS);
   assert.notEqual(resetTransitionSettings(), DEFAULT_TRANSITION_SETTINGS);
 });
 
-test("fade opacity is deterministic at the start, middle, and end of a segment", () => {
+test("fade interpolation is continuous across every segment phase", () => {
   const segment = { startMs: 1_000, endMs: 2_000 };
   assert.equal(captionOpacityAtTime(segment, 1_000), 0);
   assert.equal(captionOpacityAtTime(segment, 1_112), 112 / 225);
   assert.equal(captionOpacityAtTime(segment, 1_500), 1);
-  assert.equal(captionOpacityAtTime(segment, 1_888), 112 / 225);
+  assert.equal(captionOpacityAtTime(segment, 1_775), 1);
+  assert.equal(captionOpacityAtTime(segment, 1_887), 113 / 225);
   assert.equal(captionOpacityAtTime(segment, 2_000), 0);
+  assert.equal(captionOpacityAtTime(segment, 999), 0);
   // A seek directly into the fade region is a pure calculation, not a timer.
   assert.equal(captionOpacityAtTime(segment, 1_112), captionOpacityAtTime(segment, 1_112));
+});
+
+test("transition interpolation handles zero-duration fades and smooth blur", () => {
+  const segment = { startMs: 1_000, endMs: 2_000 };
+  const zero = { ...DEFAULT_TRANSITION_SETTINGS, fadeInMs: 0, fadeOutMs: 0 };
+  assert.equal(captionTransitionAtTime(segment, 999, zero).opacity, 0);
+  assert.equal(captionTransitionAtTime(segment, 1_000, zero).opacity, 1);
+  assert.equal(captionTransitionAtTime(segment, 1_999, zero).opacity, 1);
+  assert.equal(captionTransitionAtTime(segment, 2_000, zero).opacity, 0);
+  const blurred = { ...DEFAULT_TRANSITION_SETTINGS, blurFadeEnabled: true, blurFadeMaxPx: 12 };
+  assert.equal(captionTransitionAtTime(segment, 1_000, blurred).blurPx, 12);
+  assert.equal(captionTransitionAtTime(segment, 1_112, blurred).blurPx, 12 * (1 - 112 / 225));
+  assert.equal(captionTransitionAtTime(segment, 1_500, blurred).blurPx, 0);
+  assert.equal(captionTransitionAtTime(segment, 1_888, blurred).blurPx, 12 * (1 - 112 / 225));
 });
 
 test("none transition is fully opaque only inside the editable segment", () => {
@@ -204,6 +230,7 @@ test("touching segments crossfade visually without overlapping editable timing",
   const states = captionVisualStatesAtTime([first, second], 1_050, DEFAULT_TRANSITION_SETTINGS);
   assert.deepEqual(states.map((state) => state.segment.id), ["a", "b"]);
   assert.equal(states.every((state) => state.opacity > 0 && state.opacity < 1), true);
+  assert.equal(states[0].opacity + states[1].opacity, 1);
   assert.equal(first.endMs, second.startMs);
 });
 

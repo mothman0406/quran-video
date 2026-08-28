@@ -1,3 +1,4 @@
+import { quranDisplayText } from "../quran/content.ts";
 import type { QuranVerseContent } from "../quran/content.ts";
 import type { VerseAlignment } from "./recognition.ts";
 import type { z } from "zod";
@@ -7,6 +8,11 @@ export type Typography = z.infer<typeof TypographySchema>;
 export type CaptionBackground = z.infer<typeof CaptionBackgroundSchema>;
 export type CaptionPositioning = z.infer<typeof CaptionPositioningSchema>;
 export type TransitionSettings = z.infer<typeof TransitionSettingsSchema>;
+export type CaptionPresentationSettings = { showVerseNumber: boolean };
+
+export const DEFAULT_CAPTION_PRESENTATION: CaptionPresentationSettings = {
+  showVerseNumber: false,
+};
 
 export const DEFAULT_CAPTION_POSITIONING: CaptionPositioning = {
   anchor: "bottom",
@@ -64,6 +70,8 @@ export const DEFAULT_TRANSITION_SETTINGS: TransitionSettings = {
   type: "fade",
   fadeInMs: 225,
   fadeOutMs: 225,
+  blurFadeEnabled: false,
+  blurFadeMaxPx: 12,
 };
 
 export function resetTypography(): Typography {
@@ -76,6 +84,10 @@ export function resetCaptionBackground(): CaptionBackground {
 
 export function resetTransitionSettings(): TransitionSettings {
   return { ...DEFAULT_TRANSITION_SETTINGS };
+}
+
+export function captionVerseNumberLabel(segment: Pick<CaptionSegment, "verseKeys">): string {
+  return segment.verseKeys.map((verseKey) => verseKey.split(":")[1] ?? verseKey).join(", ");
 }
 
 export function clampNormalizedPosition(value: number, minimum = 0.06, maximum = 0.94): number {
@@ -128,6 +140,41 @@ function clampOpacity(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
+function adjacentTransitionRange(
+  segment: Pick<CaptionSegment, "endMs">,
+  next: Pick<CaptionSegment, "startMs">,
+  settings: TransitionSettings,
+): { startMs: number; endMs: number } | null {
+  if (settings.type !== "fade" || settings.fadeInMs <= 0 || settings.fadeOutMs <= 0) return null;
+  if (next.startMs - segment.endMs > Math.max(settings.fadeInMs, settings.fadeOutMs)) return null;
+  const startMs = segment.endMs - settings.fadeOutMs;
+  const endMs = next.startMs + settings.fadeInMs;
+  return endMs > startMs ? { startMs, endMs } : null;
+}
+
+export type CaptionTransitionState = {
+  opacity: number;
+  blurPx: number;
+};
+
+function blurAtOpacity(opacity: number, settings: TransitionSettings): number {
+  return settings.blurFadeEnabled ? settings.blurFadeMaxPx * (1 - opacity) : 0;
+}
+
+/** Pure visual interpolation tied to absolute video time. */
+export function captionTransitionAtTime(
+  segment: Pick<CaptionSegment, "startMs" | "endMs">,
+  timeMs: number,
+  settings: TransitionSettings = DEFAULT_TRANSITION_SETTINGS,
+): CaptionTransitionState {
+  if (!Number.isFinite(timeMs) || timeMs < segment.startMs || timeMs >= segment.endMs) return { opacity: 0, blurPx: 0 };
+  if (settings.type === "none") return { opacity: 1, blurPx: 0 };
+  const fadeIn = settings.fadeInMs > 0 ? clampOpacity((timeMs - segment.startMs) / settings.fadeInMs) : 1;
+  const fadeOut = settings.fadeOutMs > 0 ? clampOpacity((segment.endMs - timeMs) / settings.fadeOutMs) : 1;
+  const opacity = Math.min(fadeIn, fadeOut);
+  return { opacity, blurPx: blurAtOpacity(opacity, settings) };
+}
+
 /**
  * Returns the deterministic opacity for a segment at a video timestamp.
  * It intentionally has no timers or playback state, so seeking is equivalent
@@ -138,16 +185,13 @@ export function captionOpacityAtTime(
   timeMs: number,
   settings: TransitionSettings = DEFAULT_TRANSITION_SETTINGS,
 ): number {
-  if (!Number.isFinite(timeMs) || timeMs < segment.startMs || timeMs >= segment.endMs) return 0;
-  if (settings.type === "none") return 1;
-  const fadeIn = settings.fadeInMs > 0 ? clampOpacity((timeMs - segment.startMs) / settings.fadeInMs) : 1;
-  const fadeOut = settings.fadeOutMs > 0 ? clampOpacity((segment.endMs - timeMs) / settings.fadeOutMs) : 1;
-  return Math.min(fadeIn, fadeOut);
+  return captionTransitionAtTime(segment, timeMs, settings).opacity;
 }
 
 export type CaptionVisualState<T extends { startMs: number; endMs: number }> = {
   segment: T;
   opacity: number;
+  blurPx: number;
 };
 
 /**
@@ -161,15 +205,20 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
   settings: TransitionSettings = DEFAULT_TRANSITION_SETTINGS,
 ): CaptionVisualState<T>[] {
   return segments.flatMap((segment, index) => {
-    let opacity = captionOpacityAtTime(segment, timeMs, settings);
+    const baseState = captionTransitionAtTime(segment, timeMs, settings);
+    let opacity = baseState.opacity;
+    let blurPx = baseState.blurPx;
+    const previous = segments[index - 1];
     const next = segments[index + 1];
-    const adjacent = settings.type === "fade" && next && next.startMs - segment.endMs <= Math.max(settings.fadeOutMs, settings.fadeInMs);
-    if (adjacent && settings.fadeOutMs > 0 && timeMs >= segment.endMs - settings.fadeOutMs && timeMs < segment.endMs + settings.fadeOutMs) {
-      // Start at the normal fade-out boundary, then carry the outgoing layer
-      // briefly past its editable end so an adjacent incoming layer can fade in.
-      opacity = clampOpacity((segment.endMs + settings.fadeOutMs - timeMs) / (settings.fadeOutMs * 2));
+    const incoming = previous ? adjacentTransitionRange(previous, segment, settings) : null;
+    const outgoing = next ? adjacentTransitionRange(segment, next, settings) : null;
+    if (incoming && timeMs >= incoming.startMs && timeMs < incoming.endMs) {
+      opacity = clampOpacity((timeMs - incoming.startMs) / (incoming.endMs - incoming.startMs));
+    } else if (outgoing && timeMs >= outgoing.startMs && timeMs < outgoing.endMs) {
+      opacity = clampOpacity((outgoing.endMs - timeMs) / (outgoing.endMs - outgoing.startMs));
     }
-    return opacity > 0 ? [{ segment, opacity }] : [];
+    blurPx = blurAtOpacity(opacity, settings);
+    return opacity > 0 ? [{ segment, opacity, blurPx }] : [];
   });
 }
 
@@ -284,7 +333,7 @@ export function createCaptionSegments(
   if (!Number.isInteger(maxWordsPerSegment) || maxWordsPerSegment < 1) throw new Error("maxWordsPerSegment must be a positive integer");
   return alignments.flatMap((alignment) => {
     const verse = content[alignment.verseKey];
-    const arabic = verse?.arabic.uthmani ?? "";
+    const arabic = verse ? quranDisplayText(verse) : "";
     const verseWords = words(arabic);
     if (!verseWords.length) return [];
     const chunks: CaptionSegment[] = [];

@@ -4,6 +4,8 @@
 
 Complete:
 
+- Fixed M6 regressions: the always-visible verse-key marker is now an independent, default-off presentation toggle, and Arabic display text strips only source ayah markers without mutating the canonical corpus.
+- Caption opacity and optional blur now derive from absolute video time in a memoized preview layer updated with `requestAnimationFrame`; seeking and pause apply the exact state immediately without page-wide frame renders.
 - Added editor transition state with deterministic `none` and `fade` opacity calculation from each editable `CaptionSegment` range. The default is a restrained 225 ms fade in/out, with controls and reset; adjacent segments can visually crossfade without overlapping stored timing.
 - Arabic, linked translation, and enabled caption backgrounds render from the same time-derived caption-layer opacity. Seeking/scrubbing computes the correct state directly from `currentTime`; no playback timers or interval loops are used.
 - Added styling-only `CaptionStyleSchema`, four editable built-in presets (Minimal, Classic Mushaf, Cinematic, Social), and browser-local custom styles with save, apply, rename, delete, and validated JSON loading. Local styles contain no video, Quran text, or recognition data.
