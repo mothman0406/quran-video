@@ -1,7 +1,26 @@
 import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "../editor/captions.ts";
 import type { ProjectFormat } from "../schemas/project.ts";
 
-export type ExportPhase = "preparing" | "rendering" | "finalizing";
+export type ExportPhase = "preparing" | "decoding" | "rendering" | "encoding" | "muxing" | "finalizing";
+
+export type LocalExportDiagnostics = {
+  sourceContainer: string;
+  sourceVideoCodec: string | null;
+  sourceAudioCodec: string | null;
+  sourceDurationSeconds: number;
+  sourceFps: number;
+  targetFps: number;
+  sourceHasAudio: boolean;
+  outputContainer: "mp4" | "webm";
+  outputVideoCodec: "avc" | "vp9";
+  outputAudioCodec: "aac" | "opus" | null;
+  renderedFrameCount: number;
+  expectedFrameCount: number;
+  outputDurationSeconds: number;
+  outputHasAudio: boolean;
+  elapsedSeconds: number;
+  effectiveRenderingFps: number;
+};
 
 export type LocalExportConfiguration = {
   format: ProjectFormat;
@@ -19,7 +38,7 @@ export type LocalExportRequest = LocalExportConfiguration & {
   onProgress?: (progress: { phase: ExportPhase; fraction: number }) => void;
 };
 
-export type LocalExportResult = { blob: Blob; fileName: string; mimeType: string };
+export type LocalExportResult = { blob: Blob; fileName: string; mimeType: string; diagnostics: LocalExportDiagnostics };
 
 export type LocalExportSupport = { supported: boolean; path: string; reason: string; mimeType?: string };
 
