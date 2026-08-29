@@ -220,3 +220,13 @@ M3B Quran-aware recognition normalization:
 - Candidate retrieval, passage scoring, and timestamp-token alignment now compare both forms. Orthographic score remains the floor and the recitation score is a bounded corroborating boost; existing thresholds and monotonic timing logic are unchanged. The UI receives original ASR surface tokens for matched-text display, never an internal normalized or recitation form.
 - Regression coverage keeps live 93:1–5, 6:74–77 reconstruction, unrelated-Arabic rejection, ambiguity handling, and bounded runtime. New unit and matcher tests cover connected wasl, sun-letter assimilation, gemination, hamza carrier ambiguity, and rejection of a short unrelated phrase.
 - Added `docs/RECOGNITION.md`: future evaluation should compare generic Whisper with a Quran-specific speech-to-phoneme/phonetic model on held-out Hafs recitations. No model was added or downloaded.
+## Current milestone: M8 — Optional account project sync
+
+Complete:
+
+- Added optional Supabase email/password sign up, sign in, and sign out UI without gating the local editor, recognition, export, or IndexedDB project save.
+- Added explicit `Save to Account`, cloud project listing/open/delete, stable project identity mapping, schema-versioned metadata payloads, and timestamp conflict warning with local/cloud choice.
+- Added a minimal `projects` migration with owner-derived `user_id`, Row Level Security, and no storage buckets. Source video, rendered exports, temporary blobs, and local Whisper models remain device-local.
+- Added environment variable examples only; no Supabase secrets are committed.
+
+Verification: targeted M8 tests pass; full test, typecheck, lint, build, and diff checks run at milestone handoff.
