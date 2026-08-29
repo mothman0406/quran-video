@@ -13,9 +13,9 @@
 - Processing or rendering may upload a temporary copy only when a server-side job requires it. The job owns that media and must delete it after success, failure, cancellation, or expiry; cleanup is required before the job is considered complete.
 - Rendered exports are streamed or returned as a one-time result for a browser download. Rendered exports are not retained as project assets by default.
 - “Save Project” is an explicit opt-in action. Saving persists only the lightweight `SavedProject` metadata/settings projection; it never persists source video bytes or rendered exports.
-- Reopening a saved project restores its metadata/settings and asks the user to reselect the original local video before preview, processing, or rendering can continue.
+- Reopening a saved project restores its metadata/settings and asks the user to reselect the original local video before preview, processing, or rendering can continue. IndexedDB stores the validated lightweight project record; editing is ephemeral until an explicit save, and refresh warns that unsaved work will be lost.
 
-The project schema is the handoff boundary between upload, recognition, editing, preview, and rendering. `ProjectSchema` may include local source-video metadata for the active browser session; `SavedProjectSchema` deliberately omits it. Temporary server media is a job concern, not project state.
+The project schema is the handoff boundary between upload, recognition, editing, preview, and rendering. `SavedProjectSchema` may include source filename, size, type, duration, and fingerprint metadata for re-selection verification, but never a `File`, `Blob`, `ArrayBuffer`, object URL, source bytes, or export bytes. Temporary server media is a job concern, not project state.
 
 ## Planned service boundaries
 
@@ -30,7 +30,7 @@ The project schema is the handoff boundary between upload, recognition, editing,
 - M6 adds `TransitionSettings` and styling-only `CaptionStyleSchema` state. Caption opacity is a pure function of editable segment timing, current video time, and transition settings, so direct seeking is deterministic. Adjacent segments may overlap only in preview layers during a short crossfade; their editable ranges remain non-overlapping. Built-in presets and browser-local custom styles are plain snapshots of typography, positioning, background, and transition state; they contain no source video or Quran/recognition data.
 - M6.5 keeps project format state as a validated `ProjectFormat` (`vertical` 1080×1920 by default, `landscape` 1920×1080, or `square` 1080×1080). The preview uses the selected project ratio while the source video remains cover-fit inside it. Caption coordinates stay normalized to the project canvas; format-aware bounds/defaults keep Arabic and linked or unlinked translation reachable. Safe-area definitions live in `src/lib/editor/formats.ts`; `SafeAreaOverlay` is pointer-transparent editor UI and is excluded from project/render data.
 - M7B productionizes the browser-local deterministic exporter. `src/lib/export/quality.ts`, `filename.ts`, `validation.ts`, and `lifecycle.ts` define quality, naming, preflight, and single-job boundaries. The editor passes an immutable configuration snapshot to Mediabunny/WebCodecs; output is capability-probed as MP4 H.264/AAC first, then WebM VP9/Opus, verified in memory, and downloaded only on explicit user action. No export blob or source bytes are persisted.
-- Supabase owns auth and explicitly saved project metadata/settings; it is not the default source-video or export store.
+- Supabase is a future optional sync boundary; this milestone uses only browser-local IndexedDB and does not add auth or cloud sync.
 - Stripe handles quotas and subscriptions after core editing/export works.
 
 Canonical Arabic is local-first and credential-free. Quran Foundation remains an optional enrichment boundary; secrets and access tokens never cross the route boundary.

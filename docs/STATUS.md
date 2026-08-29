@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Local project lifecycle
+
+Complete:
+
+- Added an explicit IndexedDB repository for lightweight saved project metadata. Save creates a stable project id and later saves update that record; no automatic permanent save is performed.
+- Added Saved/Unsaved changes state, Save Project, Open Project local listing, Discard, Delete saved project, and New Project actions with unsaved-change confirmation.
+- Opening restores alignments, caption segments, format, translation/style/positioning/background/transition settings, and asks for the original source video again. Filename, size, media type, and loaded duration are checked; recognition does not rerun automatically.
+- Added before-unload protection for meaningful unsaved edits. Refresh intentionally warns that ephemeral unsaved work will be lost; explicit saved metadata remains separate and local.
+- Added repository validation and regression tests rejecting media payloads, object URLs, source bytes, and export data. Delete removes only local metadata; source and export files remain on the device.
+
+Verification: targeted project-storage tests, full `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. Manual browser verification remains recommended for IndexedDB persistence and source mismatch/reselection flows.
+
 ## Current milestone: M7B — Productionized local deterministic exporter
 
 Complete:

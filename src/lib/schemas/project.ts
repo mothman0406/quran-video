@@ -6,9 +6,11 @@ const PositiveInteger = z.number().int().positive();
 export const SourceVideoSchema = z.strictObject({
   fileName: z.string().min(1),
   mimeType: z.string().min(1),
+  fileSize: PositiveNumber.optional(),
   durationSeconds: PositiveNumber.optional(),
   width: PositiveInteger.optional(),
   height: PositiveInteger.optional(),
+  fingerprint: z.string().min(1).optional(),
 });
 
 export const ProjectFormatSchema = z.strictObject({
@@ -25,9 +27,10 @@ export const VerseKeySchema = z.strictObject({
 });
 
 export const VerseAlignmentSchema = VerseKeySchema.extend({
-  startSeconds: PositiveNumber,
-  endSeconds: PositiveNumber,
-  confidence: z.number().finite().min(0).max(1).optional(),
+  verseKey: z.string().regex(/^\d{1,3}:\d{1,3}$/),
+  startMs: PositiveNumber,
+  endMs: PositiveNumber,
+  confidence: z.number().finite().min(0).max(1),
   timingEvidence: z.strictObject({
     start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation"]) }),
     end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation"]) }),
@@ -141,12 +144,13 @@ export const ProjectSchema = z.strictObject({
   captionBackground: CaptionBackgroundSchema,
   typography: TypographySchema,
   transitionSettings: TransitionSettingsSchema,
+  showVerseNumber: z.boolean().default(false),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 });
 
-/** Durable project data excludes the browser-local source video. */
-export const SavedProjectSchema = ProjectSchema.omit({ sourceVideo: true });
+/** Durable project data includes source metadata only; the browser-local File is never part of this schema. */
+export const SavedProjectSchema = ProjectSchema;
 
 export type Project = z.infer<typeof ProjectSchema>;
 export type ProjectFormat = z.infer<typeof ProjectFormatSchema>;
