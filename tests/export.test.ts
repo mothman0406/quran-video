@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createLocalExportConfiguration } from "../src/lib/export/config.ts";
 import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, captionVisualStatesAtTime } from "../src/lib/editor/captions.ts";
-import { DEFAULT_PROJECT_FORMAT, SAFE_AREA_OVERLAY_METADATA } from "../src/lib/editor/formats.ts";
+import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, SAFE_AREA_OVERLAY_METADATA, mediabunnyVideoTransform, sourceVideoFitForMediabunny, sourceVideoFitForPreview } from "../src/lib/editor/formats.ts";
 import { audioOutputIsValid, selectOutputProfile, sourceAudioRequiresOutput } from "../src/lib/export/output.ts";
 import { DEFAULT_LOCAL_RENDERER_ID } from "../src/lib/export/offline-webcodecs.ts";
 import { coverPlacement, durationMatches, frameTimeline, onceCleanup, resolveExportFrameRate } from "../src/lib/export/timeline.ts";
@@ -61,7 +61,20 @@ test("output selection requires audio whenever the source has audio", () => {
 
 test("export composition uses source cover mapping and excludes safe-area overlays", () => {
   assert.deepEqual(coverPlacement(1920, 1080, 1080, 1920), { x: -1166.6666666666665, y: 0, width: 3413.333333333333, height: 1920 });
+  assert.equal(sourceVideoFitForPreview(), "cover");
+  assert.equal(sourceVideoFitForMediabunny(), "cover");
   assert.equal(SAFE_AREA_OVERLAY_METADATA.exportable, false);
+});
+
+test("Mediabunny transforms include fit for every project canvas without stretching source video", () => {
+  for (const format of Object.values(PROJECT_FORMATS)) {
+    const transform = mediabunnyVideoTransform(format);
+    assert.deepEqual(transform, { width: format.width, height: format.height, fit: "cover" });
+    assert.notEqual(transform.fit, "fill");
+    assert.equal(format.width / format.height, PROJECT_FORMATS[format.preset].aspectRatio);
+    const placement = coverPlacement(1920, 1080, format.width, format.height);
+    assert.ok(Math.abs(placement.width / placement.height - 16 / 9) < 1e-12);
+  }
 });
 
 test("cancellation cleanup runs once and MediaRecorder is not the default export path", () => {

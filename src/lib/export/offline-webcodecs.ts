@@ -16,6 +16,7 @@ import {
   canEncodeVideo,
 } from "mediabunny";
 import { quranFontDefinitions } from "../quran/content.ts";
+import { mediabunnyVideoTransform, sourceVideoFitForMediabunny } from "../editor/formats.ts";
 import { drawExportCaptions } from "./caption-canvas.ts";
 import { audioOutputIsValid, selectOutputProfile } from "./output.ts";
 import { durationMatches, frameTimeline, onceCleanup, resolveExportFrameRate } from "./timeline.ts";
@@ -124,7 +125,7 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
       const context = canvas.getContext("2d"); if (!context) throw new Error("Canvas 2D compositing is unavailable.");
       const target = new BufferTarget();
       output = new Output({ format: profile.container === "mp4" ? new Mp4OutputFormat() : new WebMOutputFormat(), target });
-      const videoSource = new CanvasSource(canvas, { codec: profile.videoCodec, bitrate: 8_000_000, keyFrameInterval: 2, transform: { width: request.format.width, height: request.format.height } });
+      const videoSource = new CanvasSource(canvas, { codec: profile.videoCodec, bitrate: 8_000_000, keyFrameInterval: 2, transform: mediabunnyVideoTransform(request.format) });
       output.addVideoTrack(videoSource, { frameRate: targetFps });
       if (audioTrack && profile.audioCodec) {
         // Audio is appended from file packets/samples, never from an HTMLMediaElement stream.
@@ -137,7 +138,7 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
         const frame = timeline[renderedFrameCount]; if (!frame) break;
         try {
           context.clearRect(0, 0, canvas.width, canvas.height);
-          if (sample) sample.drawWithFit(context, { fit: "cover" });
+          if (sample) sample.drawWithFit(context, { fit: sourceVideoFitForMediabunny() });
           drawExportCaptions(context, request, frame.timestamp * 1_000, arabicFont);
           request.onProgress?.({ phase: "rendering", fraction: renderedFrameCount / timeline.length });
           request.onProgress?.({ phase: "encoding", fraction: renderedFrameCount / timeline.length });

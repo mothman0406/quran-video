@@ -11,10 +11,11 @@ Complete:
 - MP4 H.264/AAC is selected only after runtime codec capability checks. If unavailable, VP9/Opus WebM is selected; the filename and MIME type match the actual container. Compatible AAC/Opus input audio is packet-remuxed; other supported audio is decoded/re-encoded locally. The result is demuxed once more before download and export fails if a source containing audio produces no output audio.
 - The selected Quran font is loaded and verified with `document.fonts` before demuxing. Page-specific Madinah/QCF fonts are explicitly rejected instead of allowing fallback/corrupt glyphs. Frames and audio samples are released incrementally; cancellation disposes input/output resources through one cleanup boundary.
 - UI reports Preparing source, Decoding, Rendering captions, Encoding, Muxing audio/video, and Finalizing from deterministic timeline progress. A collapsible local diagnostics panel reports source/container/codecs/FPS/audio, output choice, frame counts, verified duration/audio, and effective render FPS. No media is uploaded.
+- Fixed the Mediabunny export transform validation error by centralizing the preview/export `cover` mapping and including `fit: "cover"` alongside every project canvas width and height. The 9:16, 16:9, and 1:1 paths preserve source aspect ratio through cover fitting.
 
 Worker note: the compositing module is isolated from the UI and takes only canvas context + immutable export request, so it can move to an `OffscreenCanvas` worker without changing caption math. This milestone keeps it on the main thread because `document.fonts` and the current canvas/font setup need browser verification together.
 
-Verification: targeted export tests and `npx tsc --noEmit` pass. Manual browser verification is still required with a short MP4/WebM fixture to measure actual codec availability, A/V sync, and output playback in a target browser. Source media never leaves the device.
+Verification: targeted export tests, `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. Manual browser verification is still required with a short MP4/WebM fixture to measure actual codec availability, A/V sync, and output playback in a target browser. Source media never leaves the device.
 
 ## Previous milestone: M6.5 — Multi-aspect-ratio preview and safe-area behavior
 

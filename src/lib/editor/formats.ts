@@ -14,7 +14,27 @@ export const PROJECT_FORMATS: Record<ProjectFormatPreset, ProjectFormatDefinitio
 export const DEFAULT_PROJECT_FORMAT: ProjectFormat = { preset: "vertical", width: 1080, height: 1920 };
 
 export const SAFE_AREA_OVERLAY_METADATA = { editorOnly: true, exportable: false } as const;
-export const DEFAULT_SOURCE_VIDEO_FIT = "cover" as const;
+
+export type SourceVideoFit = "cover" | "contain";
+
+const SOURCE_VIDEO_FIT_MAPPING: Record<SourceVideoFit, { preview: SourceVideoFit; mediabunny: SourceVideoFit }> = {
+  cover: { preview: "cover", mediabunny: "cover" },
+  contain: { preview: "contain", mediabunny: "contain" },
+};
+
+export const DEFAULT_SOURCE_VIDEO_FIT: SourceVideoFit = "cover";
+
+export function sourceVideoFitForPreview(fit: SourceVideoFit = DEFAULT_SOURCE_VIDEO_FIT): SourceVideoFit {
+  return SOURCE_VIDEO_FIT_MAPPING[fit].preview;
+}
+
+export function sourceVideoFitForMediabunny(fit: SourceVideoFit = DEFAULT_SOURCE_VIDEO_FIT): SourceVideoFit {
+  return SOURCE_VIDEO_FIT_MAPPING[fit].mediabunny;
+}
+
+export function mediabunnyVideoTransform(format: ProjectFormat) {
+  return { width: format.width, height: format.height, fit: sourceVideoFitForMediabunny() } as const;
+}
 
 export function projectFormatDefinition(format: ProjectFormat): ProjectFormatDefinition {
   return PROJECT_FORMATS[format.preset];
