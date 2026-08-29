@@ -1,6 +1,18 @@
 # Status
 
-## Current milestone: M7A — Client-side video export technical spike
+## Current milestone: M7B — Productionized local deterministic exporter
+
+Complete:
+
+- Added Draft, Standard, and High quality presets with centralized bitrate mapping; Standard is the default and output dimensions remain tied to the selected 9:16, 16:9, or 1:1 project format.
+- Added a normal export panel showing format, quality, resolution, and the capability-selected MP4 H.264/AAC or WebM VP9/Opus output before rendering. Successful files remain in memory only until the user downloads them.
+- Export jobs snapshot the source-independent editor configuration at start, reject duplicate jobs, support cancellation, report deterministic progress/elapsed time/derived ETA, and retain the live editor/source state on failure.
+- Added input/output validation, safe Quran passage filenames, verified duration/audio/frame coverage/non-empty output, and user-facing retryable errors with detailed diagnostics retained for development.
+- Safe-area guides remain editor-only and are excluded from the render configuration. Source timing remains deterministic and independent of tab visibility or real-time playback.
+
+Verification: targeted export tests, `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. Manual browser verification with audio fixtures remains required for codec availability and playback coverage.
+
+## Previous milestone: M7A — Client-side video export technical spike
 
 Complete:
 

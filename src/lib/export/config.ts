@@ -22,3 +22,6 @@ export function createLocalExportConfiguration(input: {
     showVerseNumber: input.showVerseNumber,
   };
 }
+
+/** Creates the immutable render snapshot used by an export job. */
+export const snapshotLocalExportConfiguration = createLocalExportConfiguration;

@@ -1,5 +1,6 @@
 import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "../editor/captions.ts";
 import type { ProjectFormat } from "../schemas/project.ts";
+import type { ExportQuality } from "./quality.ts";
 
 export type ExportPhase = "preparing" | "decoding" | "rendering" | "encoding" | "muxing" | "finalizing";
 
@@ -34,11 +35,12 @@ export type LocalExportConfiguration = {
 
 export type LocalExportRequest = LocalExportConfiguration & {
   source: File;
+  quality?: ExportQuality;
   signal?: AbortSignal;
-  onProgress?: (progress: { phase: ExportPhase; fraction: number }) => void;
+  onProgress?: (progress: { phase: ExportPhase; fraction: number; elapsedSeconds: number; estimatedRemainingSeconds?: number }) => void;
 };
 
-export type LocalExportResult = { blob: Blob; fileName: string; mimeType: string; diagnostics: LocalExportDiagnostics };
+export type LocalExportResult = { blob: Blob; fileName: string; mimeType: string; durationSeconds: number; fileSizeBytes: number; diagnostics: LocalExportDiagnostics };
 
 export type LocalExportSupport = { supported: boolean; path: string; reason: string; mimeType?: string };
 

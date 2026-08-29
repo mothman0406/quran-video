@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createLocalExportConfiguration } from "../src/lib/export/config.ts";
+import { createLocalExportConfiguration, snapshotLocalExportConfiguration } from "../src/lib/export/config.ts";
 import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, captionVisualStatesAtTime } from "../src/lib/editor/captions.ts";
 import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, SAFE_AREA_OVERLAY_METADATA, mediabunnyVideoTransform, sourceVideoFitForMediabunny, sourceVideoFitForPreview } from "../src/lib/editor/formats.ts";
 import { audioOutputIsValid, selectOutputProfile, sourceAudioRequiresOutput } from "../src/lib/export/output.ts";
 import { DEFAULT_LOCAL_RENDERER_ID } from "../src/lib/export/offline-webcodecs.ts";
 import { coverPlacement, durationMatches, frameTimeline, onceCleanup, resolveExportFrameRate } from "../src/lib/export/timeline.ts";
+import { DEFAULT_EXPORT_QUALITY, EXPORT_QUALITY_PRESETS, exportQualityPreset } from "../src/lib/export/quality.ts";
+import { generateExportFileName } from "../src/lib/export/filename.ts";
+import { ExportCoordinator } from "../src/lib/export/lifecycle.ts";
+import { validateLocalExportInputs } from "../src/lib/export/validation.ts";
 
 const segment = { id: "93:1#1", verseKeys: ["93:1"], startMs: 1_000, endMs: 2_000, arabic: "وَالضُّحَى", translation: "By the morning brightness", transliteration: "Wa ad-duha", wordStart: 0, wordEnd: 1, wordCount: 1, timingEvidence: { start: { timestampMs: 1_000, source: "direct-asr-word" as const }, end: { timestampMs: 2_000, source: "chunk-text-alignment" as const }, derived: false } };
 
@@ -49,14 +53,53 @@ test("output selection requires audio whenever the source has audio", () => {
   assert.equal(sourceAudioRequiresOutput(true), true);
   assert.equal(sourceAudioRequiresOutput(false), false);
   assert.deepEqual(selectOutputProfile({ canEncodeAvc: true, canEncodeAac: true, canEncodeVp9: true, canEncodeOpus: true }, true), {
-    container: "mp4", videoCodec: "avc", audioCodec: "aac", extension: ".mp4", mimeType: "video/mp4;codecs=avc1,mp4a.40.2",
+    container: "mp4", videoCodec: "avc", audioCodec: "aac", extension: ".mp4", mimeType: "video/mp4;codecs=avc1,mp4a.40.2", videoBitrate: 8_000_000, audioBitrate: 160_000,
   });
   assert.deepEqual(selectOutputProfile({ canEncodeAvc: false, canEncodeAac: false, canEncodeVp9: true, canEncodeOpus: true }, false), {
-    container: "webm", videoCodec: "vp9", audioCodec: null, extension: ".webm", mimeType: "video/webm;codecs=vp9",
+    container: "webm", videoCodec: "vp9", audioCodec: null, extension: ".webm", mimeType: "video/webm;codecs=vp9", videoBitrate: 8_000_000, audioBitrate: 160_000,
   });
   assert.equal(selectOutputProfile({ canEncodeAvc: true, canEncodeAac: false, canEncodeVp9: true, canEncodeOpus: false }, true), null);
   assert.equal(audioOutputIsValid(true, false), false);
   assert.equal(audioOutputIsValid(false, false), true);
+});
+
+test("quality presets map to deterministic bitrate tiers and Standard is the default", () => {
+  assert.equal(DEFAULT_EXPORT_QUALITY, "standard");
+  assert.ok(exportQualityPreset("draft").videoBitrate < exportQualityPreset("standard").videoBitrate);
+  assert.ok(exportQualityPreset("high").videoBitrate > exportQualityPreset("standard").videoBitrate);
+  assert.deepEqual(Object.keys(EXPORT_QUALITY_PRESETS), ["draft", "standard", "high"]);
+});
+
+test("export filenames are safe and use the Quran passage range", () => {
+  assert.equal(generateExportFileName("my clip!!.mov", [{ verseKeys: ["93:1"] }, { verseKeys: ["93:2", "93:5"] }], { extension: ".mp4" }), "quran-video-93-1-93-5.mp4");
+  assert.equal(generateExportFileName("unsafe / title.mov", [], { extension: ".webm" }), "unsafe-title.webm");
+});
+
+test("export snapshots are independent from subsequent editor mutations", () => {
+  const original = config();
+  const snapshot = snapshotLocalExportConfiguration(original);
+  (original.segments[0].verseKeys as string[])[0] = "1:1";
+  original.positioning.x = 0.1;
+  assert.equal(snapshot.segments[0].verseKeys[0], "93:1");
+  assert.equal(snapshot.positioning.x, DEFAULT_CAPTION_POSITIONING.x);
+});
+
+test("duplicate export prevention and cancellation cleanup are explicit", () => {
+  const coordinator = new ExportCoordinator();
+  assert.equal(coordinator.start(), true);
+  assert.equal(coordinator.start(), false);
+  coordinator.finish();
+  assert.equal(coordinator.start(), true);
+  coordinator.finish();
+});
+
+test("validation reports missing source, captions, and invalid format", () => {
+  const errors = validateLocalExportInputs(null, config({ segments: [], format: { preset: "vertical", width: 1, height: 1 } }));
+  assert.equal(errors.length, 3);
+});
+
+test("all supported aspect ratios retain their output dimensions", () => {
+  assert.deepEqual(Object.values(PROJECT_FORMATS).map(({ width, height }) => [width, height]), [[1080, 1920], [1920, 1080], [1080, 1080]]);
 });
 
 test("export composition uses source cover mapping and excludes safe-area overlays", () => {

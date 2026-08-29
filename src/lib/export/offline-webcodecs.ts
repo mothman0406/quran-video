@@ -19,8 +19,11 @@ import { quranFontDefinitions } from "../quran/content.ts";
 import { mediabunnyVideoTransform, sourceVideoFitForMediabunny } from "../editor/formats.ts";
 import { drawExportCaptions } from "./caption-canvas.ts";
 import { audioOutputIsValid, selectOutputProfile } from "./output.ts";
+import { generateExportFileName } from "./filename.ts";
+import { exportQualityPreset } from "./quality.ts";
 import { durationMatches, frameTimeline, onceCleanup, resolveExportFrameRate } from "./timeline.ts";
-import type { LocalExportDiagnostics, LocalExportRequest, LocalExportResult, LocalExportSupport, LocalVideoRenderer } from "./types.ts";
+import { assertValidLocalExportInputs } from "./validation.ts";
+import type { ExportPhase, LocalExportDiagnostics, LocalExportRequest, LocalExportResult, LocalExportSupport, LocalVideoRenderer } from "./types.ts";
 
 export const DEFAULT_LOCAL_RENDERER_ID = "offline-webcodecs";
 
@@ -40,14 +43,24 @@ async function loadArabicFont(request: LocalExportRequest): Promise<string> {
   return font.family;
 }
 
-async function capabilities(width: number, height: number) {
+async function capabilities(width: number, height: number, bitrate: { videoBitrate: number; audioBitrate: number }) {
   const [canEncodeAvc, canEncodeAac, canEncodeVp9, canEncodeOpus] = await Promise.all([
-    canEncodeVideo("avc", { width, height, bitrate: 8_000_000 }),
-    canEncodeAudio("aac", { numberOfChannels: 2, sampleRate: 48_000, bitrate: 160_000 }),
-    canEncodeVideo("vp9", { width, height, bitrate: 8_000_000 }),
-    canEncodeAudio("opus", { numberOfChannels: 2, sampleRate: 48_000, bitrate: 160_000 }),
+    canEncodeVideo("avc", { width, height, bitrate: bitrate.videoBitrate }),
+    canEncodeAudio("aac", { numberOfChannels: 2, sampleRate: 48_000, bitrate: bitrate.audioBitrate }),
+    canEncodeVideo("vp9", { width, height, bitrate: bitrate.videoBitrate }),
+    canEncodeAudio("opus", { numberOfChannels: 2, sampleRate: 48_000, bitrate: bitrate.audioBitrate }),
   ]);
   return { canEncodeAvc, canEncodeAac, canEncodeVp9, canEncodeOpus };
+}
+
+export async function inspectLocalExport(source: File, format: LocalExportRequest["format"], quality: LocalExportRequest["quality"] = "standard") {
+  const input = new Input({ source: new BlobSource(source), formats: ALL_FORMATS });
+  try {
+    const audioTrack = await input.getPrimaryAudioTrack();
+    const bitrate = exportQualityPreset(quality ?? "standard");
+    const profile = selectOutputProfile(await capabilities(format.width, format.height, bitrate), Boolean(audioTrack), bitrate);
+    return { sourceHasAudio: Boolean(audioTrack), profile };
+  } finally { input.dispose(); }
 }
 
 export function offlineWebCodecsSupport(): LocalExportSupport {
@@ -62,9 +75,10 @@ async function copyOrEncodeAudio(options: {
   outputAudioCodec: "aac" | "opus";
   sourceStart: number;
   sourceDuration: number;
+  audioBitrate: number;
   signal?: AbortSignal;
 }): Promise<void> {
-  const { audioTrack, output, outputAudioCodec, sourceStart, sourceDuration, signal } = options;
+  const { audioTrack, output, outputAudioCodec, sourceStart, sourceDuration, audioBitrate, signal } = options;
   const inputCodec = await audioTrack.getCodec();
   const canCopy = inputCodec === outputAudioCodec;
   if (canCopy) {
@@ -82,7 +96,7 @@ async function copyOrEncodeAudio(options: {
   }
   const sampleRate = await audioTrack.getSampleRate();
   const numberOfChannels = await audioTrack.getNumberOfChannels();
-  const source = new AudioSampleSource({ codec: outputAudioCodec, bitrate: 160_000 });
+  const source = new AudioSampleSource({ codec: outputAudioCodec, bitrate: audioBitrate });
   output.addAudioTrack(source, { decoderConfig: { codec: outputAudioCodec === "aac" ? "mp4a.40.2" : "opus", sampleRate, numberOfChannels } });
   await output.start();
   for await (const sample of new AudioSampleSink(audioTrack).samples(sourceStart, sourceStart + sourceDuration)) {
@@ -95,11 +109,17 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
   id: DEFAULT_LOCAL_RENDERER_ID,
   support: offlineWebCodecsSupport,
   async render(request): Promise<LocalExportResult> {
+    const quality = exportQualityPreset(request.quality ?? "standard");
+    assertValidLocalExportInputs(request.source, request);
     const support = offlineWebCodecsSupport();
     if (!support.supported) throw new Error(support.reason);
     ensureNotAborted(request.signal);
     const startedAt = performance.now();
-    request.onProgress?.({ phase: "preparing", fraction: 0 });
+    const report = (phase: ExportPhase, fraction: number) => {
+      const elapsedSeconds = (performance.now() - startedAt) / 1_000;
+      request.onProgress?.({ phase, fraction, elapsedSeconds, ...(fraction > 0 && fraction < 1 ? { estimatedRemainingSeconds: elapsedSeconds * (1 - fraction) / fraction } : {}) });
+    };
+    report("preparing", 0);
     const arabicFont = await loadArabicFont(request);
     ensureNotAborted(request.signal);
     const input = new Input({ source: new BlobSource(request.source), formats: ALL_FORMATS });
@@ -113,23 +133,23 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
       const sourceHasAudio = Boolean(audioTrack);
       const sourceEnd = await input.computeDuration();
       const sourceStart = await input.getFirstTimestamp(audioTrack ? [videoTrack, audioTrack] : [videoTrack]);
-      const [sourceVideoCodec, sourceAudioCodec, frameRateMetrics, outputCapabilities] = await Promise.all([videoTrack.getCodec(), audioTrack?.getCodec() ?? null, videoTrack.computeFrameRateMetrics(), capabilities(request.format.width, request.format.height)]);
-      const profile = selectOutputProfile(outputCapabilities, sourceHasAudio);
+      const [sourceVideoCodec, sourceAudioCodec, frameRateMetrics, outputCapabilities] = await Promise.all([videoTrack.getCodec(), audioTrack?.getCodec() ?? null, videoTrack.computeFrameRateMetrics(), capabilities(request.format.width, request.format.height, quality)]);
+      const profile = selectOutputProfile(outputCapabilities, sourceHasAudio, quality);
       if (!profile) throw new Error(sourceHasAudio ? "This browser cannot encode an audio/video combination for a local export. H.264/AAC and VP9/Opus were both unavailable." : "This browser cannot encode H.264 or VP9 for local export.");
       const sourceDuration = sourceEnd - sourceStart;
       const targetFps = resolveExportFrameRate(frameRateMetrics.underlyingFrameRate);
       const timeline = frameTimeline(sourceDuration, targetFps);
       if (!timeline.length) throw new Error("The source duration could not be determined for deterministic export.");
-      request.onProgress?.({ phase: "decoding", fraction: 0 });
+      report("decoding", 0);
       const canvas = document.createElement("canvas"); canvas.width = request.format.width; canvas.height = request.format.height;
       const context = canvas.getContext("2d"); if (!context) throw new Error("Canvas 2D compositing is unavailable.");
       const target = new BufferTarget();
       output = new Output({ format: profile.container === "mp4" ? new Mp4OutputFormat() : new WebMOutputFormat(), target });
-      const videoSource = new CanvasSource(canvas, { codec: profile.videoCodec, bitrate: 8_000_000, keyFrameInterval: 2, transform: mediabunnyVideoTransform(request.format) });
+      const videoSource = new CanvasSource(canvas, { codec: profile.videoCodec, bitrate: profile.videoBitrate, keyFrameInterval: 2, transform: mediabunnyVideoTransform(request.format) });
       output.addVideoTrack(videoSource, { frameRate: targetFps });
       if (audioTrack && profile.audioCodec) {
         // Audio is appended from file packets/samples, never from an HTMLMediaElement stream.
-        await copyOrEncodeAudio({ audioTrack, output, outputAudioCodec: profile.audioCodec, sourceStart, sourceDuration, signal: request.signal });
+        await copyOrEncodeAudio({ audioTrack, output, outputAudioCodec: profile.audioCodec, sourceStart, sourceDuration, audioBitrate: profile.audioBitrate, signal: request.signal });
       } else await output.start();
       const sink = new VideoSampleSink(videoTrack);
       let renderedFrameCount = 0;
@@ -140,19 +160,20 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
           context.clearRect(0, 0, canvas.width, canvas.height);
           if (sample) sample.drawWithFit(context, { fit: sourceVideoFitForMediabunny() });
           drawExportCaptions(context, request, frame.timestamp * 1_000, arabicFont);
-          request.onProgress?.({ phase: "rendering", fraction: renderedFrameCount / timeline.length });
-          request.onProgress?.({ phase: "encoding", fraction: renderedFrameCount / timeline.length });
+          report("rendering", renderedFrameCount / timeline.length);
+          report("encoding", renderedFrameCount / timeline.length);
           await videoSource.add(frame.timestamp, frame.duration);
           renderedFrameCount += 1;
         } finally { sample?.close(); }
       }
       if (renderedFrameCount !== timeline.length) throw new Error("The local video decoder stopped before the source timeline completed.");
-      request.onProgress?.({ phase: "muxing", fraction: 1 });
+      report("muxing", 1);
       await output.finalize();
       ensureNotAborted(request.signal);
       if (!target.buffer) throw new Error("Local muxing completed without an output buffer.");
       const blob = new Blob([target.buffer], { type: profile.mimeType });
-      request.onProgress?.({ phase: "finalizing", fraction: 1 });
+      if (blob.size <= 0) throw new Error("The local exporter produced an empty file.");
+      report("finalizing", 1);
       const verification = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
       try {
         const [outputDurationSeconds, outputAudioTrack] = await Promise.all([verification.computeDuration(), verification.getPrimaryAudioTrack()]);
@@ -178,7 +199,7 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
           elapsedSeconds,
           effectiveRenderingFps: renderedFrameCount / Math.max(elapsedSeconds, 0.001),
         };
-        return { blob, fileName: `${request.source.name.replace(/\.[^.]+$/u, "")}-captions${profile.extension}`, mimeType: profile.mimeType, diagnostics };
+        return { blob, fileName: generateExportFileName(request.source.name, request.segments, profile), mimeType: profile.mimeType, durationSeconds: outputDurationSeconds, fileSizeBytes: blob.size, diagnostics };
       } finally { verification.dispose(); }
     } finally {
       request.signal?.removeEventListener("abort", abort);
