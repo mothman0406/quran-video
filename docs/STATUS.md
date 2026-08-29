@@ -9,6 +9,7 @@ Complete:
 - Opening restores alignments, caption segments, format, translation/style/positioning/background/transition settings, and asks for the original source video again. Filename, size, media type, and loaded duration are checked; recognition does not rerun automatically.
 - Added before-unload protection for meaningful unsaved edits. Refresh intentionally warns that ephemeral unsaved work will be lost; explicit saved metadata remains separate and local.
 - Added repository validation and regression tests rejecting media payloads, object URLs, source bytes, and export data. Delete removes only local metadata; source and export files remain on the device.
+- Saved project persistence now uses the canonical `VerseAlignment` shape (`verseKey`, `startMs`, `endMs`, confidence, and timing evidence). Legacy `startSeconds`/`endSeconds` alignments migrate to milliseconds on load and are not retained as a second active representation.
 
 Verification: targeted project-storage tests, full `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. Manual browser verification remains recommended for IndexedDB persistence and source mismatch/reselection flows.
 

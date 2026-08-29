@@ -22,10 +22,57 @@ function assertMetadataOnly(value: unknown, path = "project"): void {
   else if (value && typeof value === "object") Object.entries(value).forEach(([key, item]) => assertMetadataOnly(item, `${path}.${key}`));
 }
 
-export function validateSavedProject(project: SavedProject): SavedProject {
-  const parsed = SavedProjectSchema.parse(project);
+function migrateSavedProject(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const project = value as Record<string, unknown>;
+  if (!Array.isArray(project.verseAlignments)) return value;
+
+  return {
+    ...project,
+    verseAlignments: project.verseAlignments.map((alignment) => {
+      if (!alignment || typeof alignment !== "object" || Array.isArray(alignment)) return alignment;
+      const current = alignment as Record<string, unknown>;
+      const hasCurrentTiming = "startMs" in current || "endMs" in current;
+      if (hasCurrentTiming || !(typeof current.startSeconds === "number" && typeof current.endSeconds === "number")) return alignment;
+      const verseKey = typeof current.verseKey === "string"
+        ? current.verseKey
+        : typeof current.surahNumber === "number" && typeof current.ayahNumber === "number"
+          ? `${current.surahNumber}:${current.ayahNumber}`
+          : undefined;
+      const rest = Object.fromEntries(Object.entries(current).filter(([key]) => key !== "startSeconds" && key !== "endSeconds"));
+      return {
+        ...rest,
+        ...(verseKey ? { verseKey } : {}),
+        startMs: current.startSeconds * 1_000,
+        endMs: current.endSeconds * 1_000,
+        confidence: typeof current.confidence === "number" ? current.confidence : 0,
+      };
+    }),
+  };
+}
+
+export function validateSavedProject(project: unknown): SavedProject {
+  const parsed = SavedProjectSchema.parse(migrateSavedProject(project));
   assertMetadataOnly(parsed);
   return parsed;
+}
+
+/** Serialize only validated, metadata-only project state for local persistence. */
+export function serializeSavedProject(project: SavedProject): string {
+  return JSON.stringify(validateSavedProject(project));
+}
+
+/** Load either a JSON payload or an IndexedDB object and migrate legacy timing once. */
+export function loadSavedProject(value: unknown): SavedProject {
+  if (typeof value === "string") {
+    try {
+      return validateSavedProject(JSON.parse(value) as unknown);
+    } catch (error) {
+      if (error instanceof SyntaxError) throw new Error("Saved project data is not valid JSON.", { cause: error });
+      throw error;
+    }
+  }
+  return validateSavedProject(value);
 }
 
 export function createProjectRepository(indexedDB: IDBFactory | undefined = globalThis.indexedDB): ProjectRepository {
@@ -48,19 +95,19 @@ export function createProjectRepository(indexedDB: IDBFactory | undefined = glob
     });
   };
   return {
-    list: () => transact("readonly", (store, resolve, reject) => { const request = store.getAll(); request.onsuccess = () => { try { resolve(request.result.map(validateSavedProject)); } catch (error) { reject(error); } }; request.onerror = () => reject(request.error); }),
-    get: (id) => transact("readonly", (store, resolve, reject) => { const request = store.get(id); request.onsuccess = () => { try { resolve(request.result ? validateSavedProject(request.result) : null); } catch (error) { reject(error); } }; request.onerror = () => reject(request.error); }),
-    put: (project) => { const valid = validateSavedProject(project); return transact("readwrite", (store, resolve, reject) => { const request = store.put(valid); request.onsuccess = () => resolve(undefined); request.onerror = () => reject(request.error); }); },
+    list: () => transact("readonly", (store, resolve, reject) => { const request = store.getAll(); request.onsuccess = () => { try { resolve(request.result.map(loadSavedProject)); } catch (error) { reject(error); } }; request.onerror = () => reject(request.error); }),
+    get: (id) => transact("readonly", (store, resolve, reject) => { const request = store.get(id); request.onsuccess = () => { try { resolve(request.result ? loadSavedProject(request.result) : null); } catch (error) { reject(error); } }; request.onerror = () => reject(request.error); }),
+    put: (project) => { const valid = loadSavedProject(serializeSavedProject(project)); return transact("readwrite", (store, resolve, reject) => { const request = store.put(valid); request.onsuccess = () => resolve(undefined); request.onerror = () => reject(request.error); }); },
     delete: (id) => transact("readwrite", (store, resolve, reject) => { const request = store.delete(id); request.onsuccess = () => resolve(undefined); request.onerror = () => reject(request.error); }),
   };
 }
 
 export function createMemoryProjectRepository(seed: SavedProject[] = []): ProjectRepository {
-  const projects = new Map(seed.map((project) => [project.id, structuredClone(validateSavedProject(project))]));
+  const projects = new Map(seed.map((project) => [project.id, structuredClone(loadSavedProject(project))]));
   return {
     async list() { return [...projects.values()].map((project) => structuredClone(project)); },
     async get(id) { const project = projects.get(id); return project ? structuredClone(project) : null; },
-    async put(project) { projects.set(project.id, structuredClone(validateSavedProject(project))); },
+    async put(project) { const valid = loadSavedProject(serializeSavedProject(project)); projects.set(valid.id, structuredClone(valid)); },
     async delete(id) { projects.delete(id); },
   };
 }

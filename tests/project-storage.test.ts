@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY } from "../src/lib/editor/captions.ts";
 import { DEFAULT_PROJECT_FORMAT } from "../src/lib/editor/formats.ts";
-import { createMemoryProjectRepository, sourceFingerprint, validateSavedProject, verifySourceFile } from "../src/lib/project-storage.ts";
+import { createMemoryProjectRepository, loadSavedProject, serializeSavedProject, sourceFingerprint, validateSavedProject, verifySourceFile } from "../src/lib/project-storage.ts";
 import type { SavedProject } from "../src/lib/schemas/project.ts";
 
 function project(overrides: Partial<SavedProject> = {}): SavedProject {
@@ -20,6 +20,57 @@ test("save creates metadata, updates by stable id, and stores no media bytes", a
   assert.equal(JSON.stringify(projects[0]).includes("blob:"), false);
   assert.equal(JSON.stringify(projects[0]).includes("data:video"), false);
   assert.throws(() => validateSavedProject({ ...saved, media: new ArrayBuffer(2) } as SavedProject & { media: ArrayBuffer }), /media|unsupported/i);
+});
+
+test("current verse alignments round-trip through serialization, validation, and loading", async () => {
+  const alignments = Array.from({ length: 5 }, (_, index) => ({
+    verseKey: `93:${index + 1}`,
+    surahNumber: 93,
+    ayahNumber: index + 1,
+    startMs: 1_000 + index * 1_234,
+    endMs: 2_000 + index * 1_234,
+    confidence: 0.71 + index / 100,
+    timingEvidence: {
+      start: { timestampMs: 1_000 + index * 1_234, source: "direct-asr-word" as const },
+      end: { timestampMs: 2_000 + index * 1_234, source: "chunk-text-alignment" as const },
+      matchedText: `matched ${index + 1}`,
+    },
+  }));
+  const saved = project({ verseAlignments: alignments });
+  const loaded = loadSavedProject(serializeSavedProject(saved));
+  assert.deepEqual(loaded.verseAlignments, alignments);
+  const repository = createMemoryProjectRepository();
+  await repository.put(saved);
+  assert.deepEqual((await repository.get(saved.id))?.verseAlignments, alignments);
+  assert.equal(serializeSavedProject(saved).includes("File"), false);
+  assert.equal(serializeSavedProject(saved).includes("Blob"), false);
+});
+
+test("legacy seconds alignment payloads migrate to exact milliseconds once", () => {
+  const legacy = project({
+    verseAlignments: [{
+      surahNumber: 93,
+      ayahNumber: 1,
+      startSeconds: 1.234,
+      endSeconds: 2.5,
+      timingEvidence: {
+        start: { timestampMs: 1_234, source: "interpolation" },
+        end: { timestampMs: 2_500, source: "interpolation" },
+        matchedText: "legacy evidence",
+      },
+    } as unknown as SavedProject["verseAlignments"][number]],
+  });
+  const migrated = loadSavedProject(legacy);
+  assert.deepEqual(migrated.verseAlignments[0], {
+    surahNumber: 93,
+    ayahNumber: 1,
+    verseKey: "93:1",
+    startMs: 1_234,
+    endMs: 2_500,
+    confidence: 0,
+    timingEvidence: legacy.verseAlignments[0].timingEvidence,
+  });
+  assert.throws(() => validateSavedProject({ ...migrated, verseAlignments: [{ ...migrated.verseAlignments[0], invalid: true }] }), /unrecognized|invalid/i);
 });
 
 test("source verification accepts matching metadata and reports mismatch without attaching it silently", () => {
