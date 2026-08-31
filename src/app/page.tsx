@@ -100,6 +100,7 @@ import {
   saveCloudProject,
 } from "@/lib/cloud-sync";
 import type { Session } from "@supabase/supabase-js";
+import { recordAuthenticatedUsage } from "@/lib/usage/client";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -541,6 +542,7 @@ export default function Home() {
         }
       }
       const saved = await saveCloudProject(local);
+      void recordAuthenticatedUsage("cloud_project_saved", `${saved.id}:${saved.updatedAt}`).catch(() => undefined);
       cloudBaselineUpdatedAt.current = saved.updatedAt;
       setSavedProject(saved);
       setProjectName(saved.title);
@@ -1109,6 +1111,7 @@ export default function Home() {
         signal: controller.signal,
         onProgress: setExportState,
       });
+      void recordAuthenticatedUsage("export_completed", crypto.randomUUID()).catch(() => undefined);
       setExportResult(output);
       setExportDiagnostics(output.diagnostics);
       setExportState("complete");

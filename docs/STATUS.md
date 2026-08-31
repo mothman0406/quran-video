@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: M8.5 — Server-authoritative usage accounting
+
+Complete:
+
+- Added append-only `usage_events` storage with user/event/time indexes, operation idempotency, and RLS that permits owner reads but no client inserts.
+- Added server-only usage helpers for recording events, current-month counts, centralized UTC period boundaries, structured quota results, and provisional Free/Creator/Pro limits (unlimited until product values are approved).
+- Added an authenticated `/api/usage` route that derives identity from the Supabase bearer session and records only allowlisted event types through the service-role path.
+- Completed local exports and successful cloud saves now submit minimal authenticated events; anonymous/local flows remain no-ops. Failed or cancelled exports never submit an event, and duplicate operation ids are ignored.
+- Cloud save events are tracked for meaningful save operations; a future active-project quota should query `projects` rather than count save clicks.
+
+Verification: targeted usage tests, full `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. Supabase migration execution and authenticated browser verification remain deployment-environment checks because local credentials/database are not configured here.
+
 ## Current milestone: Local project lifecycle
 
 Complete:
