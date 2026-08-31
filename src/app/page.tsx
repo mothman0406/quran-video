@@ -25,11 +25,10 @@ import {
   DEFAULT_TYPOGRAPHY,
   mergeCaptionWithNext,
   mergeCaptionWithPrevious,
-  resetCaptionBackground as resetCaptionBackgroundDefaults,
   resetCaptionPositioning,
   resetCaptionSegmentTiming,
-  resetTransitionSettings as resetTransitionSettingsDefaults,
   resetTypography as resetTypographyDefaults,
+  resizeCaptionWidth,
   splitCaptionSegment,
   updateCaptionPosition,
   updateCaptionSegmentTiming,
@@ -41,7 +40,6 @@ import {
 } from "@/lib/editor/captions";
 import {
   DEFAULT_PROJECT_FORMAT,
-  DEFAULT_SOURCE_VIDEO_FIT,
   PROJECT_FORMATS,
   projectFormatDefinition,
 } from "@/lib/editor/formats";
@@ -57,21 +55,19 @@ import {
   BUILT_IN_STYLES,
   captionStyleFromState,
   captionStyleToState,
-  deleteLocalStyle,
   loadLocalStyles,
-  renameLocalStyle,
   saveLocalStyle,
   type BuiltInStyleName,
   type CaptionStyle,
   type LocalCaptionStyle,
 } from "@/lib/editor/styles";
-import { isQuranScript, quranFontDefinitions } from "@/lib/quran/content";
+import { quranFontDefinitions } from "@/lib/quran/content";
 import { getVerses } from "@/lib/quran/local";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import type { QuranTranslation } from "@/lib/quran/translations";
 import { localTranscriptionSupport } from "@/lib/recognition/local-whisper";
-import CaptionPreview from "@/components/caption-preview";
-import SafeAreaOverlay from "@/components/safe-area-overlay";
+import { type CaptionObject, type CaptionResizeEdge } from "@/components/caption-preview";
+import EditorWorkspace from "@/components/editor-workspace";
 import { snapshotLocalExportConfiguration } from "@/lib/export/config";
 import {
   inspectLocalExport,
@@ -79,7 +75,6 @@ import {
 } from "@/lib/export/offline-webcodecs";
 import {
   DEFAULT_EXPORT_QUALITY,
-  EXPORT_QUALITY_PRESETS,
   type ExportQuality,
 } from "@/lib/export/quality";
 import { ExportCoordinator } from "@/lib/export/lifecycle";
@@ -90,7 +85,6 @@ import type {
   LocalExportResult,
 } from "@/lib/export/types";
 import type { OutputProfile } from "@/lib/export/output";
-import AccountPanel from "@/components/account-panel";
 import {
   deleteCloudProject,
   getCloudProject,
@@ -101,7 +95,7 @@ import {
 } from "@/lib/cloud-sync";
 import type { Session } from "@supabase/supabase-js";
 import { recordAuthenticatedUsage } from "@/lib/usage/client";
-import { exportFormatForPlan, getCloudProjectLimit, getCustomStyleLimit, getPlanEntitlements, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
+import { getCloudProjectLimit, getCustomStyleLimit, getPlanEntitlements, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -130,25 +124,6 @@ const busyStages: Stage[] = [
   "matching",
   "captions",
 ];
-function formatDuration(seconds: number) {
-  if (!Number.isFinite(seconds)) return "—";
-  const total = Math.round(seconds);
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
-}
-function stageLabel(stage: Stage) {
-  return (
-    (
-      {
-        preparing: "Preparing audio",
-        "loading-model": "Loading local recognition model",
-        transcribing: "Transcribing locally",
-        matching: "Matching Quran",
-        captions: "Preparing captions",
-      } as Record<string, string>
-    )[stage] ?? ""
-  );
-}
-
 export default function Home() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -171,6 +146,7 @@ export default function Home() {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(
     null,
   );
+  const [selectedObject, setSelectedObject] = useState<CaptionObject | null>(null);
   const [splitBoundary, setSplitBoundary] = useState(1);
   const [typography, setTypography] = useState<Typography>(DEFAULT_TYPOGRAPHY);
   const [captionBackground, setCaptionBackground] = useState<CaptionBackground>(
@@ -230,7 +206,14 @@ export default function Home() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
-  const draggingPosition = useRef<"arabic" | "translation" | null>(null);
+  const canvasInteraction = useRef<{
+    kind: CaptionObject;
+    mode: "drag" | "resize";
+    edge?: CaptionResizeEdge;
+    pointerX: number;
+    pointerY: number;
+    positioning: CaptionPositioning;
+  } | null>(null);
   const draggingEdge = useRef<"start" | "end" | null>(null);
   const exportAbort = useRef<AbortController | null>(null);
   const exportCoordinator = useRef(new ExportCoordinator());
@@ -420,6 +403,7 @@ export default function Home() {
     setContent({});
     setCurrentTimeMs(0);
     setSelectedSegmentId(null);
+    setSelectedObject(null);
     setStage("idle");
     setProgress(null);
     setErrorMessage(null);
@@ -587,6 +571,7 @@ export default function Home() {
     setTransitionSettings(project.transitionSettings);
     setShowVerseNumber(project.showVerseNumber);
     setSelectedSegmentId(null);
+    setSelectedObject(null);
     setContent({});
     cloudBaselineUpdatedAt.current = fromCloud ? project.updatedAt : null;
     savedSignature.current = JSON.stringify({
@@ -781,6 +766,7 @@ export default function Home() {
     setStage("idle");
     setErrorMessage(null);
     setCurrentTimeMs(0);
+    setSelectedObject(null);
     setPositioning(resetCaptionPositioning(projectFormat));
     setExportState(null);
     setExportError(null);
@@ -866,45 +852,64 @@ export default function Home() {
   );
   function selectSegment(segment: CaptionSegment) {
     setSelectedSegmentId(segment.id);
+    setSelectedObject(null);
     setSplitBoundary(
       Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)),
     );
-    seekTo(segment.startMs);
+    seekTo(Math.min(segment.startMs + 250, Math.max(segment.startMs, segment.endMs - 1)));
   }
-  const positionFromPointer = useCallback(
-    (event: PointerEvent<HTMLElement>, kind: "arabic" | "translation") => {
+  const handleObjectPointerDown = useCallback(
+    (event: PointerEvent<HTMLDivElement>, kind: CaptionObject) => {
+      event.stopPropagation();
+      setSelectedObject(kind);
+      canvasInteraction.current = {
+        kind,
+        mode: "drag",
+        pointerX: event.clientX,
+        pointerY: event.clientY,
+        positioning: { ...positioning, translationPositionLinked: false },
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [positioning],
+  );
+  const handleResizePointerDown = useCallback(
+    (event: PointerEvent<HTMLButtonElement>, kind: CaptionObject, edge: CaptionResizeEdge) => {
+      event.stopPropagation();
+      setSelectedObject(kind);
+      canvasInteraction.current = {
+        kind,
+        mode: "resize",
+        edge,
+        pointerX: event.clientX,
+        pointerY: event.clientY,
+        positioning: { ...positioning, translationPositionLinked: false },
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [positioning],
+  );
+  const handleObjectPointerMove = useCallback(
+    (event: PointerEvent<HTMLElement>) => {
+      const interaction = canvasInteraction.current;
       const rect = previewRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      setPositioning((current) =>
-        updateCaptionPosition(
-          current,
-          kind,
-          (event.clientX - rect.left) / rect.width,
-          (event.clientY - rect.top) / rect.height,
-          projectFormat,
-        ),
-      );
+      if (!interaction || !rect) return;
+      const dx = (event.clientX - interaction.pointerX) / rect.width;
+      const dy = (event.clientY - interaction.pointerY) / rect.height;
+      if (interaction.mode === "drag") {
+        const start = interaction.positioning;
+        setPositioning(updateCaptionPosition(start, interaction.kind, interaction.kind === "arabic" ? start.x + dx : start.translationX + dx, interaction.kind === "arabic" ? start.y + dy : start.translationY + dy, projectFormat));
+      } else {
+        const startWidth = interaction.kind === "arabic" ? interaction.positioning.maxWidthPercent : (interaction.positioning.translationMaxWidthPercent ?? interaction.positioning.maxWidthPercent);
+        const direction = interaction.edge === "left" ? -1 : 1;
+        const nextWidth = startWidth + direction * dx * 2;
+        setPositioning(resizeCaptionWidth(interaction.positioning, interaction.kind, nextWidth, projectFormat));
+      }
     },
     [projectFormat],
   );
-  const handlePositionPointerDown = useCallback(
-    (event: PointerEvent<HTMLElement>, kind: "arabic" | "translation") => {
-      event.stopPropagation();
-      draggingPosition.current = kind;
-      event.currentTarget.setPointerCapture(event.pointerId);
-      positionFromPointer(event, kind);
-    },
-    [positionFromPointer],
-  );
-  const handlePositionPointerMove = useCallback(
-    (event: PointerEvent<HTMLElement>) => {
-      if (draggingPosition.current)
-        positionFromPointer(event, draggingPosition.current);
-    },
-    [positionFromPointer],
-  );
-  const handlePositionPointerUp = useCallback(() => {
-    draggingPosition.current = null;
+  const handleObjectPointerUp = useCallback(() => {
+    canvasInteraction.current = null;
   }, []);
   function timelineTimeFromPointer(event: PointerEvent<HTMLElement>) {
     const rect = timelineRef.current?.getBoundingClientRect();
@@ -1004,9 +1009,6 @@ export default function Home() {
     setCaptionBackground(next.captionBackground);
     setTransitionSettings(next.transitionSettings);
   }
-  function applyBuiltInStyle(name: BuiltInStyleName) {
-    applyStyle(BUILT_IN_STYLES[name]);
-  }
   function saveCurrentStyle() {
     const styleLimit = getCustomStyleLimit(plan);
     if (styleLimit !== null && localStyles.length >= styleLimit) {
@@ -1025,16 +1027,16 @@ export default function Home() {
       ),
     );
   }
-  function renameStyle(style: LocalCaptionStyle) {
-    const name = window.prompt("Rename local style", style.name);
-    if (name) setLocalStyles(renameLocalStyle(style.id, name));
+  function resetSelectedObjectStyle() {
+    const defaults = resetTypographyDefaults();
+    if (selectedObject === "arabic") {
+      setTypography((current) => ({ ...current, quranStyle: defaults.quranStyle, arabicFontFamily: defaults.arabicFontFamily, arabicFontSize: defaults.arabicFontSize, textColor: defaults.textColor, arabicOutlineEnabled: defaults.arabicOutlineEnabled, arabicOutlineWidth: defaults.arabicOutlineWidth, arabicOutlineColor: defaults.arabicOutlineColor, arabicShadowEnabled: defaults.arabicShadowEnabled, arabicShadowBlur: defaults.arabicShadowBlur, arabicShadowStrength: defaults.arabicShadowStrength, arabicOpacity: defaults.arabicOpacity, textAlign: defaults.textAlign, arabicLineSpacing: defaults.arabicLineSpacing }));
+    } else if (selectedObject === "translation") {
+      setTypography((current) => ({ ...current, translationFontFamily: defaults.translationFontFamily, translationFontSize: defaults.translationFontSize, translationTextColor: defaults.translationTextColor, translationOutlineEnabled: defaults.translationOutlineEnabled, translationOutlineWidth: defaults.translationOutlineWidth, translationOutlineColor: defaults.translationOutlineColor, translationShadowEnabled: defaults.translationShadowEnabled, translationShadowBlur: defaults.translationShadowBlur, translationShadowStrength: defaults.translationShadowStrength, translationOpacity: defaults.translationOpacity, translationTextAlign: defaults.translationTextAlign, translationSpacingBelowArabic: defaults.translationSpacingBelowArabic, translationVisible: defaults.translationVisible }));
+    }
   }
-  function removeStyle(style: LocalCaptionStyle) {
-    setLocalStyles(deleteLocalStyle(style.id));
-  }
-  function resetTypography() {
-    setTypography(resetTypographyDefaults());
-    setCaptionBackground(resetCaptionBackgroundDefaults());
+  function alignTranslationBelowArabic() {
+    setPositioning((current) => clampCaptionPositioning({ ...current, translationPositionLinked: true }, projectFormat));
   }
   function changeFormat(preset: ProjectFormatPreset) {
     const definition = PROJECT_FORMATS[preset];
@@ -1045,9 +1047,6 @@ export default function Home() {
     };
     setProjectFormat(next);
     setPositioning((current) => clampCaptionPositioning(current, next));
-  }
-  function resetTransitions() {
-    setTransitionSettings(resetTransitionSettingsDefaults());
   }
   function splitSelected() {
     if (!selectedSegment) return;
@@ -1165,6 +1164,106 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-[#f5f2eb] text-[#17211b]">
+      <EditorWorkspace
+        videoFile={videoFile}
+        videoUrl={videoUrl}
+        videoMetadata={videoMetadata}
+        videoRef={videoRef}
+        previewRef={previewRef}
+        timelineRef={timelineRef}
+        stage={stage}
+        progress={progress}
+        support={support}
+        alignments={alignments}
+        content={content}
+        currentTimeMs={currentTimeMs}
+        segments={segments}
+        selectedSegmentId={selectedSegmentId}
+        selectedSegment={selectedSegment}
+        selectedIndex={selectedIndex}
+        selectedObject={selectedObject}
+        splitBoundary={splitBoundary}
+        typography={typography}
+        captionBackground={captionBackground}
+        projectFormat={projectFormat}
+        positioning={positioning}
+        transitionSettings={transitionSettings}
+        showVerseNumber={showVerseNumber}
+        showSafeArea={showSafeArea}
+        projectName={projectName}
+        dirty={dirty}
+        busy={busy}
+        localStyles={localStyles}
+        localStyleName={localStyleName}
+        availableBuiltInStyles={(Object.keys(BUILT_IN_STYLES) as BuiltInStyleName[]).filter((name) => isBuiltInStyleAvailable(plan, name))}
+        availableQuranStyles={Object.keys(quranFontDefinitions).filter((name) => isFontAvailable(plan, name))}
+        exportOpen={exportOpen}
+        exportQuality={exportQuality}
+        outputPlan={outputPlan}
+        exportResult={exportResult}
+        exportState={exportState}
+        exportError={exportError}
+        exportDiagnostics={exportDiagnostics}
+        errorMessage={errorMessage}
+        showCorrection={showCorrection}
+        surah={surah}
+        startAyah={startAyah}
+        endAyah={endAyah}
+        entitlements={entitlements}
+        selectedFormatDefinition={selectedFormatDefinition}
+        onProjectNameChange={setProjectName}
+        onVideoSelect={selectVideo}
+        onLoadedMetadata={loadedVideoMetadata}
+        onVideoTimeUpdate={updateTime}
+        onVideoError={() => setErrorMessage("This video could not be previewed in your browser.")}
+        onSelectObject={setSelectedObject}
+        onObjectPointerDown={handleObjectPointerDown}
+        onResizePointerDown={handleResizePointerDown}
+        onObjectPointerMove={handleObjectPointerMove}
+        onObjectPointerUp={handleObjectPointerUp}
+        onCanvasBackgroundPointerDown={() => setSelectedObject(null)}
+        onSelectSegment={selectSegment}
+        onTimelinePointerDown={seekTimeline}
+        onTimelinePointerMove={handleEdgeMove}
+        onEdgeDown={handleEdgeDown}
+        onEdgeUp={handleEdgeUp}
+        onChangeFormat={changeFormat}
+        onDetect={() => void detect()}
+        onCorrectDetection={() => void correctDetection()}
+        onToggleCorrection={() => setShowCorrection((value) => !value)}
+        onClearVideo={clearVideo}
+        onSaveProject={() => void saveProject()}
+        onSaveToAccount={() => void saveToAccount()}
+        onOpenProjects={() => setProjectsOpen(true)}
+        onOpenCloudProjects={() => { void listCloudProjects().then(setCloudProjects).catch((error: unknown) => setErrorMessage(error instanceof Error ? error.message : "Could not list cloud projects.")); setCloudProjectsOpen(true); }}
+        onSessionChange={handleSessionChange}
+        onPlanChange={setSubscriptionPlan}
+        onDiscard={savedProject ? () => void openProject(savedProject) : newProject}
+        onNewProject={newProject}
+        onExportOpen={() => { setExportOpen(true); setExportError(null); }}
+        onExport={() => void exportVideo()}
+        onCancelExport={cancelExport}
+        onDownloadExport={downloadExport}
+        onSetExportQuality={(quality) => { setExportQuality(quality); setOutputPlan(null); }}
+        onSetExportOpen={setExportOpen}
+        onTypographyChange={updateTypography}
+        onBackgroundChange={updateCaptionBackground}
+        onTransitionChange={(patch) => setTransitionSettings((current) => ({ ...current, ...patch }))}
+        onSetShowVerseNumber={setShowVerseNumber}
+        onSetShowSafeArea={setShowSafeArea}
+        onApplyStyle={applyStyle}
+        onSaveCurrentStyle={saveCurrentStyle}
+        onSetLocalStyleName={setLocalStyleName}
+        onResetSelectedObjectStyle={resetSelectedObjectStyle}
+        onAlignTranslation={alignTranslationBelowArabic}
+        onUpdateTiming={updateTiming}
+        onSetSplitBoundary={setSplitBoundary}
+        onSplit={splitSelected}
+        onMergePrevious={mergePrevious}
+        onMergeNext={mergeNext}
+        onResetTiming={() => selectedSegment && setSegments((current) => resetCaptionSegmentTiming(current, selectedSegment.id, (videoMetadata?.durationSeconds ?? 0) * 1000))}
+      />
+      {/* <div className="hidden" aria-hidden="true">
       <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-5 py-5 sm:px-8 lg:px-12 lg:py-8">
         <header className="flex items-center justify-between border-b border-[#d8d5cc] pb-5">
           <div>
@@ -1286,9 +1385,12 @@ export default function Home() {
                       positioning={positioning}
                       transitionSettings={transitionSettings}
                       showVerseNumber={showVerseNumber}
-                      onPositionPointerDown={handlePositionPointerDown}
-                      onPositionPointerMove={handlePositionPointerMove}
-                      onPositionPointerUp={handlePositionPointerUp}
+                      selectedObject={selectedObject}
+                      onSelectObject={setSelectedObject}
+                      onObjectPointerDown={handleObjectPointerDown}
+                      onResizePointerDown={handleResizePointerDown}
+                      onPointerMove={handleObjectPointerMove}
+                      onPointerUp={handleObjectPointerUp}
                     />
                   </div>
                 </div>
@@ -2656,6 +2758,7 @@ export default function Home() {
           </aside>
         </div>
       </div>
+      </div> */}
       {projectsOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"

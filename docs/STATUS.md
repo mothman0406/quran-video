@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Compact Quran video editor workspace
+
+Complete:
+
+- Reframed the homepage editor as a viewport-oriented workspace with a compact top bar, source/tools sidebar, dominant video canvas, contextual inspector, and attached timeline.
+- Arabic and translation now behave as separate editor-only canvas objects with independent selection, normalized drag positioning, direct width resizing, selection handles, and an Align below Arabic action.
+- Moved text styling into a selection-aware inspector with compact controls while keeping project format, detection, local/cloud project actions, timing edits, transitions, styles, and local export discoverable.
+- Added legacy-compatible independent translation width state and kept selection chrome out of the export snapshot/render path.
+
+Verification: `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. Browser interaction verification with a local video remains recommended.
+
 ## Current milestone: M9 — Stripe subscriptions for Creator and Pro
 
 Complete:

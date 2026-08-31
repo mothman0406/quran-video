@@ -23,6 +23,7 @@ const DEFAULT_VERTICAL_CAPTION_POSITIONING: CaptionPositioning = {
   translationY: 0.74,
   translationPositionLinked: true,
   maxWidthPercent: 0.9,
+  translationMaxWidthPercent: 0.9,
   translationGapPx: 8,
 };
 
@@ -114,6 +115,7 @@ export function captionPositionBounds(format: ProjectFormat, maxWidthPercent = D
 export function clampCaptionPositioning(positioning: CaptionPositioning, format: ProjectFormat): CaptionPositioning {
   const bounds = captionPositionBounds(format, positioning.maxWidthPercent);
   const next = { ...positioning };
+  next.translationMaxWidthPercent = Math.min(0.96, Math.max(0.2, positioning.translationMaxWidthPercent ?? positioning.maxWidthPercent));
   next.x = clampNormalizedPosition(positioning.x, bounds.x[0], bounds.x[1]);
   next.y = clampNormalizedPosition(positioning.y, bounds.y[0], bounds.y[1]);
   next.translationX = clampNormalizedPosition(positioning.translationX, bounds.x[0], bounds.x[1]);
@@ -123,6 +125,22 @@ export function clampCaptionPositioning(positioning: CaptionPositioning, format:
     next.translationY = clampNormalizedPosition(next.y + 0.12, bounds.y[0], bounds.y[1]);
   }
   return next;
+}
+
+export function resizeCaptionWidth(
+  positioning: CaptionPositioning,
+  kind: "arabic" | "translation",
+  widthPercent: number,
+  format: ProjectFormat,
+): CaptionPositioning {
+  const next = {
+    ...positioning,
+    translationPositionLinked: false,
+    ...(kind === "arabic"
+      ? { maxWidthPercent: widthPercent }
+      : { translationMaxWidthPercent: widthPercent }),
+  };
+  return clampCaptionPositioning(next, format);
 }
 
 export function resetCaptionPositioning(format: ProjectFormat): CaptionPositioning {

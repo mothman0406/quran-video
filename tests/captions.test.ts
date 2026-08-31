@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -152,6 +152,18 @@ test("normalized positioning is constrained and linked translation follows Arabi
   assert.equal(moved.translationY, 0.82);
   const unlinked = updateCaptionPosition({ ...moved, translationPositionLinked: false }, "arabic", 0.2, 0.2);
   assert.equal(unlinked.translationX, 0.8);
+});
+
+test("canvas object width resizing is normalized, independent, and leaves Quran text untouched", () => {
+  const format = { preset: "vertical" as const, width: 1080, height: 1920 };
+  const resizedArabic = resizeCaptionWidth(DEFAULT_CAPTION_POSITIONING, "arabic", 0.62, format);
+  assert.equal(resizedArabic.maxWidthPercent, 0.62);
+  assert.equal(resizedArabic.translationMaxWidthPercent, 0.9);
+  assert.equal(resizedArabic.translationPositionLinked, false);
+  const resizedTranslation = resizeCaptionWidth(resizedArabic, "translation", 0.48, format);
+  assert.equal(resizedTranslation.translationMaxWidthPercent, 0.48);
+  assert.equal(resizedTranslation.maxWidthPercent, 0.62);
+  assert.equal(content["93:1"].arabic.uthmani, "وَالضُّحَى وَاللَّيْلِ إِذَا سَجَى وَمَا وَدَّعَكَ رَبُّكَ");
 });
 
 test("manual timing clamps to duration and neighboring boundaries", () => {

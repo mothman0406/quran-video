@@ -71,6 +71,8 @@ export const CaptionPositioningSchema = z.strictObject({
   translationY: z.number().finite().min(0).max(1),
   translationPositionLinked: z.boolean(),
   maxWidthPercent: z.number().finite().positive().max(1),
+  /** Added for independently editable translation boxes; absent in legacy projects. */
+  translationMaxWidthPercent: z.number().finite().positive().max(1).optional(),
   translationGapPx: z.number().int().nonnegative(),
 });
 
