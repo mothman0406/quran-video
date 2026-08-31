@@ -6,7 +6,7 @@ Defaults: vertical 9:16, centered Arabic with translation below, ayah-level timi
 
 ## V1 plan entitlements
 
-The pre-Stripe V1 model is centralized in `src/lib/entitlements.ts`. Prices below are intended values until Stripe products are created; no billing, checkout, webhook, or portal integration exists yet.
+The V1 model is centralized in `src/lib/entitlements.ts`. Prices below are intended display values; Stripe price IDs remain deployment configuration.
 
 - Free ($0): unlimited local recognition, editing, and export count; 720p maximum output with a small watermark; basic Quran font/style set, Saheeh International, basic transitions, Hafs only; 2 saved custom styles and 2 cloud projects.
 - Creator (intended $7.99/month): unlimited local workflows and 1080p output without watermark; all currently supported fonts/styles, translations, transitions/presets, unlimited custom styles, 25 cloud projects, and a future advanced/word-alignment entitlement; Hafs initially.

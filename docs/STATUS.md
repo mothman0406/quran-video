@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: M9 — Stripe subscriptions for Creator and Pro
+
+Complete:
+
+- Added server-only Stripe checkout and Customer Portal routes, allowlisted Creator/Pro plan mapping, Supabase-user authentication, safe customer reuse, and internal user metadata.
+- Added signed, raw-body webhook processing for subscription lifecycle events with idempotency records and conservative active/trialing/known-price entitlement policy.
+- Added owner-readable, server-write-only subscription state storage and authoritative plan resolution. Existing centralized entitlements now receive the verified plan; cancel-at-period-end remains paid until Stripe reports the subscription ended.
+- Added account billing UI, test-mode configuration names, and a manual Stripe checklist. No secrets or Stripe IDs are committed.
+
+Verification: targeted billing tests, full `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. Live Stripe/Supabase deployment and webhook delivery remain manual environment checks. Annual billing, coupons, trials, one-time purchases, 4K, other qiraat, and server rendering remain out of scope.
+
 ## Current milestone: V1 Free / Creator / Pro entitlement model
 
 Complete:

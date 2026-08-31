@@ -217,10 +217,11 @@ export default function Home() {
   const [cloudProjects, setCloudProjects] = useState<SavedProject[]>([]);
   const [cloudProjectsOpen, setCloudProjectsOpen] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
+  const [subscriptionPlan, setSubscriptionPlan] = useState<"Free" | "Creator" | "Pro">("Free");
   const [pendingOpenProject, setPendingOpenProject] =
     useState<SavedProject | null>(null);
   const [dirty, setDirty] = useState(false);
-  const plan = resolveClientPlan(Boolean(session));
+  const plan = resolveClientPlan(Boolean(session), subscriptionPlan);
   const entitlements = getPlanEntitlements(plan);
   const repository = useRef<ProjectRepository | null>(null);
   const savedSignature = useRef<string | null>(null);
@@ -274,6 +275,7 @@ export default function Home() {
     setSession(next);
     if (!next) {
       setCloudProjects([]);
+      setSubscriptionPlan("Free");
       return;
     }
     void listCloudProjects()
@@ -1896,7 +1898,7 @@ export default function Home() {
           <aside className="flex flex-col justify-center gap-4 lg:pb-8">
             <div className="rounded-[24px] border border-[#d8d5cc] bg-[#fbfaf6] p-6 shadow-[0_16px_45px_rgba(23,60,50,0.06)]">
               <h2 className="font-serif text-xl font-semibold text-[#173c32]">Optional account</h2>
-              <AccountPanel onSessionChange={handleSessionChange} />
+              <AccountPanel onSessionChange={handleSessionChange} onPlanChange={setSubscriptionPlan} />
               <p className="mt-3 text-xs leading-5 text-[#737b73]">Cloud sync saves editing settings only. Your source video and exports remain on your device.</p>
             </div>
             <div className="rounded-[24px] border border-[#d8d5cc] bg-[#fbfaf6] p-6 shadow-[0_16px_45px_rgba(23,60,50,0.06)]">
