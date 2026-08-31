@@ -4,7 +4,17 @@ Quran-first video caption editor for recitation videos. The product will identif
 
 Defaults: vertical 9:16, centered Arabic with translation below, ayah-level timing, and editable fades. Users will eventually be able to adjust text, timing, position, style, typography, and output format.
 
-V1 is Hafs only. Madinah/QCF, Uthmani, IndoPak, and KFGQPC typography are planned choices. Recognition, canonical content, rendering, accounts, billing, and additional media features are explicitly staged for later milestones.
+## V1 plan entitlements
+
+The pre-Stripe V1 model is centralized in `src/lib/entitlements.ts`. Prices below are intended values until Stripe products are created; no billing, checkout, webhook, or portal integration exists yet.
+
+- Free ($0): unlimited local recognition, editing, and export count; 720p maximum output with a small watermark; basic Quran font/style set, Saheeh International, basic transitions, Hafs only; 2 saved custom styles and 2 cloud projects.
+- Creator (intended $7.99/month): unlimited local workflows and 1080p output without watermark; all currently supported fonts/styles, translations, transitions/presets, unlimited custom styles, 25 cloud projects, and a future advanced/word-alignment entitlement; Hafs initially.
+- Pro (intended $14.99/month): Creator capabilities with a centralized 1,000-project technical ceiling, plus future 4K, supported-qiraat, and premium creator capability entitlements. 4K and other qiraat are not implemented.
+
+Export count is recorded for future accounting but is not a quota on any plan. Canonical Arabic, core recognition, manual timing/editing, and local-first workflows remain available on Free.
+
+V1 is Hafs only. Free includes the basic Uthmani font/style set; Creator and Pro include all currently supported typography. Recognition, canonical content, rendering, accounts, billing, and additional media features remain explicitly staged by milestone.
 
 ## Local-first product behavior
 

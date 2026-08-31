@@ -17,9 +17,16 @@ function config(overrides = {}) { return createLocalExportConfiguration({ format
 
 test("export mapping keeps project render state and excludes editor-only safe areas", () => {
   const value = config();
-  assert.deepEqual(value.format, { preset: "vertical", width: 1080, height: 1920 });
+  assert.deepEqual(value.format, { preset: "vertical", width: 720, height: 1280 });
   assert.equal("safeAreaGuides" in value, false);
+  assert.equal(value.watermarkRequired, true);
   assert.deepEqual(SAFE_AREA_OVERLAY_METADATA, { editorOnly: true, exportable: false });
+});
+
+test("export entitlements cap Free at 720p and keep Creator at 1080p without watermark", () => {
+  assert.deepEqual(config({ plan: "Creator" }).format, { preset: "vertical", width: 1080, height: 1920 });
+  assert.equal(config({ plan: "Creator" }).watermarkRequired, false);
+  assert.equal(config({ plan: "Pro" }).watermarkRequired, false);
 });
 
 test("export mapping preserves manual timings, translation visibility, and verse-number presentation", () => {

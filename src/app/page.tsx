@@ -101,6 +101,7 @@ import {
 } from "@/lib/cloud-sync";
 import type { Session } from "@supabase/supabase-js";
 import { recordAuthenticatedUsage } from "@/lib/usage/client";
+import { exportFormatForPlan, getCloudProjectLimit, getCustomStyleLimit, getPlanEntitlements, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -219,6 +220,8 @@ export default function Home() {
   const [pendingOpenProject, setPendingOpenProject] =
     useState<SavedProject | null>(null);
   const [dirty, setDirty] = useState(false);
+  const plan = resolveClientPlan(Boolean(session));
+  const entitlements = getPlanEntitlements(plan);
   const repository = useRef<ProjectRepository | null>(null);
   const savedSignature = useRef<string | null>(null);
   const cloudBaselineUpdatedAt = useRef<string | null>(null);
@@ -524,6 +527,12 @@ export default function Home() {
     );
     try {
       const remote = await getCloudProject(local.id);
+      const currentCloudProjects = await listCloudProjects();
+      setCloudProjects(currentCloudProjects);
+      if (!remote && currentCloudProjects.length >= getCloudProjectLimit(plan)) {
+        setErrorMessage(`Your ${plan} plan supports up to ${getCloudProjectLimit(plan)} cloud projects.`);
+        return;
+      }
       const hasRemoteChange = Boolean(
         remote &&
           ((cloudBaselineUpdatedAt.current &&
@@ -997,6 +1006,11 @@ export default function Home() {
     applyStyle(BUILT_IN_STYLES[name]);
   }
   function saveCurrentStyle() {
+    const styleLimit = getCustomStyleLimit(plan);
+    if (styleLimit !== null && localStyles.length >= styleLimit) {
+      setErrorMessage(`Your ${plan} plan supports up to ${styleLimit} saved custom styles.`);
+      return;
+    }
     setLocalStyles(
       saveLocalStyle(
         localStyleName,
@@ -1076,6 +1090,7 @@ export default function Home() {
       positioning,
       transitionSettings,
       showVerseNumber,
+      plan,
     });
     const validationErrors = validateLocalExportInputs(videoFile, snapshot);
     if (validationErrors.length) {
@@ -1513,9 +1528,10 @@ export default function Home() {
                   <div className="rounded-lg bg-[#edf4ef] px-3 py-2 text-xs text-[#35604f]">
                     <span className="font-semibold">Resolution</span>
                     <p className="mt-1 text-sm">
-                      {selectedFormatDefinition.width} ×{" "}
-                      {selectedFormatDefinition.height}
+                      {exportFormatForPlan(plan, selectedFormatDefinition).width} ×{" "}
+                      {exportFormatForPlan(plan, selectedFormatDefinition).height}
                     </p>
+                    <p className="mt-1">{entitlements.watermarkRequired ? "Small watermark included" : "No watermark"}</p>
                     <p className="mt-1">
                       Output:{" "}
                       {outputPlan?.profile
@@ -1952,7 +1968,7 @@ export default function Home() {
                     }}
                   >
                     <option value="">Choose a starting style…</option>
-                    {(Object.keys(BUILT_IN_STYLES) as BuiltInStyleName[]).map(
+                    {(Object.keys(BUILT_IN_STYLES) as BuiltInStyleName[]).filter((name) => isBuiltInStyleAvailable(plan, name)).map(
                       (name) => (
                         <option key={name} value={name}>
                           {name}
@@ -2025,13 +2041,13 @@ export default function Home() {
                     id="quran-script"
                     value={typography.quranStyle}
                     onChange={(event) => {
-                      if (isQuranScript(event.target.value))
+                      if (isQuranScript(event.target.value) && isFontAvailable(plan, event.target.value))
                         updateTypography("quranStyle", event.target.value);
                     }}
                   >
                     {Object.entries(quranFontDefinitions).map(
                       ([value, font]) => (
-                        <option key={value} value={value}>
+                        <option key={value} value={value} disabled={!isFontAvailable(plan, value)}>
                           {font.label}
                         </option>
                       ),

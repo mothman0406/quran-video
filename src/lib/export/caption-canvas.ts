@@ -27,4 +27,15 @@ export function drawExportCaptions(context: CanvasRenderingContext2D, request: L
     if (translationLines.length && !positioning.translationPositionLinked) { const tx = positioning.translationX * request.format.width; const ty = positioning.translationY * request.format.height; context.font = `${translationSize}px ${typography.translationFontFamily}`; const h = translationHeight; if (captionBackground.enabled) { context.fillStyle = alphaColor(captionBackground.color, captionBackground.opacity); roundedRect(context, tx - maxWidth / 2 - captionBackground.horizontalPadding * scale, ty - h / 2 - captionBackground.verticalPadding * scale, maxWidth + captionBackground.horizontalPadding * scale * 2, h + captionBackground.verticalPadding * scale * 2, captionBackground.cornerRadius * scale); } drawText(context, translationLines, tx, ty - h / 2 + translationSize, translationSize * 1.25, typography.translationTextAlign, "ltr", alphaColor(typography.translationTextColor, typography.translationOpacity), typography.translationOutlineEnabled, typography.translationOutlineWidth * scale, typography.translationOutlineColor, typography.translationShadowEnabled, typography.translationShadowBlur * scale, typography.translationShadowStrength); }
     context.restore();
   }
+  if (request.watermarkRequired) {
+    context.save();
+    context.font = `${Math.max(12, request.format.width * 0.018)}px Arial, sans-serif`;
+    context.textAlign = "right";
+    context.textBaseline = "bottom";
+    context.fillStyle = "rgba(255,255,255,0.72)";
+    context.shadowColor = "rgba(0,0,0,0.35)";
+    context.shadowBlur = 3;
+    context.fillText("Quran Video", request.format.width - request.format.width * 0.035, request.format.height - request.format.height * 0.025);
+    context.restore();
+  }
 }

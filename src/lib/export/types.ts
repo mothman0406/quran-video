@@ -31,6 +31,7 @@ export type LocalExportConfiguration = {
   positioning: CaptionPositioning;
   transitionSettings: TransitionSettings;
   showVerseNumber: boolean;
+  watermarkRequired: boolean;
 };
 
 export type LocalExportRequest = LocalExportConfiguration & {

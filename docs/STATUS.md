@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: V1 Free / Creator / Pro entitlement model
+
+Complete:
+
+- Replaced provisional plan definitions with centralized typed capabilities and quotas in `src/lib/entitlements.ts`; unauthenticated and authenticated-without-subscription users resolve to Free.
+- Free is capped at 720p with a renderer-controlled watermark, 2 cloud projects, and 2 saved custom styles. Creator is capped at 1080p with no watermark and 25 cloud projects. Pro carries future 4K, multi-qiraat, and premium capability flags with a centralized 1,000-project technical ceiling.
+- Export count remains unlimited on every plan while `export_completed` continues to be recorded. Local Quran recognition, canonical Arabic, manual editing, and local exports are not count-gated.
+- Added a development-only `NEXT_PUBLIC_DEV_PLAN_OVERRIDE` for local simulation; production ignores it and uses server subscription state when that state is connected.
+
+Verification: entitlement, export, and existing regression tests pass when the milestone checks complete below. Stripe, 4K, other qiraat, and word-level alignment remain intentionally unimplemented.
+
 ## Current milestone: M8.5 — Server-authoritative usage accounting
 
 Complete:
