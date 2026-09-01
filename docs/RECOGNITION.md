@@ -1,6 +1,12 @@
 # Two-stage local Quran recognition
 
-Whisper Base remains fully browser-local and now requests Transformers.js `return_timestamps: "word"`. Overlapping 30-second transcription windows are stitched into one monotonic transcript: overlap duplicates are removed and timestamp order cannot move backward. The source is decoded once to mono 16 kHz PCM and reduced to a local 10 ms RMS envelope; neither PCM nor text is uploaded.
+The recognition transcriber uses `onnx-community/whisper-base_timestamped`, the multilingual Whisper Base ONNX export that retains the decoder cross-attention outputs Transformers.js needs for `return_timestamps: "word"`. It remains fully browser-local: q4 is selected for the encoder and merged decoder (about 145 MB including tokenizer/config assets on first download), WebGPU is preferred, and the same cached model runs through local WASM when WebGPU cannot initialize. The source is decoded once to mono 16 kHz PCM and reduced to a local 10 ms RMS envelope; neither PCM nor text is uploaded.
+
+## Timestamp capability and fallback
+
+Word timing is a declared capability of the timestamped export; the ordinary `onnx-community/whisper-base` export must not be used for that mode. Each run validates non-empty word timestamps after absolute-time overlap stitching: values must be finite, ordered, within the source duration, and not all identical. An occasional zero-duration word is retained for neighboring interpolation, but missing timestamps, large regressions, out-of-duration values, or identical timestamps invalidate precise timing.
+
+If Transformers.js reports its known missing-cross-attention/output-attentions failure, or validation rejects the returned words, the transcriber retries once with `return_timestamps: true` on the same model. Passage mapping continues from coarse timestamped chunks, but the result is marked `chunk-fallback`, records its reason in developer diagnostics, and the editor warns that timing is approximate. This fallback never claims word precision.
 
 ## 1. Passage mapping
 
@@ -10,7 +16,7 @@ Mapping reports the selected best passage, top three alternatives, global score,
 
 ## 2. Word and PCM timing
 
-After mapping, the selected canonical passage is aligned again as one monotonic word sequence. Every canonical token retains its ayah, word index, and global passage order. Aligned ASR words supply initial timings; missing interior evidence is interpolated only between canonical neighbors.
+After mapping, the selected canonical passage is aligned again as one monotonic word sequence when validated ASR words are available. Every canonical token retains its ayah, word index, and global passage order. Aligned ASR words supply initial timings; under a documented chunk fallback, missing interior evidence uses timestamped chunk text and interpolation only between canonical neighbors.
 
 PCM energy is consulted only inside a corridor already implied by the last aligned word of ayah A and first aligned word of ayah B. A local adaptive noise floor finds active speech offset/onset around that expected transition. A genuine gap yields distinct A end and B start times; connected recitation uses the text-derived transition instead. Silence is never a global verse segmenter, so a breath within an ayah cannot split it. The first/last ayah are refined around their first/last aligned word, preserving initial silence and elongated final vocal energy without retaining a long reverb tail.
 

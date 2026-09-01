@@ -92,7 +92,8 @@ export default function RecognitionSpikePage() {
 
         {result && <section className="rounded-2xl border border-[#d8d5cc] bg-[#fbfaf6] p-5">
           <h2 className="font-serif text-2xl font-semibold text-[#173c32]">Recognition result</h2>
-          <p className="mt-2 text-sm text-[#68716a]">Backend: {result.backend} · transcription time: {formatMilliseconds(result.durationMs)}</p>
+          <p className="mt-2 text-sm text-[#68716a]">Transcriber: {LOCAL_WHISPER_MODEL} · backend: {result.backend} · timestamp mode: {result.timestampMode === "word" ? "word" : "chunk fallback"} · model load: {formatMilliseconds(result.modelLoadMs)} · transcription: {formatMilliseconds(result.transcriptionMs)}</p>
+          <p className="mt-2 text-sm text-[#68716a]">Timestamp validation: {result.timestampValidation.asrWordCount} ASR words · {result.timestampValidation.timestampedWordCount} timestamped words · {result.timestampValidation.zeroDurationCount} zero-duration · range: {result.timestampValidation.rangeMs ? `${formatTime(result.timestampValidation.rangeMs[0])}–${formatTime(result.timestampValidation.rangeMs[1])}` : "—"}{result.timestampValidation.fallbackReason ? ` · fallback: ${result.timestampValidation.fallbackReason}` : ""}</p>
           <dl className="mt-4 grid gap-3 sm:grid-cols-2">
             <div><dt className="text-xs font-bold uppercase tracking-wide text-[#8b928b]">Surah</dt><dd className="mt-1 font-semibold">{firstMatch ? firstMatch.verseKey.split(":")[0] : "No Quran match"}</dd></div>
             <div><dt className="text-xs font-bold uppercase tracking-wide text-[#8b928b]">Detected ayah range</dt><dd className="mt-1 font-semibold">{firstMatch && lastMatch ? `${firstMatch.verseKey} – ${lastMatch.verseKey}` : "—"}</dd></div>

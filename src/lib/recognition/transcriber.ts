@@ -22,7 +22,21 @@ export type LocalTranscriptionResult = {
   chunks: TranscriptChunk[];
   rawTranscript: string;
   backend: "webgpu" | "wasm";
+  timestampMode: "word" | "chunk-fallback";
+  timestampValidation: TimestampValidationDiagnostics;
+  /** Time spent loading the locally cached/downloaded model. */
+  modelLoadMs: number;
+  /** Time spent in ASR calls, excluding decoding and model loading. */
+  transcriptionMs: number;
   durationMs: number;
   /** Local 10 ms PCM energy envelope, retained only for this recognition job. */
   audioAnalysis: AudioAnalysis;
+};
+
+export type TimestampValidationDiagnostics = {
+  asrWordCount: number;
+  timestampedWordCount: number;
+  zeroDurationCount: number;
+  rangeMs: [number, number] | null;
+  fallbackReason?: string;
 };

@@ -4,9 +4,17 @@ import type {
   TranscriptionProgress,
 } from "./transcriber";
 import { analyzeMonoPcm } from "./audio-analysis.ts";
+import type { TimestampValidationDiagnostics } from "./transcriber";
 
-export const LOCAL_WHISPER_MODEL = "onnx-community/whisper-base";
+/** This export retains the decoder cross-attentions Transformers.js needs for word timestamps. */
+export const LOCAL_WHISPER_MODEL = "onnx-community/whisper-base_timestamped";
+// q4 encoder (18.8 MB) + q4 merged decoder (123.7 MB) + tokenizer/config assets.
 export const LOCAL_WHISPER_APPROXIMATE_DOWNLOAD_MB = 145;
+export const LOCAL_WHISPER_CAPABILITY = {
+  modelId: LOCAL_WHISPER_MODEL,
+  wordTimestamps: true,
+  dtype: "q4",
+} as const;
 const TARGET_SAMPLE_RATE = 16_000;
 const CHUNK_SECONDS = 30;
 const CHUNK_OVERLAP_SECONDS = 3;
@@ -17,6 +25,8 @@ type PipelineOutput = {
 };
 
 type Pipeline = (audio: Float32Array, options: Record<string, unknown>) => Promise<PipelineOutput>;
+type TimestampMode = "word" | "chunk-fallback";
+type TimestampedUnit = { text: string; timestamp: [number, number] };
 
 function supportsWebGpu() {
   return typeof navigator !== "undefined" && "gpu" in navigator;
@@ -78,6 +88,72 @@ async function createPipeline(
   return { transcriber: transcriber as Pipeline, backend: "wasm" };
 }
 
+export function isWordTimestampRuntimeFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /cross attentions|output_attentions|token_timestamps/i.test(message);
+}
+
+export async function withTimestampFallback<T>(
+  runWordTimestamps: () => Promise<T>,
+  runChunkTimestamps: () => Promise<T>,
+): Promise<{ value: T; timestampMode: TimestampMode; fallbackReason?: string }> {
+  try {
+    return { value: await runWordTimestamps(), timestampMode: "word" };
+  } catch (error) {
+    if (!isWordTimestampRuntimeFailure(error)) throw error;
+    return {
+      value: await runChunkTimestamps(),
+      timestampMode: "chunk-fallback",
+      fallbackReason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+export function validateWordTimestamps(
+  units: readonly TimestampedUnit[],
+  audioDurationMs: number,
+): { valid: boolean; diagnostics: TimestampValidationDiagnostics; reason?: string } {
+  const nonEmpty = units.filter((item) => item.text.trim());
+  const timestamps = nonEmpty.map((item) => item.timestamp);
+  const invalid = timestamps.some(([start, end]) =>
+    !Number.isFinite(start) || !Number.isFinite(end) || start > end || start < 0 || end * 1_000 > audioDurationMs + 250,
+  );
+  const regressions = timestamps.some(([start, end], index) => index > 0 && (start < timestamps[index - 1][0] || end < timestamps[index - 1][1]));
+  const zeroDurationCount = timestamps.filter(([start, end]) => start === end).length;
+  const allIdentical = timestamps.length > 1 && timestamps.every(([start, end]) => start === timestamps[0][0] && end === timestamps[0][1]);
+  const diagnostics: TimestampValidationDiagnostics = {
+    asrWordCount: nonEmpty.reduce((count, item) => count + item.text.trim().split(/\s+/).filter(Boolean).length, 0),
+    timestampedWordCount: timestamps.length,
+    zeroDurationCount,
+    rangeMs: timestamps.length ? [Math.round(timestamps[0][0] * 1_000), Math.round(timestamps.at(-1)![1] * 1_000)] : null,
+  };
+  const reason = invalid ? "Word timestamps were missing, non-finite, or outside the recording."
+    : regressions ? "Word timestamps regressed after overlap stitching."
+    : allIdentical ? "Word timestamps were identical for every recognized word."
+    : timestamps.length === 0 ? "The transcriber returned no timestamped words."
+    : undefined;
+  return { valid: !reason, diagnostics, reason };
+}
+
+export function stitchTimestampedChunks(
+  chunks: readonly { text: string; startMs: number; endMs: number; words?: Array<{ text: string; startMs: number; endMs: number }> }[],
+) {
+  return chunks
+    .filter((chunk) => chunk.text.trim())
+    .sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs)
+    .reduce<typeof chunks[number][]>((all, chunk) => {
+      const prior = all.at(-1);
+      const sameWord = prior?.text.trim() === chunk.text.trim();
+      const overlaps = prior ? chunk.startMs <= prior.endMs : false;
+      // The second 30-second window repeats its first three seconds. Keep the
+      // first occurrence rather than modifying a valid absolute timestamp.
+      if (prior && sameWord && overlaps) return all;
+      if (prior && chunk.endMs < prior.endMs) return all;
+      all.push(chunk);
+      return all;
+    }, []);
+}
+
 async function decodeAudio(source: File, onProgress?: (progress: TranscriptionProgress) => void) {
   if (typeof AudioContext === "undefined") {
     throw new Error("Audio decoding is unavailable in this browser.");
@@ -135,69 +211,89 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
     const startedAt = performance.now();
     const audio = await decodeAudio(source, onProgress);
     const audioAnalysis = analyzeMonoPcm(audio, TARGET_SAMPLE_RATE);
+    const loadingStartedAt = performance.now();
     const { transcriber, backend } = await createPipeline(supportsWebGpu(), onProgress);
+    const modelLoadMs = Math.round(performance.now() - loadingStartedAt);
     const audioChunks = splitPcmAudio(audio);
-    const transcriptChunks: LocalTranscriptionResult["chunks"] = [];
+    const transcriptionStartedAt = performance.now();
 
-    for (const [index, chunk] of audioChunks.entries()) {
-      onProgress?.({
-        phase: "transcribing",
-        message: `Transcribing local audio chunk ${index + 1} of ${audioChunks.length}…`,
-        completed: index,
-        total: audioChunks.length,
-      });
-      const output = await transcriber(chunk.audio, {
-        language: "arabic",
-        task: "transcribe",
-        // Transformers.js supports word timestamps for Whisper.  These are the
-        // alignment observations; output chunk windows are never verse timing.
-        return_timestamps: "word",
-      });
-      const timestamped = output.chunks ?? (output.text ? [{ text: output.text, timestamp: [0, chunk.audio.length / TARGET_SAMPLE_RATE] as [number, number] }] : []);
-      for (const item of timestamped) {
-        const midpoint = (item.timestamp[0] + item.timestamp[1]) / 2;
-        if (midpoint < chunk.trimBeforeSeconds) continue;
-        const text = item.text.trim();
-        const startMs = Math.round((chunk.offsetSeconds + item.timestamp[0]) * 1_000);
-        const endMs = Math.round((chunk.offsetSeconds + item.timestamp[1]) * 1_000);
-        // A runtime may still return a multi-word span. Keep its timestamp but
-        // label it as coarser evidence; normal installations return words.
-        transcriptChunks.push({
-          text,
-          startMs,
-          endMs,
-          words: text.split(/\s+/).filter(Boolean).length === 1 ? [{ text, startMs, endMs }] : undefined,
+    async function runTranscription(timestampMode: TimestampMode) {
+      const transcriptChunks: LocalTranscriptionResult["chunks"] = [];
+      const returnedUnits: TimestampedUnit[] = [];
+      for (const [index, chunk] of audioChunks.entries()) {
+        onProgress?.({
+          phase: "transcribing",
+          message: `Transcribing local audio chunk ${index + 1} of ${audioChunks.length}…`,
+          completed: index,
+          total: audioChunks.length,
         });
+        const output = await transcriber(chunk.audio, {
+          language: "arabic",
+          task: "transcribe",
+          return_timestamps: timestampMode === "word" ? "word" : true,
+        });
+        const timestamped = output.chunks ?? (output.text ? [{ text: output.text, timestamp: [0, chunk.audio.length / TARGET_SAMPLE_RATE] as [number, number] }] : []);
+        for (const item of timestamped) {
+          const midpoint = (item.timestamp[0] + item.timestamp[1]) / 2;
+          if (midpoint < chunk.trimBeforeSeconds) continue;
+          const text = item.text.trim();
+          if (!text) continue;
+          const startMs = Math.round((chunk.offsetSeconds + item.timestamp[0]) * 1_000);
+          const endMs = Math.round((chunk.offsetSeconds + item.timestamp[1]) * 1_000);
+          returnedUnits.push({ text, timestamp: [startMs / 1_000, endMs / 1_000] });
+          transcriptChunks.push({
+            text,
+            startMs,
+            endMs,
+            words: timestampMode === "word" ? [{ text, startMs, endMs }] : undefined,
+          });
+        }
       }
+      const stitched = stitchTimestampedChunks(transcriptChunks);
+      return {
+        chunks: stitched,
+        returnedUnits: timestampMode === "word"
+          ? stitched.flatMap((item) => item.words ?? []).map((word) => ({ text: word.text, timestamp: [word.startMs / 1_000, word.endMs / 1_000] as [number, number] }))
+          : returnedUnits,
+      };
     }
 
-    // 30-second windows overlap by three seconds.  Keep the first occurrence
-    // of an overlapping word and enforce monotonic timestamps so the logical
-    // recording is one transcript rather than independent chunk decisions.
-    const stitched = transcriptChunks
-      .filter((chunk) => chunk.text)
-      .sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs)
-      .reduce<LocalTranscriptionResult["chunks"]>((all, chunk) => {
-        const prior = all.at(-1);
-        const sameWord = prior?.text.trim() === chunk.text.trim();
-        const overlaps = prior ? chunk.startMs <= prior.endMs : false;
-        if (prior && sameWord && overlaps) return all;
-        const startMs = Math.max(prior?.endMs ?? 0, chunk.startMs);
-        const endMs = Math.max(startMs, chunk.endMs);
-        all.push({
-          ...chunk,
-          startMs,
-          endMs,
-          words: chunk.words?.map((word) => ({ ...word, startMs: Math.max(startMs, word.startMs), endMs: Math.max(startMs, word.endMs) })),
-        });
-        return all;
-      }, []);
+    const initialAttempt = await withTimestampFallback(
+      () => runTranscription("word"),
+      () => runTranscription("chunk-fallback"),
+    );
+    let timestampMode = initialAttempt.timestampMode;
+    let fallbackReason = initialAttempt.fallbackReason;
+    let transcription = initialAttempt.value;
+    let validation = validateWordTimestamps(transcription.returnedUnits, Math.round(audio.length / TARGET_SAMPLE_RATE * 1_000));
+    if (timestampMode === "word" && !validation.valid) {
+      timestampMode = "chunk-fallback";
+      fallbackReason = validation.reason;
+      transcription = await runTranscription("chunk-fallback");
+    }
+    if (timestampMode === "chunk-fallback") {
+      validation = {
+        valid: true,
+        diagnostics: {
+          asrWordCount: transcription.chunks.reduce((count, chunk) => count + chunk.text.split(/\s+/).filter(Boolean).length, 0),
+          timestampedWordCount: 0,
+          zeroDurationCount: 0,
+          rangeMs: null,
+          fallbackReason,
+        },
+        reason: undefined,
+      };
+    }
 
     onProgress?.({ phase: "transcribing", message: "Local transcription complete.", completed: audioChunks.length, total: audioChunks.length });
     return {
-      chunks: stitched,
-      rawTranscript: stitched.map((chunk) => chunk.text).join(" "),
+      chunks: transcription.chunks,
+      rawTranscript: transcription.chunks.map((chunk) => chunk.text).join(" "),
       backend,
+      timestampMode,
+      timestampValidation: validation.diagnostics,
+      modelLoadMs,
+      transcriptionMs: Math.round(performance.now() - transcriptionStartedAt),
       durationMs: Math.round(performance.now() - startedAt),
       audioAnalysis,
     };

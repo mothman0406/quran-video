@@ -61,6 +61,7 @@ type EditorWorkspaceProps = {
   exportError: string | null;
   exportDiagnostics: LocalExportDiagnostics | null;
   errorMessage: string | null;
+  timingWarning: string | null;
   showCorrection: boolean;
   surah: number;
   startAyah: number;
@@ -141,7 +142,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
     selectedObject, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, showVerseNumber, showSafeArea, projectName, dirty, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
-    exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage,
+    exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage, timingWarning,
     showCorrection, surah, startAyah, endAyah, entitlements, selectedFormatDefinition,
     onProjectNameChange, onVideoSelect, onLoadedMetadata, onVideoTimeUpdate, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown,
@@ -215,9 +216,10 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           <div className="editor-playhead" style={{ left: `${(currentTimeMs / maxTime) * 100}%` }} />
           <div className="editor-timeline-track">{segments.map((segment) => <button key={segment.id} type="button" aria-label={`Caption ${segment.verseKeys.join(", ")}`} onClick={(event) => { event.stopPropagation(); onSelectSegment(segment); }} className={`editor-caption-block ${segment.id === selectedSegmentId ? "is-selected" : ""}`} style={{ width: `${Math.max(1, ((segment.endMs - segment.startMs) / maxTime) * 100)}%`, marginLeft: `${(segment.startMs / maxTime) * 100}%` }}><span>{segment.verseKeys[0]}</span>{segment.id === selectedSegmentId && <><span className="editor-timing-handle editor-timing-handle-start" onPointerDown={(event) => onEdgeDown(event, "start", segment)} onPointerUp={onEdgeUp} /><span className="editor-timing-handle editor-timing-handle-end" onPointerDown={(event) => onEdgeDown(event, "end", segment)} onPointerUp={onEdgeUp} /></>}</button>)}</div>
         </div></div>}
-        {(busy || (stage === "complete" && alignments.length > 0) || showCorrection || errorMessage || exportState) && <div className="editor-notices">
+        {(busy || (stage === "complete" && alignments.length > 0) || showCorrection || errorMessage || timingWarning || exportState) && <div className="editor-notices">
           {busy && <div className="editor-notice"><strong>{stage === "loading-model" ? "Loading recognition model" : stage === "transcribing" ? "Transcribing locally" : stage === "matching" ? "Matching Quran" : "Preparing captions"}</strong><span>Audio stays in this browser{progress?.total ? ` · ${progress.completed ?? 0}/${progress.total} chunks` : ""}.</span></div>}
           {stage === "complete" && alignments.length > 0 && <div className="editor-notice editor-notice-success"><strong>Detected Surah {alignments[0].surahNumber} · ayat {alignments[0].ayahNumber}–{alignments.at(-1)?.ayahNumber}</strong><span>{Math.round((alignments.reduce((sum, item) => sum + item.confidence, 0) / alignments.length) * 100)}% overall confidence</span></div>}
+          {timingWarning && <div className="editor-notice">{timingWarning}</div>}
           {showCorrection && <div className="editor-correction"><SectionLabel>Correct detection</SectionLabel><div><select aria-label="Surah" className="editor-select" value={surah}><option value={surah}>Surah {surah}</option></select><input aria-label="First ayah" type="number" value={startAyah} readOnly /><input aria-label="Last ayah" type="number" value={endAyah} readOnly /><button className="editor-button editor-button-primary" type="button" onClick={onCorrectDetection}>Use range</button></div></div>}
           {errorMessage && <div className="editor-notice editor-notice-error">{errorMessage}</div>}
           {exportState && <div className="editor-notice"><strong>{exportState === "complete" ? "Export complete" : exportState === "error" ? "Export stopped" : `Exporting · ${exportState.phase}`}</strong><span>{exportError ?? "Source media is processed locally."}</span></div>}

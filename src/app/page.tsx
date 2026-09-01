@@ -133,6 +133,7 @@ export default function Home() {
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [timingWarning, setTimingWarning] = useState<string | null>(null);
   const [support, setSupport] = useState<{
     supported: boolean;
     reason: string;
@@ -407,6 +408,7 @@ export default function Home() {
     setStage("idle");
     setProgress(null);
     setErrorMessage(null);
+    setTimingWarning(null);
     setPositioning(resetCaptionPositioning(projectFormat));
     setExportState(null);
     setExportError(null);
@@ -712,6 +714,9 @@ export default function Home() {
         },
       );
       if (job !== generation.current) return;
+      if (result.timestampMode === "chunk-fallback") {
+        setTimingWarning("Word timing was unavailable for this recording, so caption timing is approximate. You can adjust it in the timeline.");
+      }
       setStage("matching");
       const analysis = analyzeTranscript(result.chunks, { audioAnalysis: result.audioAnalysis });
       if (analysis.matches.length === 0)
@@ -1205,6 +1210,7 @@ export default function Home() {
         exportError={exportError}
         exportDiagnostics={exportDiagnostics}
         errorMessage={errorMessage}
+        timingWarning={timingWarning}
         showCorrection={showCorrection}
         surah={surah}
         startAyah={startAyah}
@@ -1802,6 +1808,7 @@ export default function Home() {
                   Canonical Arabic is loaded locally from the verified Tanzil
                   Hafs corpus.
                 </p>
+                {timingWarning && <p className="mt-2 text-xs text-[#8d5e2a]">{timingWarning}</p>}
               </div>
             )}
             {showCorrection && (
