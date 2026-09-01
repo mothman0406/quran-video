@@ -20,14 +20,12 @@ const alignment = {
 
 const content = { "93:1": { arabic: { uthmani: "وَالضُّحَى وَاللَّيْلِ إِذَا سَجَى وَمَا وَدَّعَكَ رَبُّكَ" }, translation: "By the morning brightness", transliteration: null } } as unknown as Record<string, QuranVerseContent>;
 
-test("splits long ayat only at Quran word boundaries with monotonic derived timing", () => {
+test("automatically creates one whole-ayah display set regardless of preferred line length", () => {
   const segments = createCaptionSegments([alignment], content, 3);
-  assert.equal(segments.length, 3);
-  assert.equal(segments.map((segment) => segment.arabic).join(" "), content["93:1"].arabic.uthmani);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0].arabic, content["93:1"].arabic.uthmani);
   assert.equal(segments[0].timingEvidence.start.source, "word-timestamp");
-  assert.equal(segments[1].timingEvidence.start.source, "derived");
-  assert.equal(segments[0].endMs <= segments[1].startMs, true);
-  assert.equal(segments[1].endMs <= segments[2].startMs, true);
+  assert.equal(segments[0].timingEvidence.derived, false);
   assert.equal(segments.every((segment) => segment.verseKeys.join() === "93:1"), true);
 });
 
@@ -41,18 +39,18 @@ test("verse numbers are optional presentation metadata and never part of Arabic 
   assert.equal(splitCaptionSegment(segments[0], 1)[0].arabic, segments[0].arabic);
 });
 
-test("short ayat stay intact and automatic chunks avoid a tiny tail", () => {
+test("automatic display never splits long ayat; line wrapping is visual only", () => {
   const short = createCaptionSegments([alignment], { "93:1": { ...content["93:1"], arabic: { ...content["93:1"].arabic, uthmani: "وَالضُّحَى" } } }, 3);
   assert.equal(short.length, 1);
   const nineWords = "وَالضُّحَى وَاللَّيْلِ إِذَا سَجَى وَمَا وَدَّعَكَ رَبُّكَ وَمَا قَلَى";
   const balanced = createCaptionSegments([alignment], { "93:1": { ...content["93:1"], arabic: { ...content["93:1"].arabic, uthmani: nineWords } } }, 8);
-  assert.deepEqual(balanced.map((segment) => segment.arabic.split(" ").length), [5, 4]);
+  assert.deepEqual(balanced.map((segment) => segment.arabic.split(" ").length), [9]);
 });
 
 test("translation survives editor conversion and long-ayah splitting through the parent verse key", () => {
   const segments = createCaptionSegments([alignment], content, 3);
-  assert.equal(translationForCaptionSegment(segments[1], content), "By the morning brightness");
-  assert.equal(segments[1].translation, null);
+  assert.equal(translationForCaptionSegment(segments[0], content), "By the morning brightness");
+  assert.equal(segments[0].translation, "By the morning brightness");
   const split = splitCaptionSegment(createCaptionSegments([alignment], content, 99)[0], 3);
   assert.equal(split.every((segment) => segment.verseKeys.includes("93:1")), true);
   assert.equal(split.every((segment) => segment.translation === "By the morning brightness"), true);
@@ -80,7 +78,7 @@ test("invalid split boundaries do not alter canonical text", () => {
 });
 
 test("adjacent merges preserve verse keys and the full timing range", () => {
-  const first = createCaptionSegments([alignment], content, 3);
+  const first = splitCaptionSegment(createCaptionSegments([alignment], content, 3)[0], 3);
   const merged = mergeCaptionWithPrevious(first, 1);
   assert.deepEqual(merged[0].verseKeys, ["93:1"]);
   assert.equal(merged[0].startMs, alignment.startMs);
@@ -106,6 +104,24 @@ test("generated display timing starts at detected onset and closes pauses at the
   assert.equal(getActiveCaptionSegment(generated, 100)?.id, generated[0].id);
   assert.equal(getActiveCaptionSegment(generated, 1_600)?.id, generated[1].id);
   assert.equal(getActiveCaptionSegment(generated, 2_400), null);
+});
+
+test("three detected ayat produce exactly three whole-ayah display sets despite repetition metadata", () => {
+  const repeatedFirst = { ...alignment, verseKey: "6:75", surahNumber: 6, ayahNumber: 75, startMs: 9_500, endMs: 12_000, timingEvidence: { ...alignment.timingEvidence, start: { timestampMs: 9_500, source: "word-timestamp" as const }, end: { timestampMs: 12_000, source: "word-timestamp" as const }, matchedText: "repeat repeat" } };
+  const second = { ...repeatedFirst, verseKey: "6:76", ayahNumber: 76, startMs: 12_000, endMs: 14_000, timingEvidence: { ...repeatedFirst.timingEvidence, start: { timestampMs: 12_000, source: "word-timestamp" as const }, end: { timestampMs: 14_000, source: "word-timestamp" as const } } };
+  const third = { ...second, verseKey: "6:77", ayahNumber: 77, startMs: 14_000, endMs: 16_000, timingEvidence: { ...second.timingEvidence, start: { timestampMs: 14_000, source: "word-timestamp" as const }, end: { timestampMs: 16_000, source: "word-timestamp" as const } } };
+  const verses = {
+    "6:75": { ...content["93:1"], arabic: { uthmani: "آية خمسة وسبعون" } },
+    "6:76": { ...content["93:1"], arabic: { uthmani: "آية ستة وسبعون" } },
+    "6:77": { ...content["93:1"], arabic: { uthmani: "آية سبعة وسبعون" } },
+  } as unknown as Record<string, QuranVerseContent>;
+  const segments = createCaptionSegments([repeatedFirst, second, third], verses, 1);
+  assert.equal(segments.length, 3);
+  assert.deepEqual(segments.map((segment) => segment.verseKeys[0]), ["6:75", "6:76", "6:77"]);
+  assert.equal(segments[0].arabic, "آية خمسة وسبعون");
+  assert.equal(segments[0].startMs, 9_500);
+  assert.equal(segments[0].endMs, segments[1].startMs);
+  assert.equal(segments[1].endMs, segments[2].startMs);
 });
 
 test("typography defaults are neutral and independently configurable", () => {
@@ -180,14 +196,12 @@ test("canvas object width resizing is normalized, independent, and leaves Quran 
 });
 
 test("manual timing clamps to duration without changing neighboring segments", () => {
-  const base = createCaptionSegments([alignment], content, 3);
+  const base = splitCaptionSegment(createCaptionSegments([alignment], content, 3)[0], 3);
   const changed = updateCaptionSegmentTiming(base, base[1].id, { startMs: -100, endMs: 99_999 }, 2_000);
   assert.equal(changed[1].startMs, 0);
   assert.equal(changed[1].endMs, 2_000);
   assert.equal(changed[0].startMs, base[0].startMs);
   assert.equal(changed[0].endMs, base[0].endMs);
-  assert.equal(changed[2].startMs, base[2].startMs);
-  assert.equal(changed[2].endMs, base[2].endMs);
   assert.equal(alignment.startMs, 100);
 });
 
@@ -201,7 +215,7 @@ test("reset timing restores generated timing evidence without touching recogniti
 });
 
 test("reset all timing restores each recognition recommendation", () => {
-  const base = createCaptionSegments([alignment], content, 3);
+  const base = splitCaptionSegment(createCaptionSegments([alignment], content, 3)[0], 3);
   const edited = updateCaptionSegmentTiming(updateCaptionSegmentTiming(base, base[0].id, { startMs: 400 }, 2_000), base[1].id, { endMs: 1_900 }, 2_000);
   const reset = resetAllCaptionSegmentTiming(edited, 2_000);
   assert.deepEqual(reset.map((segment) => [segment.startMs, segment.endMs]), base.map((segment) => [segment.timingEvidence.start.timestampMs, segment.timingEvidence.end.timestampMs]));

@@ -331,6 +331,11 @@ export function translationForCaptionSegment(
   return segment.verseKeys.map((verseKey) => content[verseKey]?.translation ?? null).find(Boolean) ?? null;
 }
 
+/**
+ * Kept for callers from older projects. Automatic generation is intentionally
+ * whole-ayah regardless of this value; visual line wrapping is CSS, not a
+ * second timed caption set.
+ */
 export const DEFAULT_MAX_WORDS_PER_SEGMENT = 8;
 
 function words(value: string): string[] {
@@ -339,36 +344,6 @@ function words(value: string): string[] {
 
 function unique(values: readonly string[]): string[] {
   return values.filter((value, index) => values.indexOf(value) === index);
-}
-
-function chunkBoundaries(totalWords: number, maxWords: number): Array<[number, number]> {
-  if (totalWords <= maxWords) return [[0, totalWords]];
-  const chunkCount = Math.ceil(totalWords / maxWords);
-  const baseSize = Math.floor(totalWords / chunkCount);
-  const largerChunks = totalWords % chunkCount;
-  const boundaries: Array<[number, number]> = [];
-  let start = 0;
-  for (let index = 0; index < chunkCount; index += 1) {
-    const size = baseSize + (index < largerChunks ? 1 : 0);
-    boundaries.push([start, start + size]);
-    start += size;
-  }
-  return boundaries;
-}
-
-function segmentTiming(alignment: VerseAlignment, startWord: number, endWord: number, totalWords: number) {
-  const duration = Math.max(0, alignment.endMs - alignment.startMs);
-  const startMs = Math.round(alignment.startMs + duration * startWord / totalWords);
-  const endMs = endWord === totalWords ? alignment.endMs : Math.round(alignment.startMs + duration * endWord / totalWords);
-  return {
-    startMs,
-    endMs: Math.max(startMs, endMs),
-    timingEvidence: {
-      start: { timestampMs: startMs, source: startWord === 0 ? alignment.timingEvidence.start.source : "derived" as const },
-      end: { timestampMs: endMs, source: endWord === totalWords ? alignment.timingEvidence.end.source : "derived" as const },
-      derived: startWord > 0 || endWord < totalWords,
-    },
-  };
 }
 
 /**
@@ -401,22 +376,23 @@ export function createCaptionSegments(
     const arabic = verse ? quranDisplayText(verse) : "";
     const verseWords = words(arabic);
     if (!verseWords.length) return [];
-    const chunks: CaptionSegment[] = [];
-    for (const [start, end] of chunkBoundaries(verseWords.length, maxWordsPerSegment)) {
-      const timing = segmentTiming(alignment, start, end, verseWords.length);
-      chunks.push({
-        id: `${alignment.verseKey}#${chunks.length + 1}`,
-        verseKeys: [alignment.verseKey],
-        ...timing,
-        arabic: verseWords.slice(start, end).join(" "),
-        translation: verseWords.length <= maxWordsPerSegment ? verse?.translation ?? null : null,
-        transliteration: verseWords.length <= maxWordsPerSegment ? verse?.transliteration ?? null : null,
-        wordStart: start,
-        wordEnd: end,
-        wordCount: end - start,
-      });
-    }
-    return chunks;
+    return [{
+      id: `${alignment.verseKey}#1`,
+      verseKeys: [alignment.verseKey],
+      startMs: alignment.startMs,
+      endMs: alignment.endMs,
+      arabic: verseWords.join(" "),
+      translation: verse?.translation ?? null,
+      transliteration: verse?.transliteration ?? null,
+      wordStart: 0,
+      wordEnd: verseWords.length,
+      wordCount: verseWords.length,
+      timingEvidence: {
+        start: { timestampMs: alignment.startMs, source: alignment.timingEvidence.start.source },
+        end: { timestampMs: alignment.endMs, source: alignment.timingEvidence.end.source },
+        derived: false,
+      },
+    }];
   });
   return continuousDisplayTiming(generated);
 }

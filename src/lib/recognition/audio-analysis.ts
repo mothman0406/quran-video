@@ -108,3 +108,40 @@ export function refineWordEdgeWithEnergy(
   }
   return null;
 }
+
+/**
+ * Refines the beginning of the first detected ayah inside a text-derived
+ * corridor. This deliberately cannot inspect the earlier recording: PCM can
+ * make a boundary more exact, but cannot decide where Quran recitation began.
+ */
+export function refineFirstAyahOnsetWithEnergy(
+  analysis: AudioAnalysis,
+  anchorStartMs: number,
+  lookbackMs: number,
+  forwardToleranceMs = 180,
+): number | null {
+  if (!analysis.rms.length) return null;
+  const fromMs = Math.max(0, anchorStartMs - Math.max(0, lookbackMs));
+  const toMs = Math.min(analysis.durationMs, anchorStartMs + Math.max(0, forwardToleranceMs));
+  const threshold = adaptiveThreshold(analysis, fromMs, toMs);
+  const start = windowAt(analysis, fromMs);
+  const end = windowAt(analysis, toMs);
+  let quietStart = -1;
+  let closestQuietEnd: number | null = null;
+  for (let index = start; index <= end; index += 1) {
+    const quiet = (analysis.rms[index] ?? Infinity) <= threshold;
+    if (quiet && quietStart < 0) quietStart = index;
+    if ((!quiet || index === end) && quietStart >= 0) {
+      const quietEnd = quiet && index === end ? index + 1 : index;
+      if ((quietEnd - quietStart) * analysis.windowMs >= 30) {
+        const candidateMs = quietEnd * analysis.windowMs;
+        if (candidateMs <= anchorStartMs + forwardToleranceMs
+          && (closestQuietEnd === null || Math.abs(candidateMs - anchorStartMs) < Math.abs(closestQuietEnd - anchorStartMs))) {
+          closestQuietEnd = candidateMs;
+        }
+      }
+      quietStart = -1;
+    }
+  }
+  return closestQuietEnd === null ? null : Math.round(closestQuietEnd);
+}

@@ -1,7 +1,7 @@
 import hafsCorpus from "../quran/hafs-corpus.json" with { type: "json" };
 import { normalizeQuranRecitation, quranRecognitionUnits, type QuranRecognitionUnits } from "./quran-recitation.ts";
 import type { AudioAnalysis } from "./audio-analysis.ts";
-import { refineTransitionWithEnergy, refineWordEdgeWithEnergy } from "./audio-analysis.ts";
+import { refineFirstAyahOnsetWithEnergy, refineTransitionWithEnergy, refineWordEdgeWithEnergy } from "./audio-analysis.ts";
 
 export type TranscriptChunk = {
   startMs: number;
@@ -107,6 +107,35 @@ export type RecognitionAnalysis = {
   matches: RecognitionResult;
   diagnostics: RecognitionDiagnostic[];
   passage: PassageInference;
+  timingTrace: RecognitionTimingTrace | null;
+};
+
+export type VerseTimingTrace = {
+  verseKey: string;
+  /** Earliest token aligned by the passage matcher, before credibility filtering. */
+  firstAlignedAsrEvidenceMs: number | null;
+  /** First token in the selected local, multi-word alignment anchor. */
+  firstStrongAlignmentAnchorMs: number | null;
+  firstCanonicalWordSupported: number | null;
+  onsetCorridorStartMs: number | null;
+  onsetCorridorEndMs: number | null;
+  pcmLocalOnsetCandidateMs: number | null;
+  rawVerseAlignmentStartMs: number;
+  verseAlignmentStartMs: number;
+  verseAlignmentEndMs: number;
+};
+
+export type RecognitionTimingTrace = {
+  earliestAudioActivityCandidateMs: number | null;
+  firstAsrChunkStartMs: number | null;
+  firstAsrTimestampedWordMs: number | null;
+  firstAsrWordAlignedToDetectedQuranMs: number | null;
+  firstCanonicalQuranWordSupported: number | null;
+  firstStrongAlignmentAnchorMs: number | null;
+  pcmLocalOnsetCandidateMs: number | null;
+  rawVerseAlignmentStartMs: number | null;
+  verseAlignmentStartMs: number | null;
+  verses: VerseTimingTrace[];
 };
 
 type CorpusChapter = {
@@ -366,6 +395,12 @@ type CanonicalToken = {
   displayText: string;
 };
 
+type AlignedAyahEvidence = {
+  token: TimedToken;
+  canonicalWordIndex: number;
+  similarity: number;
+};
+
 function timedTokens(chunks: readonly TranscriptChunk[]): TimedToken[] {
   return chunks.reduce<TimedToken[]>((all, chunk) => {
     if (chunk.words?.length) {
@@ -480,22 +515,73 @@ function canonicalPassageTokens(passage: readonly QuranCorpusVerse[]) {
   return canonical;
 }
 
+/**
+ * A lone early token can be Whisper output during silence. When the same ayah
+ * has a later, coherent run of aligned tokens, use that run as the onset
+ * anchor. One-token recordings remain supported: there is no invented delay.
+ */
+function selectFirstAyahOnsetAnchor(evidence: readonly AlignedAyahEvidence[]): AlignedAyahEvidence | null {
+  if (!evidence.length) return null;
+  const strong = evidence.filter((item) => item.similarity >= 0.7);
+  const candidates = (strong.length ? strong : evidence).slice().sort((left, right) => left.token.startMs - right.token.startMs);
+  if (candidates.length === 1) return candidates[0];
+  const clusters: AlignedAyahEvidence[][] = [];
+  for (const item of candidates) {
+    const current = clusters.at(-1);
+    if (!current || item.token.startMs - current.at(-1)!.token.endMs > 1_800) clusters.push([item]);
+    else current.push(item);
+  }
+  const best = clusters.reduce((winner, cluster) => {
+    const score = (items: readonly AlignedAyahEvidence[]) => {
+      const distinctWords = new Set(items.map((item) => item.canonicalWordIndex)).size;
+      const averageSimilarity = items.reduce((sum, item) => sum + item.similarity, 0) / items.length;
+      return items.length + distinctWords * 0.5 + averageSimilarity;
+    };
+    return score(cluster) > score(winner) ? cluster : winner;
+  });
+  return best[0] ?? null;
+}
+
+function earliestAudioActivityCandidate(audioAnalysis: AudioAnalysis | undefined): number | null {
+  if (!audioAnalysis?.rms.length) return null;
+  const values = [...audioAnalysis.rms].sort((left, right) => left - right);
+  const floor = values[Math.floor((values.length - 1) * 0.2)] ?? 0;
+  const peak = values.at(-1) ?? floor;
+  const threshold = floor + (peak - floor) * 0.16;
+  const index = audioAnalysis.rms.findIndex((value) => value > threshold);
+  return index < 0 ? null : index * audioAnalysis.windowMs;
+}
+
 function reconstructPassage(
   selected: ScoredCandidate,
   chunks: readonly TranscriptChunk[],
   verses: readonly QuranCorpusVerse[],
   audioAnalysis?: AudioAnalysis,
-): RecognitionMatch[] {
+): { matches: RecognitionMatch[]; timingTrace: RecognitionTimingTrace } {
   const passage = verses.slice(selected.start, selected.end + 1);
   const canonical = canonicalPassageTokens(passage);
   const evidence = timedTokens(chunks);
   const aligned = selected.alignment;
-  if (aligned.firstCanonicalIndex === null || aligned.lastCanonicalIndex === null) return [];
+  if (aligned.firstCanonicalIndex === null || aligned.lastCanonicalIndex === null) {
+    return { matches: [], timingTrace: {
+      earliestAudioActivityCandidateMs: earliestAudioActivityCandidate(audioAnalysis),
+      firstAsrChunkStartMs: chunks.length ? Math.min(...chunks.map((chunk) => chunk.startMs)) : null,
+      firstAsrTimestampedWordMs: null,
+      firstAsrWordAlignedToDetectedQuranMs: null,
+      firstCanonicalQuranWordSupported: null,
+      firstStrongAlignmentAnchorMs: null,
+      pcmLocalOnsetCandidateMs: null,
+      rawVerseAlignmentStartMs: null,
+      verseAlignmentStartMs: null,
+      verses: [],
+    } };
+  }
   const firstToken = canonical[aligned.firstCanonicalIndex];
   const lastToken = canonical[aligned.lastCanonicalIndex];
   const activeStart = firstToken.ayah;
   const activeEnd = lastToken.ayah;
   const byAyah = passage.map(() => [] as TimedToken[]);
+  const alignedEvidenceByAyah = passage.map(() => [] as AlignedAyahEvidence[]);
   const textByAyah = passage.map(() => [] as string[]);
   const matchedWordsByAyah = passage.map(() => new Set<number>());
   const qualityByAyah = passage.map(() => [] as number[]);
@@ -505,6 +591,12 @@ function reconstructPassage(
     textByAyah[ayah].push(...tokens.map((token) => token.displayText));
     matchedWordsByAyah[ayah].add(canonical[canonicalIndex].wordIndex);
     qualityByAyah[ayah].push(...(aligned.similarities.get(canonicalIndex) ?? []));
+    const similarities = aligned.similarities.get(canonicalIndex) ?? [];
+    tokens.forEach((token, tokenIndex) => alignedEvidenceByAyah[ayah].push({
+      token,
+      canonicalWordIndex: canonical[canonicalIndex].wordIndex,
+      similarity: similarities[tokenIndex] ?? 0,
+    }));
   });
   const sourceDuration = Math.max(0, audioAnalysis?.durationMs ?? 0, ...chunks.map((chunk) => chunk.endMs));
   const rawStarts = byAyah.map((tokens) => tokens.length ? Math.min(...tokens.map((token) => token.startMs)) : null);
@@ -553,14 +645,24 @@ function reconstructPassage(
       starts[index + 1] = Math.max(transition, starts[index + 1] ?? transition);
     }
   }
-  const firstTokens = byAyah[activeStart];
   const lastTokens = byAyah[activeEnd];
-  if (audioAnalysis && firstTokens.length) {
-    const refined = refineWordEdgeWithEnergy(audioAnalysis, Math.min(...firstTokens.map((token) => token.startMs)), "start");
-    if (refined !== null) {
-      starts[activeStart] = Math.max(0, Math.min(refined, ends[activeStart]! - 1));
-      startSources[activeStart] = "word-audio-refined";
-    }
+  const rawFirstStartMs = starts[activeStart] ?? null;
+  const firstAnchor = selectFirstAyahOnsetAnchor(alignedEvidenceByAyah[activeStart]);
+  const firstCanonicalWordSupported = firstAnchor ? firstAnchor.canonicalWordIndex + 1 : null;
+  const onsetLookbackMs = firstAnchor
+    ? Math.min(1_600, Math.max(360, 280 + firstAnchor.canonicalWordIndex * 160))
+    : 0;
+  const onsetCorridorStartMs = firstAnchor ? Math.max(0, firstAnchor.token.startMs - onsetLookbackMs) : null;
+  const onsetCorridorEndMs = firstAnchor ? Math.min(sourceDuration, firstAnchor.token.startMs + 180) : null;
+  const pcmLocalOnsetCandidateMs = audioAnalysis && firstAnchor
+    ? refineFirstAyahOnsetWithEnergy(audioAnalysis, firstAnchor.token.startMs, onsetLookbackMs)
+    : null;
+  // Never use generic audio activity here. The anchor is Quran identity; PCM
+  // only sharpens it within the bounded local corridor.
+  if (firstAnchor) {
+    const refinedStart = pcmLocalOnsetCandidateMs ?? firstAnchor.token.startMs;
+    starts[activeStart] = Math.max(0, Math.min(refinedStart, ends[activeStart]! - 1));
+    if (pcmLocalOnsetCandidateMs !== null) startSources[activeStart] = "word-audio-refined";
   }
   if (audioAnalysis && lastTokens.length) {
     const refined = refineWordEdgeWithEnergy(audioAnalysis, Math.max(...lastTokens.map((token) => token.endMs)), "end");
@@ -569,7 +671,7 @@ function reconstructPassage(
       endSources[activeEnd] = "word-audio-refined";
     }
   }
-  return passage.slice(activeStart, activeEnd + 1).map((verse, offset) => {
+  const matches = passage.slice(activeStart, activeEnd + 1).map((verse, offset) => {
     const index = activeStart + offset;
     const startMs = Math.round(Math.max(0, Math.min(sourceDuration, starts[index] ?? 0)));
     const endMs = Math.round(Math.max(startMs + 1, Math.min(sourceDuration, ends[index] ?? startMs + 1)));
@@ -593,6 +695,36 @@ function reconstructPassage(
       },
     };
   });
+  const verseTrace = matches.map((match, offset) => {
+    const index = activeStart + offset;
+    const evidenceForVerse = alignedEvidenceByAyah[index];
+    const anchor = index === activeStart ? firstAnchor : selectFirstAyahOnsetAnchor(evidenceForVerse);
+    return {
+      verseKey: match.verseKey,
+      firstAlignedAsrEvidenceMs: evidenceForVerse.length ? Math.min(...evidenceForVerse.map((item) => item.token.startMs)) : null,
+      firstStrongAlignmentAnchorMs: anchor?.token.startMs ?? null,
+      firstCanonicalWordSupported: anchor ? anchor.canonicalWordIndex + 1 : null,
+      onsetCorridorStartMs: index === activeStart ? onsetCorridorStartMs : null,
+      onsetCorridorEndMs: index === activeStart ? onsetCorridorEndMs : null,
+      pcmLocalOnsetCandidateMs: index === activeStart ? pcmLocalOnsetCandidateMs : null,
+      rawVerseAlignmentStartMs: index === activeStart ? rawFirstStartMs ?? match.startMs : rawStarts[index] ?? match.startMs,
+      verseAlignmentStartMs: match.startMs,
+      verseAlignmentEndMs: match.endMs,
+    };
+  });
+  const firstAlignedWord = verseTrace[0]?.firstAlignedAsrEvidenceMs ?? null;
+  return { matches, timingTrace: {
+    earliestAudioActivityCandidateMs: earliestAudioActivityCandidate(audioAnalysis),
+    firstAsrChunkStartMs: chunks.length ? Math.min(...chunks.map((chunk) => chunk.startMs)) : null,
+    firstAsrTimestampedWordMs: evidence.length ? Math.min(...evidence.map((token) => token.startMs)) : null,
+    firstAsrWordAlignedToDetectedQuranMs: firstAlignedWord,
+    firstCanonicalQuranWordSupported: firstCanonicalWordSupported,
+    firstStrongAlignmentAnchorMs: firstAnchor?.token.startMs ?? null,
+    pcmLocalOnsetCandidateMs,
+    rawVerseAlignmentStartMs: rawFirstStartMs,
+    verseAlignmentStartMs: matches[0]?.startMs ?? null,
+    verses: verseTrace,
+  } };
 }
 
 type LocalCandidate = {
@@ -877,7 +1009,7 @@ export function analyzeTranscript(
     canonicalSpan: null, mappingQuality: null, transcriptCoverage: null, canonicalSpanCoverage: null, uniquenessMargin: null,
     firstBoundaryConfidence: null, lastBoundaryConfidence: null, boundaryCompletion: { extendedBackward: false, extendedForward: false },
   };
-  if (!fullTranscript || orderedChunks.some((chunk) => chunk.endMs < chunk.startMs)) return { matches: [], diagnostics, passage: emptyPassage };
+  if (!fullTranscript || orderedChunks.some((chunk) => chunk.endMs < chunk.startMs)) return { matches: [], diagnostics, passage: emptyPassage, timingTrace: null };
 
   const priorityStarts = diagnostics.flatMap((diagnostic) => {
     const key = diagnostic.topCandidate?.startVerseKey;
@@ -943,11 +1075,13 @@ export function analyzeTranscript(
       extendedForward: selectedEndIndex >= 0 && anchorEndIndex >= 0 && selectedEndIndex > anchorEndIndex,
     },
   };
-  if (state === "no-reliable-match" || !best) return { matches: [], diagnostics, passage };
+  if (state === "no-reliable-match" || !best) return { matches: [], diagnostics, passage, timingTrace: null };
+  const reconstructed = reconstructPassage(best, orderedChunks, verses, options.audioAnalysis);
   return {
-    matches: reconstructPassage(best, orderedChunks, verses, options.audioAnalysis),
+    matches: reconstructed.matches,
     diagnostics,
     passage,
+    timingTrace: reconstructed.timingTrace,
   };
 }
 

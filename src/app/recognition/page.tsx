@@ -29,6 +29,7 @@ function formatClockMilliseconds(value: number) {
 
 type GroundTruthKind = "recitation-start" | "set-start" | "transition" | "recitation-end";
 type GroundTruthMark = { id: string; kind: GroundTruthKind; timeMs: number; segmentId: string | null };
+type PreviewActivation = { segmentId: string; verseKeys: string[]; timeMs: number };
 
 const INITIAL_RUNTIME_SUPPORT = { supported: false, reason: "Checking browser capabilities…" };
 
@@ -50,6 +51,8 @@ export default function RecognitionSpikePage() {
   const [segments, setSegments] = useState<CaptionSegment[]>([]);
   const [marks, setMarks] = useState<GroundTruthMark[]>([]);
   const [editingMarkId, setEditingMarkId] = useState<string | null>(null);
+  const [previewActivations, setPreviewActivations] = useState<PreviewActivation[]>([]);
+  const lastPreviewSegmentId = useRef<string | null>(null);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setSupport(localTranscriptionSupport()));
@@ -72,6 +75,8 @@ export default function RecognitionSpikePage() {
     setAlignments([]);
     setSegments([]);
     setMarks([]);
+    setPreviewActivations([]);
+    lastPreviewSegmentId.current = null;
   }
 
   async function transcribe() {
@@ -98,12 +103,23 @@ export default function RecognitionSpikePage() {
   }
 
   function onVideoTimeUpdate() {
-    setCurrentTimeMs(Math.round((videoRef.current?.currentTime ?? 0) * 1_000));
+    const next = Math.round((videoRef.current?.currentTime ?? 0) * 1_000);
+    setCurrentTimeMs(next);
+    recordPreviewActivation(next);
   }
   function seekTo(value: number) {
     const next = Math.max(0, Math.min(durationMs, Math.round(value)));
     if (videoRef.current) videoRef.current.currentTime = next / 1_000;
     setCurrentTimeMs(next);
+    recordPreviewActivation(next);
+  }
+  function recordPreviewActivation(timeMs: number) {
+    const active = getActiveCaptionSegment(segments, timeMs);
+    const nextId = active?.id ?? null;
+    if (nextId === lastPreviewSegmentId.current) return;
+    lastPreviewSegmentId.current = nextId;
+    if (!active) return;
+    setPreviewActivations((current) => [...current.slice(-49), { segmentId: active.id, verseKeys: active.verseKeys, timeMs }]);
   }
   function mark(kind: GroundTruthKind) {
     const active = getActiveCaptionSegment(segments, currentTimeMs);
@@ -116,6 +132,60 @@ export default function RecognitionSpikePage() {
   function deleteMark(id: string) {
     setMarks((current) => current.filter((item) => item.id !== id));
     if (editingMarkId === id) setEditingMarkId(null);
+  }
+
+  function timingDebugPayload() {
+    const traceByVerse = new Map((analysis?.timingTrace?.verses ?? []).map((trace) => [trace.verseKey, trace]));
+    const segmentByVerse = new Map(segments.map((segment) => [segment.verseKeys[0], segment]));
+    const markFor = (segment: CaptionSegment | undefined, kinds: readonly GroundTruthKind[]) => marks.find((mark) => kinds.includes(mark.kind) && (!segment || mark.segmentId === segment.id));
+    return {
+      source: { durationMs: result?.durationMs ?? durationMs },
+      transcriber: result ? { model: LOCAL_WHISPER_MODEL, backend: result.backend, timestampMode: result.timestampMode } : null,
+      detectedPassage: { canonicalSpan: analysis?.passage.canonicalSpan, verseRange: matches.map((match) => match.verseKey) },
+      firstStartTrace: analysis?.timingTrace,
+      verses: matches.map((match) => {
+        const segment = segmentByVerse.get(match.verseKey);
+        const manual = markFor(segment, match === matches[0] ? ["recitation-start", "set-start"] : ["transition", "set-start"]);
+        return {
+          verseKey: match.verseKey,
+          ...traceByVerse.get(match.verseKey),
+          verseAlignmentStartMs: match.startMs,
+          captionSegmentStartMs: segment?.startMs ?? null,
+          captionSegmentEndMs: segment?.endMs ?? null,
+          manualStartMs: manual?.timeMs ?? null,
+          signedErrorMs: manual && segment ? segment.startMs - manual.timeMs : null,
+        };
+      }),
+      manualGroundTruthMarks: marks,
+      actualPreviewActivations: previewActivations,
+      rawAsr: result ? { chunks: result.chunks, timestampValidation: result.timestampValidation } : null,
+    };
+  }
+  function timingReportText() {
+    const debug = timingDebugPayload();
+    const first = debug.firstStartTrace;
+    const value = (item: number | null | undefined) => item === null || item === undefined ? "—" : `${item} ms`;
+    return [
+      "SOURCE", `duration: ${value(debug.source.durationMs)}`,
+      "", "TRANSCRIBER", `model: ${debug.transcriber?.model ?? "—"}`, `backend: ${debug.transcriber?.backend ?? "—"}`, `timestamp mode: ${debug.transcriber?.timestampMode ?? "—"}`,
+      "", "DETECTED PASSAGE", `verse range: ${debug.detectedPassage.verseRange.join("–") || "—"}`, `canonical word span: ${debug.detectedPassage.canonicalSpan ? `${debug.detectedPassage.canonicalSpan.firstVerseKey} word ${debug.detectedPassage.canonicalSpan.firstWordIndex} → ${debug.detectedPassage.canonicalSpan.lastVerseKey} word ${debug.detectedPassage.canonicalSpan.lastWordIndex}` : "—"}`,
+      "", "FIRST START TRACE", `earliest audio activity candidate: ${value(first?.earliestAudioActivityCandidateMs)}`, `first ASR chunk start: ${value(first?.firstAsrChunkStartMs)}`, `first ASR timestamped word: ${value(first?.firstAsrTimestampedWordMs)}`, `first ASR word aligned to detected Quran: ${value(first?.firstAsrWordAlignedToDetectedQuranMs)}`, `first canonical Quran word supported: ${first?.firstCanonicalQuranWordSupported ?? "—"}`, `first strong alignment anchor: ${value(first?.firstStrongAlignmentAnchorMs)}`, `PCM local onset candidate: ${value(first?.pcmLocalOnsetCandidateMs)}`, `raw VerseAlignment start: ${value(first?.rawVerseAlignmentStartMs)}`, `generated CaptionSegment start: ${value(debug.verses[0]?.captionSegmentStartMs)}`,
+      ...debug.verses.flatMap((verse) => ["", `VERSE ${verse.verseKey}`, `first aligned ASR evidence: ${value(verse.firstAlignedAsrEvidenceMs)}`, `alignment timestamp: ${value(verse.firstStrongAlignmentAnchorMs)}`, `PCM-refined start: ${value(verse.pcmLocalOnsetCandidateMs)}`, `VerseAlignment start: ${value(verse.verseAlignmentStartMs)}`, `CaptionSegment start: ${value(verse.captionSegmentStartMs)}`, `manual start: ${value(verse.manualStartMs)}`, `signed error: ${value(verse.signedErrorMs)}`]),
+      "", "MANUAL MARKS", ...debug.manualGroundTruthMarks.map((mark) => `${mark.kind}: ${value(mark.timeMs)}`),
+      "", "ACTIVE DISPLAY TRACE", ...debug.actualPreviewActivations.map((entry) => `${entry.verseKeys.join(", ")} activated at ${value(entry.timeMs)}`),
+    ].join("\n");
+  }
+  async function copyTimingReport() {
+    await navigator.clipboard.writeText(timingReportText());
+  }
+  function exportDebugJson() {
+    const blob = new Blob([JSON.stringify(timingDebugPayload(), null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "quran-recognition-timing-debug.json";
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   useEffect(() => {
@@ -164,6 +234,7 @@ export default function RecognitionSpikePage() {
           <h2 className="font-serif text-2xl font-semibold text-[#173c32]">Recognition result</h2>
           <p className="mt-2 text-sm text-[#68716a]">Transcriber: {LOCAL_WHISPER_MODEL} · backend: {result.backend} · timestamp mode: {result.timestampMode === "word" ? "word" : "chunk fallback"} · model load: {formatMilliseconds(result.modelLoadMs)} · transcription: {formatMilliseconds(result.transcriptionMs)}</p>
           <p className="mt-2 text-sm text-[#68716a]">Timestamp validation: {result.timestampValidation.asrWordCount} ASR words · {result.timestampValidation.timestampedWordCount} timestamped words · {result.timestampValidation.zeroDurationCount} zero-duration · range: {result.timestampValidation.rangeMs ? `${formatTime(result.timestampValidation.rangeMs[0])}–${formatTime(result.timestampValidation.rangeMs[1])}` : "—"}{result.timestampValidation.fallbackReason ? ` · fallback: ${result.timestampValidation.fallbackReason}` : ""}</p>
+          <div className="mt-4 flex flex-wrap gap-2"><button className="rounded-full bg-[#173c32] px-4 py-2 text-sm font-semibold text-white" type="button" onClick={() => void copyTimingReport()}>Copy Timing Report</button><button className="rounded-full border border-[#b8cabc] px-4 py-2 text-sm font-semibold text-[#315846]" type="button" onClick={exportDebugJson}>Export Debug JSON</button></div>
           <dl className="mt-4 grid gap-3 sm:grid-cols-2">
             <div><dt className="text-xs font-bold uppercase tracking-wide text-[#8b928b]">Surah</dt><dd className="mt-1 font-semibold">{firstMatch ? firstMatch.verseKey.split(":")[0] : "No Quran match"}</dd></div>
             <div><dt className="text-xs font-bold uppercase tracking-wide text-[#8b928b]">Detected ayah range</dt><dd className="mt-1 font-semibold">{firstMatch && lastMatch ? `${firstMatch.verseKey} – ${lastMatch.verseKey}` : "—"}</dd></div>

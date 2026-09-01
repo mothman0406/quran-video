@@ -275,6 +275,41 @@ test("refines only the expected text boundary with a local PCM energy gap", () =
   assert.ok(first!.endMs < second!.startMs, "a real ayah pause remains a caption gap");
 });
 
+test("first Quran onset ignores early audio and a lone Whisper-like aligned token", () => {
+  const corpus = [
+    { verseKey: "6:75", text: "الف باء جيم" },
+    { verseKey: "6:76", text: "دال هاء واو" },
+    { verseKey: "6:77", text: "زاي حاء طاء" },
+  ];
+  const pcm = new Float32Array(15_000);
+  // Handling noise at 2.6s is deliberately outside the later Quran corridor.
+  for (let index = 2_600; index < 2_900; index += 1) pcm[index] = 0.2;
+  for (let index = 9_500; index < 14_000; index += 1) pcm[index] = 0.2;
+  const analysis = analyzeTranscript([{
+    startMs: 2_630,
+    endMs: 14_000,
+    text: "الف الف باء جيم دال هاء واو زاي حاء طاء",
+    words: [
+      { text: "الف", startMs: 2_630, endMs: 2_800 }, // isolated hallucination
+      { text: "الف", startMs: 9_700, endMs: 9_850 },
+      { text: "باء", startMs: 9_850, endMs: 10_100 },
+      { text: "جيم", startMs: 10_100, endMs: 10_350 },
+      { text: "دال", startMs: 10_900, endMs: 11_100 },
+      { text: "هاء", startMs: 11_100, endMs: 11_300 },
+      { text: "واو", startMs: 11_300, endMs: 11_500 },
+      { text: "زاي", startMs: 12_000, endMs: 12_200 },
+      { text: "حاء", startMs: 12_200, endMs: 12_400 },
+      { text: "طاء", startMs: 12_400, endMs: 12_600 },
+    ],
+  }], { corpus, minConfidence: 0.6, audioAnalysis: analyzeMonoPcm(pcm, 1_000) });
+  assert.deepEqual(analysis.matches.map((match) => match.verseKey), ["6:75", "6:76", "6:77"]);
+  assert.ok((analysis.matches[0]?.startMs ?? 0) >= 9_400, "caption must not begin at generic early activity");
+  assert.ok((analysis.matches[0]?.startMs ?? Infinity) <= 9_700, "local PCM may only refine the late text anchor");
+  assert.ok((analysis.timingTrace?.firstAsrWordAlignedToDetectedQuranMs ?? 0) >= 9_700, "only accepted Quran alignment is timing evidence");
+  assert.ok((analysis.timingTrace?.firstStrongAlignmentAnchorMs ?? 0) >= 9_700);
+  assert.equal(analysis.timingTrace?.pcmLocalOnsetCandidateMs, 9_500);
+});
+
 test("rejects unrelated Arabic prose even when approximate retrieval runs", () => {
   const analysis = analyzeTranscript([{
     startMs: 0,
