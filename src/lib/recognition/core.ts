@@ -20,8 +20,8 @@ export type RecognitionMatch = {
   endMs: number;
   confidence: number;
   timing: {
-    start: { timestampMs: number; source: "direct-asr-word" | "chunk-text-alignment" | "interpolation" };
-    end: { timestampMs: number; source: "direct-asr-word" | "chunk-text-alignment" | "interpolation" };
+    start: { timestampMs: number; source: "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "low-confidence" };
+    end: { timestampMs: number; source: "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "low-confidence" };
     matchedText: string;
   };
 };
@@ -44,9 +44,31 @@ export type RecognitionDiagnostic = {
   rejectionReason: "empty transcript" | "invalid timestamps" | "no candidate sequence" | "ambiguous short phrase" | "below confidence threshold" | null;
 };
 
+export type PassageCandidateDiagnostic = {
+  startVerseKey: string;
+  endVerseKey: string;
+  totalScore: number;
+  confidence: number;
+  textSimilarity: number;
+  sequenceConsistency: number;
+  transcriptCoverage: number;
+  consecutiveAyat: number;
+};
+
+export type PassageAmbiguityState = "confident-unique" | "plausible-ambiguous" | "no-reliable-match";
+
+export type PassageInference = {
+  state: PassageAmbiguityState;
+  candidates: PassageCandidateDiagnostic[];
+  candidateMargin: number | null;
+  selectedCandidate: PassageCandidateDiagnostic | null;
+  disambiguatedByLaterChunks: boolean;
+};
+
 export type RecognitionAnalysis = {
   matches: RecognitionResult;
   diagnostics: RecognitionDiagnostic[];
+  passage: PassageInference;
 };
 
 type CorpusChapter = {
@@ -361,19 +383,12 @@ function alignTokens(canonical: QuranRecognitionUnits[], asr: TimedToken[]) {
 }
 
 function reconstructPassage(
-  accepted: ScoredCandidate[],
-  acceptedConfidence: number[],
+  selected: ScoredCandidate,
+  confidence: number,
   chunks: readonly TranscriptChunk[],
   verses: readonly QuranCorpusVerse[],
 ): RecognitionMatch[] {
-  if (!accepted.length) return [];
-  // A confirmed span is higher-level evidence than any individual weak chunk.
-  // Fill only interior ayat in the same surah, preserving Quran order.
-  const sameSurah = accepted.filter((candidate) => verses[candidate.start].verseKey.split(":")[0] === verses[accepted[0].start].verseKey.split(":")[0]);
-  if (!sameSurah.length) return [];
-  const start = Math.min(...sameSurah.map((candidate) => candidate.start));
-  const end = Math.max(...sameSurah.map((candidate) => candidate.end));
-  const passage = verses.slice(start, end + 1);
+  const passage = verses.slice(selected.start, selected.end + 1);
   const canonical: Array<{ units: QuranRecognitionUnits; ayah: number }> = [];
   passage.forEach((verse, ayah) => {
     const orthographicWords = normalizedVerseWords(verse);
@@ -429,7 +444,7 @@ function reconstructPassage(
       verseKey: verse.verseKey,
       startMs,
       endMs,
-      confidence: Number((acceptedConfidence.reduce((sum, value) => sum + value, 0) / acceptedConfidence.length).toFixed(4)),
+      confidence: Number(confidence.toFixed(4)),
       timing: {
         start: { timestampMs: startMs, source },
         end: { timestampMs: endMs, source },
@@ -445,7 +460,145 @@ type ScoredCandidate = {
   score: number;
   textSimilarity: number;
   tokenSequenceSimilarity: number;
+  transcriptCoverage?: number;
+  canonicalCoverage?: number;
+  consecutiveAyat?: number;
 };
+
+function canonicalPassageTokens(passage: readonly QuranCorpusVerse[]) {
+  const canonical: Array<{ units: QuranRecognitionUnits; ayah: number }> = [];
+  passage.forEach((verse, ayah) => {
+    const orthographicWords = normalizedVerseWords(verse);
+    const recitationWords = recitationVerseWords(verse);
+    orthographicWords.forEach((word, index) => canonical.push({
+      units: { orthographic: word, recitation: recitationWords[index] ?? normalizeQuranRecitation(word) },
+      ayah,
+    }));
+  });
+  return canonical;
+}
+
+/**
+ * Scores one contiguous Quran window against all timestamped ASR evidence.
+ * No chunk gets to choose a verse: chunks only help retrieve possible anchors.
+ */
+function scorePassageCandidate(
+  start: number,
+  end: number,
+  evidence: readonly TimedToken[],
+  transcriptUnits: QuranRecognitionUnits,
+  verses: readonly QuranCorpusVerse[],
+): ScoredCandidate {
+  const passage = verses.slice(start, end + 1);
+  const canonical = canonicalPassageTokens(passage);
+  const aligned = alignTokens(canonical.map((token) => token.units), [...evidence]);
+  const matchedAsr = new Set<TimedToken>();
+  const supportedAyat = new Set<number>();
+  let similarityTotal = 0;
+  let similarityCount = 0;
+  aligned.forEach((tokens, canonicalIndex) => {
+    if (!tokens.length) return;
+    supportedAyat.add(canonical[canonicalIndex].ayah);
+    for (const token of tokens) {
+      matchedAsr.add(token);
+      similarityTotal += recognitionUnitSimilarity(canonical[canonicalIndex].units, token.units);
+      similarityCount += 1;
+    }
+  });
+  let longestRun = 0;
+  let run = 0;
+  for (let ayah = 0; ayah < passage.length; ayah += 1) {
+    run = supportedAyat.has(ayah) ? run + 1 : 0;
+    longestRun = Math.max(longestRun, run);
+  }
+  const averageSimilarity = similarityCount ? similarityTotal / similarityCount : 0;
+  const transcriptCoverage = evidence.length ? matchedAsr.size / evidence.length : 0;
+  const canonicalCoverage = canonical.length ? aligned.size / canonical.length : 0;
+  const sequenceConsistency = passage.length ? longestRun / passage.length : 0;
+  const textSimilarity = combinedTextSimilarity(transcriptUnits, {
+    orthographic: passage.map(normalizedVerseText).join(" "),
+    recitation: passage.map(recitationVerseText).join(" "),
+  });
+  // Coverage is deliberately stronger than a locally plausible phrase. A short,
+  // distinctive ayah can still win when it explains its complete transcript.
+  const score = averageSimilarity * 0.34
+    + transcriptCoverage * 0.34
+    + canonicalCoverage * 0.12
+    + sequenceConsistency * 0.16
+    + textSimilarity * 0.04;
+  return { start, end, score, textSimilarity, tokenSequenceSimilarity: averageSimilarity, transcriptCoverage, canonicalCoverage, consecutiveAyat: longestRun };
+}
+
+function globalCandidateStarts(
+  chunks: readonly TranscriptChunk[],
+  transcriptUnits: QuranRecognitionUnits,
+  verses: readonly QuranCorpusVerse[],
+  maxPassageVerses: number,
+  priorityStarts: readonly number[],
+): { starts: number[]; path: CandidateStarts["path"] } {
+  const priority = [...new Set(priorityStarts)];
+  const starts = new Set(priority);
+  const transcriptWordCount = chunks.reduce((count, chunk) => count + normalizeArabic(chunk.text).split(" ").filter(Boolean).length, 0);
+  let usedFallback = false;
+  if (transcriptWordCount <= 12 || priority.length === 0) {
+    const fullResult = candidateStarts(transcriptUnits, verses, maxPassageVerses);
+    usedFallback ||= fullResult.path === "character-fallback";
+    fullResult.starts.forEach((start) => starts.add(start));
+    for (const chunk of chunks) {
+      const normalized = normalizeArabic(chunk.text);
+      if (!normalized) continue;
+      const result = candidateStarts(quranRecognitionUnits(normalized, chunk.text), verses, maxPassageVerses);
+      usedFallback ||= result.path === "character-fallback";
+      result.starts.forEach((start) => starts.add(start));
+    }
+  }
+  // A long recording already has several locally-ranked anchors. Reserving
+  // broad alternatives for short recordings keeps the all-browser pass bounded
+  // while preserving ambiguity detection for terse repeated phrases.
+  const generic = [...starts].filter((start) => !priority.includes(start)).slice(0, transcriptWordCount <= 12 ? 8 : 0);
+  return { starts: [...priority, ...generic], path: usedFallback && starts.size === 0 ? "character-fallback" : "token-retrieval" };
+}
+
+function scoreGlobalPassages(
+  chunks: readonly TranscriptChunk[],
+  verses: readonly QuranCorpusVerse[],
+  maxPassageVerses: number,
+  priorityStarts: readonly number[],
+): { candidates: ScoredCandidate[]; path: CandidateStarts["path"]; evidence: TimedToken[]; transcriptUnits: QuranRecognitionUnits } {
+  const transcript = chunks.map((chunk) => chunk.text).join(" ");
+  const normalized = normalizeArabic(transcript);
+  const transcriptUnits = quranRecognitionUnits(normalized, transcript);
+  const evidence = timedTokens(chunks);
+  const starts = globalCandidateStarts(chunks, transcriptUnits, verses, maxPassageVerses, priorityStarts);
+  const candidates: ScoredCandidate[] = [];
+  const seen = new Set<string>();
+  for (const start of starts.starts) {
+    const surah = verses[start]?.verseKey.split(":")[0];
+    for (let end = start; end < Math.min(verses.length, start + maxPassageVerses); end += 1) {
+      if (verses[end].verseKey.split(":")[0] !== surah) break;
+      const key = `${start}:${end}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      candidates.push(scorePassageCandidate(start, end, evidence, transcriptUnits, verses));
+    }
+  }
+  candidates.sort((left, right) => right.score - left.score || right.transcriptCoverage! - left.transcriptCoverage! || left.start - right.start);
+  return { candidates, path: starts.path, evidence, transcriptUnits };
+}
+
+function passageDiagnostic(candidate: ScoredCandidate, verses: readonly QuranCorpusVerse[]): PassageCandidateDiagnostic {
+  const confidence = confidenceFor(candidate.score, verses.slice(candidate.start, candidate.end + 1).map(normalizedVerseText).join(" "));
+  return {
+    startVerseKey: verses[candidate.start].verseKey,
+    endVerseKey: verses[candidate.end].verseKey,
+    totalScore: Number(candidate.score.toFixed(4)),
+    confidence: Number(confidence.toFixed(4)),
+    textSimilarity: Number(candidate.textSimilarity.toFixed(4)),
+    sequenceConsistency: Number(((candidate.consecutiveAyat ?? 0) / (candidate.end - candidate.start + 1)).toFixed(4)),
+    transcriptCoverage: Number((candidate.transcriptCoverage ?? 0).toFixed(4)),
+    consecutiveAyat: candidate.consecutiveAyat ?? 0,
+  };
+}
 
 function bestCandidateForStarts(
   units: QuranRecognitionUnits,
@@ -486,16 +639,15 @@ function diagnosticCandidate(best: ScoredCandidate, verses: readonly QuranCorpus
 
 export function analyzeTranscript(
   chunks: readonly TranscriptChunk[],
-  options: { corpus?: readonly QuranCorpusVerse[]; minConfidence?: number; maxVersesPerChunk?: number } = {},
+  options: { corpus?: readonly QuranCorpusVerse[]; minConfidence?: number; maxVersesPerChunk?: number; maxPassageVerses?: number; ambiguityMargin?: number } = {},
 ): RecognitionAnalysis {
   const verses = options.corpus ?? hafsVerses;
-  const minConfidence = options.minConfidence ?? 0.52;
+  const minConfidence = options.minConfidence ?? 0.64;
   const maxVersesPerChunk = options.maxVersesPerChunk ?? 5;
+  const maxPassageVerses = options.maxPassageVerses ?? Math.max(5, Math.min(14, chunks.length * 3 + 4));
+  const ambiguityMargin = options.ambiguityMargin ?? 0.075;
   const orderedChunks = [...chunks].sort((left, right) => left.startMs - right.startMs);
   const diagnostics: RecognitionDiagnostic[] = [];
-  const accepted: ScoredCandidate[] = [];
-  const acceptedConfidence: number[] = [];
-  let cursor = 0;
 
   for (const chunk of orderedChunks) {
     const normalizedChunk = normalizeArabic(chunk.text);
@@ -516,19 +668,12 @@ export function analyzeTranscript(
     const units = quranRecognitionUnits(normalizedChunk, chunk.text);
     const candidates = candidateStarts(units, verses, maxVersesPerChunk);
     diagnostic.candidateGenerationPath = candidates.path;
-    const starts = candidates.starts.filter((start) => start >= cursor);
-    if (starts.length === 0) {
-      const rejectedBest = bestCandidateForStarts(units, candidates.starts, verses, maxVersesPerChunk);
-      if (rejectedBest) diagnostic.topCandidate = diagnosticCandidate(rejectedBest, verses, normalizedChunk);
-      diagnostics.push({ ...diagnostic, rejectionReason: "no candidate sequence" });
-      continue;
-    }
-    const best = bestCandidateForStarts(units, starts, verses, maxVersesPerChunk);
+    const best = bestCandidateForStarts(units, candidates.starts, verses, maxVersesPerChunk);
     if (!best) continue;
     const confidence = confidenceFor(best.score, normalizedChunk);
     diagnostic.topCandidate = diagnosticCandidate(best, verses, normalizedChunk);
     const exactSingleVerse = verses.some((verse) => normalizedVerseText(verse) === normalizedChunk);
-    if (normalizedChunk.split(" ").length === 1 && starts.length > 1 && !exactSingleVerse) {
+    if (normalizedChunk.split(" ").length === 1 && candidates.starts.length > 1 && !exactSingleVerse) {
       diagnostics.push({ ...diagnostic, rejectionReason: "ambiguous short phrase" });
       continue;
     }
@@ -536,17 +681,66 @@ export function analyzeTranscript(
       diagnostics.push({ ...diagnostic, rejectionReason: "below confidence threshold" });
       continue;
     }
-    accepted.push(best);
-    acceptedConfidence.push(confidence);
-    cursor = Math.max(cursor, best.end + 1);
     diagnostics.push(diagnostic);
   }
-  return { matches: reconstructPassage(accepted, acceptedConfidence, orderedChunks, verses), diagnostics };
+  const fullTranscript = normalizeArabic(orderedChunks.map((chunk) => chunk.text).join(" "));
+  const emptyPassage: PassageInference = {
+    state: "no-reliable-match", candidates: [], candidateMargin: null, selectedCandidate: null, disambiguatedByLaterChunks: false,
+  };
+  if (!fullTranscript || orderedChunks.some((chunk) => chunk.endMs < chunk.startMs)) return { matches: [], diagnostics, passage: emptyPassage };
+
+  const priorityStarts = diagnostics.flatMap((diagnostic) => {
+    const key = diagnostic.topCandidate?.startVerseKey;
+    const index = key ? verses.findIndex((verse) => verse.verseKey === key) : -1;
+    return index >= 0 ? [index] : [];
+  });
+  const global = scoreGlobalPassages(orderedChunks, verses, maxPassageVerses, priorityStarts);
+  const ranked = global.candidates.slice(0, 3);
+  const best = ranked[0];
+  const runnerUp = ranked.find((candidate) => candidate.start !== best?.start || candidate.end !== best.end);
+  const margin = best && runnerUp ? best.score - runnerUp.score : null;
+  const bestDiagnostic = best ? passageDiagnostic(best, verses) : null;
+  const sufficientEvidence = Boolean(
+    best
+      && best.score >= minConfidence
+      && (best.transcriptCoverage ?? 0) >= 0.45
+      && (best.consecutiveAyat ?? 0) >= 1
+      && (best.textSimilarity >= 0.7 || (best.consecutiveAyat ?? 0) >= 2),
+  );
+  // A shorter contained window often matches the later ayat of a correct
+  // passage. It is not a real ambiguity when it leaves meaningful transcript
+  // evidence unexplained. Reserve ambiguity for candidates that explain the
+  // same evidence almost equally well at a different Quran location.
+  const ambiguous = Boolean(
+    sufficientEvidence && runnerUp && (margin ?? 0) < ambiguityMargin && runnerUp.score >= minConfidence
+      && (runnerUp.transcriptCoverage ?? 0) >= (best!.transcriptCoverage ?? 0) - 0.02
+      && runnerUp.textSimilarity >= best!.textSimilarity - 0.02,
+  );
+  const state: PassageAmbiguityState = !sufficientEvidence ? "no-reliable-match" : ambiguous ? "plausible-ambiguous" : "confident-unique";
+  const selectedCandidate = state === "confident-unique" ? bestDiagnostic : null;
+  const firstChunkBest = diagnostics.find((diagnostic) => diagnostic.topCandidate)?.topCandidate;
+  const disambiguatedByLaterChunks = Boolean(
+    selectedCandidate && firstChunkBest
+      && (firstChunkBest.startVerseKey !== selectedCandidate.startVerseKey || firstChunkBest.endVerseKey !== selectedCandidate.endVerseKey),
+  );
+  const passage: PassageInference = {
+    state,
+    candidates: ranked.map((candidate) => passageDiagnostic(candidate, verses)),
+    candidateMargin: margin === null ? null : Number(margin.toFixed(4)),
+    selectedCandidate,
+    disambiguatedByLaterChunks,
+  };
+  if (state !== "confident-unique" || !best) return { matches: [], diagnostics, passage };
+  return {
+    matches: reconstructPassage(best, bestDiagnostic!.confidence, orderedChunks, verses),
+    diagnostics,
+    passage,
+  };
 }
 
 export function recognizeTranscript(
   chunks: readonly TranscriptChunk[],
-  options: { corpus?: readonly QuranCorpusVerse[]; minConfidence?: number; maxVersesPerChunk?: number } = {},
+  options: { corpus?: readonly QuranCorpusVerse[]; minConfidence?: number; maxVersesPerChunk?: number; maxPassageVerses?: number; ambiguityMargin?: number } = {},
 ): RecognitionResult {
   return analyzeTranscript(chunks, options).matches;
 }

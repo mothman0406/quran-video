@@ -32,8 +32,8 @@ export const VerseAlignmentSchema = VerseKeySchema.extend({
   endMs: PositiveNumber,
   confidence: z.number().finite().min(0).max(1),
   timingEvidence: z.strictObject({
-    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation"]) }),
-    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation"]) }),
+    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation", "low-confidence"]) }),
+    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation", "low-confidence"]) }),
     matchedText: z.string(),
   }).optional(),
 });
@@ -50,8 +50,8 @@ export const CaptionSegmentSchema = z.strictObject({
   wordEnd: z.number().int().positive(),
   wordCount: z.number().int().positive(),
   timingEvidence: z.strictObject({
-    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation", "derived"]) }),
-    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation", "derived"]) }),
+    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation", "low-confidence", "derived"]) }),
+    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["direct-asr-word", "chunk-text-alignment", "interpolation", "low-confidence", "derived"]) }),
     derived: z.boolean(),
   }).optional(),
 });

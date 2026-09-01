@@ -134,15 +134,45 @@ test("maps a clip beginning mid-ayah to the containing ayah", () => {
   assert.equal(result[0]?.startMs, 250);
 });
 
-test("maps a clip ending mid-ayah to the containing ayah", () => {
-  const result = recognizeTranscript([{ startMs: 0, endMs: 420, text: "الحمد لله" }]);
-  assert.equal(result[0]?.verseKey, "1:2");
-  assert.equal(result[0]?.endMs, 420);
+test("reports an ambiguous short clip instead of committing to one repeated passage", () => {
+  const analysis = analyzeTranscript([{ startMs: 0, endMs: 420, text: "الحمد لله" }]);
+  assert.deepEqual(analysis.matches, []);
+  assert.equal(analysis.passage.state, "plausible-ambiguous");
+  assert.ok(analysis.passage.candidates.length >= 2);
 });
 
 test("does not overclaim an ambiguous short phrase", () => {
   const result = recognizeTranscript([{ startMs: 0, endMs: 300, text: "الله" }]);
   assert.deepEqual(result, []);
+});
+
+test("uses later contiguous ayat to overturn an early repeated-phrase hypothesis", () => {
+  const corpus = [
+    { verseKey: "1:1", text: "قال الله" },
+    { verseKey: "1:2", text: "ثم ذهب" },
+    { verseKey: "2:1", text: "قال الله" },
+    { verseKey: "2:2", text: "ثم رجع" },
+  ];
+  const analysis = analyzeTranscript([
+    { startMs: 500, endMs: 1_000, text: "قال الله" },
+    { startMs: 1_100, endMs: 1_700, text: "ثم رجع" },
+  ], { corpus, minConfidence: 0.6 });
+  assert.equal(analysis.passage.state, "confident-unique");
+  assert.deepEqual(analysis.matches.map((match) => match.verseKey), ["2:1", "2:2"]);
+  assert.equal(analysis.passage.disambiguatedByLaterChunks, true);
+  assert.equal(analysis.matches[0]?.startMs, 500, "intro/silence before the first aligned token is not used as an ayah start");
+});
+
+test("leaves a repeated short recording ambiguous until subsequent Quran evidence arrives", () => {
+  const corpus = [
+    { verseKey: "1:1", text: "قال الله" },
+    { verseKey: "1:2", text: "ثم ذهب" },
+    { verseKey: "2:1", text: "قال الله" },
+    { verseKey: "2:2", text: "ثم رجع" },
+  ];
+  const analysis = analyzeTranscript([{ startMs: 800, endMs: 1_300, text: "قال الله" }], { corpus, minConfidence: 0.6 });
+  assert.deepEqual(analysis.matches, []);
+  assert.equal(analysis.passage.state, "plausible-ambiguous");
 });
 
 test("rejects unrelated Arabic prose even when approximate retrieval runs", () => {

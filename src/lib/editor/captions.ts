@@ -194,18 +194,6 @@ function clampOpacity(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
-function adjacentTransitionRange(
-  segment: Pick<CaptionSegment, "endMs">,
-  next: Pick<CaptionSegment, "startMs">,
-  settings: TransitionSettings,
-): { startMs: number; endMs: number } | null {
-  if (settings.type !== "fade" || settings.fadeInMs <= 0 || settings.fadeOutMs <= 0) return null;
-  if (next.startMs - segment.endMs > Math.max(settings.fadeInMs, settings.fadeOutMs)) return null;
-  const startMs = segment.endMs - settings.fadeOutMs;
-  const endMs = next.startMs + settings.fadeInMs;
-  return endMs > startMs ? { startMs, endMs } : null;
-}
-
 export type CaptionTransitionState = {
   opacity: number;
   blurPx: number;
@@ -249,34 +237,22 @@ export type CaptionVisualState<T extends { startMs: number; endMs: number }> = {
 };
 
 /**
- * Computes the visible caption layers for preview. Adjacent segments get a
- * short visual crossfade when their editable timings touch; their stored
- * timing ranges remain non-overlapping.
+ * Computes preview layers directly from the editable segment intervals. A
+ * transition only interpolates opacity inside its own interval, so a caption
+ * can never appear before `startMs` or persist at/after `endMs`.
  */
 export function captionVisualStatesAtTime<T extends { startMs: number; endMs: number }>(
   segments: readonly T[],
   timeMs: number,
   settings: TransitionSettings = DEFAULT_TRANSITION_SETTINGS,
 ): CaptionVisualState<T>[] {
-  return segments.flatMap((segment, index) => {
+  return segments.flatMap((segment) => {
     const baseState = captionTransitionAtTime(segment, timeMs, settings);
-    let opacity = baseState.opacity;
-    let blurPx = baseState.blurPx;
-    const previous = segments[index - 1];
-    const next = segments[index + 1];
-    const incoming = previous ? adjacentTransitionRange(previous, segment, settings) : null;
-    const outgoing = next ? adjacentTransitionRange(segment, next, settings) : null;
-    if (incoming && timeMs >= incoming.startMs && timeMs < incoming.endMs) {
-      opacity = clampOpacity((timeMs - incoming.startMs) / (incoming.endMs - incoming.startMs));
-    } else if (outgoing && timeMs >= outgoing.startMs && timeMs < outgoing.endMs) {
-      opacity = clampOpacity((outgoing.endMs - timeMs) / (outgoing.endMs - outgoing.startMs));
-    }
-    blurPx = blurAtOpacity(opacity, settings);
-    return opacity > 0 ? [{ segment, opacity, blurPx }] : [];
+    return timeMs >= segment.startMs && timeMs < segment.endMs ? [{ segment, ...baseState }] : [];
   });
 }
 
-export type CaptionTimingSource = "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "derived";
+export type CaptionTimingSource = "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "low-confidence" | "derived";
 
 export type CaptionSegment = {
   id: string;

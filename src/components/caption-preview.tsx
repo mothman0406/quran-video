@@ -58,7 +58,10 @@ function CaptionPreview({
         const opacity = state?.opacity ?? 0;
         layer.style.opacity = String(opacity);
         layer.style.filter = state && state.blurPx > 0 ? `blur(${state.blurPx}px)` : "none";
-        layer.style.visibility = opacity > 0 ? "visible" : "hidden";
+        // Presence in the state map is the same half-open CaptionSegment time
+        // interval used by the editor timeline. A fade may begin at opacity 0,
+        // but it never changes the caption's authoritative start/end boundary.
+        layer.style.visibility = state ? "visible" : "hidden";
         layer.dataset.captionOpacity = opacity.toFixed(3);
       });
     };

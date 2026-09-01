@@ -236,14 +236,18 @@ test("none transition is fully opaque only inside the editable segment", () => {
   assert.equal(captionOpacityAtTime(segment, 2_000, none), 0);
 });
 
-test("touching segments crossfade visually without overlapping editable timing", () => {
+test("preview and timeline use the same half-open editable CaptionSegment interval", () => {
   const first = { id: "a", startMs: 0, endMs: 1_000 };
   const second = { id: "b", startMs: 1_000, endMs: 2_000 };
-  const states = captionVisualStatesAtTime([first, second], 1_050, DEFAULT_TRANSITION_SETTINGS);
-  assert.deepEqual(states.map((state) => state.segment.id), ["a", "b"]);
-  assert.equal(states.every((state) => state.opacity > 0 && state.opacity < 1), true);
-  assert.equal(states[0].opacity + states[1].opacity, 1);
-  assert.equal(first.endMs, second.startMs);
+  const segments = [first, second];
+  const expected: Array<[number, string | undefined]> = [
+    [-1, undefined], [0, "a"], [999, "a"], [1_000, "b"], [1_999, "b"], [2_000, undefined],
+  ];
+  for (const [timeMs, id] of expected) {
+    assert.equal(captionForPlaybackTime(segments, timeMs)?.id, id, `timeline at ${timeMs}`);
+    assert.deepEqual(captionVisualStatesAtTime(segments, timeMs, DEFAULT_TRANSITION_SETTINGS).map((state) => state.segment.id), id ? [id] : [], `preview at ${timeMs}`);
+  }
+  assert.equal(first.endMs, second.startMs, "editable intervals remain adjacent but never overlap");
 });
 
 test("caption background shares the animated caption layer opacity", () => {
