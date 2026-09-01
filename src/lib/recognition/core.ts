@@ -26,6 +26,15 @@ export type RecognitionMatch = {
     end: { timestampMs: number; source: "word-audio-refined" | "word-timestamp" | "token-interpolated" | "chunk-interpolated" | "low-confidence-fallback" };
     matchedText: string;
   };
+  /** Canonical evidence is independent from timestamp precision. Word indexes are one-based. */
+  wordSupport: {
+    canonicalStartWordIndex: number;
+    canonicalEndWordIndex: number;
+    matchedCanonicalWordCount: number;
+    canonicalWordCount: number;
+    coverage: number;
+    evidenceQuality: number;
+  };
 };
 
 export type RecognitionResult = RecognitionMatch[];
@@ -49,6 +58,8 @@ export type RecognitionDiagnostic = {
 export type PassageCandidateDiagnostic = {
   startVerseKey: string;
   endVerseKey: string;
+  firstWordIndex: number;
+  lastWordIndex: number;
   totalScore: number;
   confidence: number;
   textSimilarity: number;
@@ -56,6 +67,9 @@ export type PassageCandidateDiagnostic = {
   transcriptCoverage: number;
   canonicalCoverage: number;
   consecutiveAyat: number;
+  explainedTranscriptTokens: number;
+  unexplainedTranscriptBefore: number;
+  unexplainedTranscriptAfter: number;
 };
 
 export type PassageAmbiguityState = "confident-unique" | "plausible-ambiguous" | "no-reliable-match";
@@ -66,6 +80,27 @@ export type PassageInference = {
   candidateMargin: number | null;
   selectedCandidate: PassageCandidateDiagnostic | null;
   disambiguatedByLaterChunks: boolean;
+  canonicalSpan: CanonicalSpan | null;
+  mappingQuality: number | null;
+  transcriptCoverage: number | null;
+  canonicalSpanCoverage: number | null;
+  uniquenessMargin: number | null;
+  firstBoundaryConfidence: number | null;
+  lastBoundaryConfidence: number | null;
+  boundaryCompletion: { extendedBackward: boolean; extendedForward: boolean };
+};
+
+export type CanonicalSpan = {
+  surah: number;
+  firstVerseKey: string;
+  firstWordIndex: number;
+  firstWordText: string;
+  firstBoundary: "verse-beginning" | "mid-verse" | "uncertain";
+  lastVerseKey: string;
+  lastWordIndex: number;
+  lastWordText: string;
+  lastBoundary: "verse-end" | "mid-verse" | "uncertain";
+  coveredVerseKeys: string[];
 };
 
 export type RecognitionAnalysis = {
@@ -321,6 +356,16 @@ type TimedToken = {
   source: "direct-asr-word" | "chunk-text-alignment";
 };
 
+type CanonicalToken = {
+  units: QuranRecognitionUnits;
+  ayah: number;
+  verseKey: string;
+  /** Zero-based internally; public metadata is one-based. */
+  wordIndex: number;
+  globalWordIndex: number;
+  displayText: string;
+};
+
 function timedTokens(chunks: readonly TranscriptChunk[]): TimedToken[] {
   return chunks.reduce<TimedToken[]>((all, chunk) => {
     if (chunk.words?.length) {
@@ -343,87 +388,124 @@ function timedTokens(chunks: readonly TranscriptChunk[]): TimedToken[] {
   }, []).filter((token) => token.endMs >= token.startMs);
 }
 
+type TokenAlignment = {
+  matched: Map<number, TimedToken[]>;
+  matchedAsrIndexes: Set<number>;
+  similarities: Map<number, number[]>;
+  firstCanonicalIndex: number | null;
+  lastCanonicalIndex: number | null;
+  score: number;
+  evidenceTokenCount: number;
+};
+
 /**
- * Monotonic fuzzy alignment of ASR tokens to the canonical passage. It deliberately
- * has no pause or chunk-boundary input: those are timestamps on evidence, never ayah
- * separators. Canonical gaps are inexpensive so clips may begin/end inside an ayah.
+ * Semi-global alignment: canonical start/end gaps are free because a clip can
+ * begin or end in the middle of an ayah. ASR gaps are deliberately penalized.
+ * This is the key asymmetry that prevents a later clean anchor from discarding
+ * spoken Quran text at the beginning or end of a recording.
  */
-function alignTokens(canonical: QuranRecognitionUnits[], asr: TimedToken[]) {
+function alignTokens(canonical: readonly CanonicalToken[], asr: readonly TimedToken[]): TokenAlignment {
   const rows = canonical.length + 1;
   const columns = asr.length + 1;
   const scores = Array.from({ length: rows }, () => new Float64Array(columns));
   const moves = Array.from({ length: rows }, () => new Uint8Array(columns)); // 1 diag, 2 canonical gap, 3 ASR gap
   for (let i = 1; i < rows; i += 1) { scores[i][0] = 0; moves[i][0] = 2; }
-  for (let j = 1; j < columns; j += 1) { scores[0][j] = 0; moves[0][j] = 3; }
+  // Transcript words are speech evidence, not free padding. Silence produces
+  // no token here, while unrelated speech can remain unmatched at a cost.
+  for (let j = 1; j < columns; j += 1) { scores[0][j] = scores[0][j - 1] - 0.78; moves[0][j] = 3; }
   for (let i = 1; i < rows; i += 1) {
     for (let j = 1; j < columns; j += 1) {
-      const similarity = recognitionUnitSimilarity(canonical[i - 1], asr[j - 1].units);
-      const diagonal = scores[i - 1][j - 1] + (similarity >= 0.58 ? similarity * 2 : -1.2);
-      const skipCanonical = scores[i - 1][j] - 0.12;
-      const skipAsr = scores[i][j - 1] - 0.35;
+      const similarity = recognitionUnitSimilarity(canonical[i - 1].units, asr[j - 1].units);
+      const diagonal = scores[i - 1][j - 1] + (similarity >= 0.58 ? similarity * 2.25 : -1.25);
+      const skipCanonical = scores[i - 1][j] - 0.1;
+      const skipAsr = scores[i][j - 1] - 0.78;
       if (diagonal >= skipCanonical && diagonal >= skipAsr) { scores[i][j] = diagonal; moves[i][j] = 1; }
       else if (skipCanonical >= skipAsr) { scores[i][j] = skipCanonical; moves[i][j] = 2; }
       else { scores[i][j] = skipAsr; moves[i][j] = 3; }
     }
   }
+  // Reaching the canonical end is not required: it is a free suffix gap.
+  let endRow = 0;
+  for (let i = 1; i < rows; i += 1) if (scores[i][columns - 1] > scores[endRow][columns - 1]) endRow = i;
   const aligned = new Map<number, TimedToken[]>();
-  let i = canonical.length;
+  const similarities = new Map<number, number[]>();
+  const matchedAsrIndexes = new Set<number>();
+  let i = endRow;
   let j = asr.length;
   while (i > 0 || j > 0) {
     const move = moves[i]?.[j] ?? 0;
     if (move === 1) {
-      if (recognitionUnitSimilarity(canonical[i - 1], asr[j - 1].units) >= 0.58) {
+      const similarity = recognitionUnitSimilarity(canonical[i - 1].units, asr[j - 1].units);
+      if (similarity >= 0.58) {
         const current = aligned.get(i - 1) ?? [];
         current.unshift(asr[j - 1]);
         aligned.set(i - 1, current);
+        const currentSimilarities = similarities.get(i - 1) ?? [];
+        currentSimilarities.unshift(similarity);
+        similarities.set(i - 1, currentSimilarities);
+        matchedAsrIndexes.add(j - 1);
       }
       i -= 1; j -= 1;
     } else if (move === 2) i -= 1;
     else if (move === 3) j -= 1;
     else break;
   }
-  return aligned;
+  const indexes = [...aligned.keys()].sort((left, right) => left - right);
+  return {
+    matched: aligned,
+    matchedAsrIndexes,
+    similarities,
+    firstCanonicalIndex: indexes[0] ?? null,
+    lastCanonicalIndex: indexes.at(-1) ?? null,
+    score: scores[endRow][columns - 1],
+    evidenceTokenCount: asr.length,
+  };
 }
 
-function reconstructPassage(
-  selected: ScoredCandidate,
-  confidence: number,
-  chunks: readonly TranscriptChunk[],
-  verses: readonly QuranCorpusVerse[],
-  audioAnalysis?: AudioAnalysis,
-): RecognitionMatch[] {
-  const passage = verses.slice(selected.start, selected.end + 1);
-  // Keep canonical word identity throughout the timing stage.  This is a
-  // different alignment from passage selection: it has one known passage and
-  // maps every usable timestamped ASR word monotonically onto it.
-  const canonical: Array<{ units: QuranRecognitionUnits; ayah: number; verseKey: string; wordIndex: number; globalWordIndex: number }> = [];
+function canonicalPassageTokens(passage: readonly QuranCorpusVerse[]) {
+  const canonical: CanonicalToken[] = [];
   passage.forEach((verse, ayah) => {
     const orthographicWords = normalizedVerseWords(verse);
     const recitationWords = recitationVerseWords(verse);
+    const displayWords = verse.text.trim().split(/\s+/).filter((word) => normalizeArabic(word));
     orthographicWords.forEach((word, index) => canonical.push({
       units: { orthographic: word, recitation: recitationWords[index] ?? normalizeQuranRecitation(word) },
       ayah,
       verseKey: verse.verseKey,
       wordIndex: index,
       globalWordIndex: canonical.length,
+      displayText: displayWords[index] ?? word,
     }));
   });
+  return canonical;
+}
+
+function reconstructPassage(
+  selected: ScoredCandidate,
+  chunks: readonly TranscriptChunk[],
+  verses: readonly QuranCorpusVerse[],
+  audioAnalysis?: AudioAnalysis,
+): RecognitionMatch[] {
+  const passage = verses.slice(selected.start, selected.end + 1);
+  const canonical = canonicalPassageTokens(passage);
   const evidence = timedTokens(chunks);
-  const aligned = alignTokens(canonical.map((token) => token.units), evidence);
+  const aligned = selected.alignment;
+  if (aligned.firstCanonicalIndex === null || aligned.lastCanonicalIndex === null) return [];
+  const firstToken = canonical[aligned.firstCanonicalIndex];
+  const lastToken = canonical[aligned.lastCanonicalIndex];
+  const activeStart = firstToken.ayah;
+  const activeEnd = lastToken.ayah;
   const byAyah = passage.map(() => [] as TimedToken[]);
   const textByAyah = passage.map(() => [] as string[]);
-  aligned.forEach((tokens, canonicalIndex) => {
+  const matchedWordsByAyah = passage.map(() => new Set<number>());
+  const qualityByAyah = passage.map(() => [] as number[]);
+  aligned.matched.forEach((tokens, canonicalIndex) => {
     const ayah = canonical[canonicalIndex].ayah;
     byAyah[ayah].push(...tokens);
     textByAyah[ayah].push(...tokens.map((token) => token.displayText));
+    matchedWordsByAyah[ayah].add(canonical[canonicalIndex].wordIndex);
+    qualityByAyah[ayah].push(...(aligned.similarities.get(canonicalIndex) ?? []));
   });
-  // Candidate scoring may retain a harmless trailing canonical verse with no text
-  // support. Do not report unsupported outer edges; interior ayat remain intact.
-  const firstSupported = byAyah.findIndex((tokens) => tokens.length > 0);
-  const lastSupported = byAyah.findLastIndex((tokens) => tokens.length > 0);
-  if (firstSupported < 0 || lastSupported < firstSupported) return [];
-  const activeStart = firstSupported;
-  const activeEnd = lastSupported;
   const sourceDuration = Math.max(0, audioAnalysis?.durationMs ?? 0, ...chunks.map((chunk) => chunk.endMs));
   const rawStarts = byAyah.map((tokens) => tokens.length ? Math.min(...tokens.map((token) => token.startMs)) : null);
   const rawEnds = byAyah.map((tokens) => tokens.length ? Math.max(...tokens.map((token) => token.endMs)) : null);
@@ -495,39 +577,39 @@ function reconstructPassage(
       verseKey: verse.verseKey,
       startMs,
       endMs,
-      confidence: Number(confidence.toFixed(4)),
+      confidence: Number(selected.mappingQuality.toFixed(4)),
       timing: {
         start: { timestampMs: startMs, source: startSources[index] },
         end: { timestampMs: endMs, source: endSources[index] },
         matchedText: textByAyah[index].join(" "),
       },
+      wordSupport: {
+        canonicalStartWordIndex: index === activeStart ? firstToken.wordIndex + 1 : 1,
+        canonicalEndWordIndex: index === activeEnd ? lastToken.wordIndex + 1 : normalizedVerseWords(verse).length,
+        matchedCanonicalWordCount: matchedWordsByAyah[index].size,
+        canonicalWordCount: normalizedVerseWords(verse).length,
+        coverage: Number((matchedWordsByAyah[index].size / Math.max(1, (index === activeEnd ? lastToken.wordIndex + 1 : normalizedVerseWords(verse).length) - (index === activeStart ? firstToken.wordIndex : 0))).toFixed(4)),
+        evidenceQuality: Number(((qualityByAyah[index].reduce((sum, value) => sum + value, 0) / Math.max(1, qualityByAyah[index].length))).toFixed(4)),
+      },
     };
   });
 }
 
-type ScoredCandidate = {
+type LocalCandidate = {
   start: number;
   end: number;
   score: number;
   textSimilarity: number;
   tokenSequenceSimilarity: number;
+};
+
+type ScoredCandidate = LocalCandidate & {
   transcriptCoverage?: number;
   canonicalCoverage?: number;
   consecutiveAyat?: number;
+  mappingQuality: number;
+  alignment: TokenAlignment;
 };
-
-function canonicalPassageTokens(passage: readonly QuranCorpusVerse[]) {
-  const canonical: Array<{ units: QuranRecognitionUnits; ayah: number }> = [];
-  passage.forEach((verse, ayah) => {
-    const orthographicWords = normalizedVerseWords(verse);
-    const recitationWords = recitationVerseWords(verse);
-    orthographicWords.forEach((word, index) => canonical.push({
-      units: { orthographic: word, recitation: recitationWords[index] ?? normalizeQuranRecitation(word) },
-      ayah,
-    }));
-  });
-  return canonical;
-}
 
 /**
  * Scores one contiguous Quran window against all timestamped ASR evidence.
@@ -542,16 +624,15 @@ function scorePassageCandidate(
 ): ScoredCandidate {
   const passage = verses.slice(start, end + 1);
   const canonical = canonicalPassageTokens(passage);
-  const aligned = alignTokens(canonical.map((token) => token.units), [...evidence]);
-  const matchedAsr = new Set<TimedToken>();
+  const alignment = alignTokens(canonical, evidence);
+  const matchedAsr = alignment.matchedAsrIndexes;
   const supportedAyat = new Set<number>();
   let similarityTotal = 0;
   let similarityCount = 0;
-  aligned.forEach((tokens, canonicalIndex) => {
+  alignment.matched.forEach((tokens, canonicalIndex) => {
     if (!tokens.length) return;
     supportedAyat.add(canonical[canonicalIndex].ayah);
     for (const token of tokens) {
-      matchedAsr.add(token);
       similarityTotal += recognitionUnitSimilarity(canonical[canonicalIndex].units, token.units);
       similarityCount += 1;
     }
@@ -564,20 +645,22 @@ function scorePassageCandidate(
   }
   const averageSimilarity = similarityCount ? similarityTotal / similarityCount : 0;
   const transcriptCoverage = evidence.length ? matchedAsr.size / evidence.length : 0;
-  const canonicalCoverage = canonical.length ? aligned.size / canonical.length : 0;
+  const spanLength = alignment.firstCanonicalIndex === null || alignment.lastCanonicalIndex === null ? 0 : alignment.lastCanonicalIndex - alignment.firstCanonicalIndex + 1;
+  const canonicalCoverage = spanLength ? alignment.matched.size / spanLength : 0;
   const sequenceConsistency = passage.length ? longestRun / passage.length : 0;
   const textSimilarity = combinedTextSimilarity(transcriptUnits, {
     orthographic: passage.map(normalizedVerseText).join(" "),
     recitation: passage.map(recitationVerseText).join(" "),
   });
-  // Coverage is deliberately stronger than a locally plausible phrase. A short,
-  // distinctive ayah can still win when it explains its complete transcript.
-  const score = averageSimilarity * 0.34
-    + transcriptCoverage * 0.34
-    + canonicalCoverage * 0.12
-    + sequenceConsistency * 0.16
-    + textSimilarity * 0.04;
-  return { start, end, score, textSimilarity, tokenSequenceSimilarity: averageSimilarity, transcriptCoverage, canonicalCoverage, consecutiveAyat: longestRun };
+  const explainedLength = Math.min(1, matchedAsr.size / 6);
+  // A clean late subsection cannot beat a longer, slightly noisy explanation:
+  // all transcript tokens participate and coverage carries the largest weight.
+  const mappingQuality = averageSimilarity === 1 && transcriptCoverage === 1 && canonicalCoverage === 1 && sequenceConsistency === 1 ? 1 : averageSimilarity * 0.3
+    + transcriptCoverage * 0.42
+    + canonicalCoverage * 0.08
+    + sequenceConsistency * 0.1
+    + explainedLength * 0.1;
+  return { start, end, score: mappingQuality, mappingQuality, textSimilarity, tokenSequenceSimilarity: averageSimilarity, transcriptCoverage, canonicalCoverage, consecutiveAyat: longestRun, alignment };
 }
 
 function globalCandidateStarts(
@@ -589,6 +672,15 @@ function globalCandidateStarts(
 ): { starts: number[]; path: CandidateStarts["path"] } {
   const priority = [...new Set(priorityStarts)];
   const starts = new Set(priority);
+  // Local retrieval commonly lands on the clean second ayah. Expand around it
+  // before detailed alignment so the preceding partial ayah is a real option.
+  for (const anchor of priority) {
+    const surah = verses[anchor]?.verseKey.split(":")[0];
+    for (let offset = 1; offset <= 5; offset += 1) {
+      const previous = anchor - offset;
+      if (previous >= 0 && verses[previous]?.verseKey.split(":")[0] === surah) starts.add(previous);
+    }
+  }
   const transcriptWordCount = chunks.reduce((count, chunk) => count + normalizeArabic(chunk.text).split(" ").filter(Boolean).length, 0);
   let usedFallback = false;
   if (transcriptWordCount <= 12 || priority.length === 0) {
@@ -639,9 +731,15 @@ function scoreGlobalPassages(
 
 function passageDiagnostic(candidate: ScoredCandidate, verses: readonly QuranCorpusVerse[]): PassageCandidateDiagnostic {
   const confidence = confidenceFor(candidate.score, verses.slice(candidate.start, candidate.end + 1).map(normalizedVerseText).join(" "));
+  const canonical = canonicalPassageTokens(verses.slice(candidate.start, candidate.end + 1));
+  const first = candidate.alignment.firstCanonicalIndex === null ? canonical[0] : canonical[candidate.alignment.firstCanonicalIndex];
+  const last = candidate.alignment.lastCanonicalIndex === null ? canonical.at(-1) : canonical[candidate.alignment.lastCanonicalIndex];
+  const matchedAsr = [...candidate.alignment.matchedAsrIndexes].sort((left, right) => left - right);
   return {
-    startVerseKey: verses[candidate.start].verseKey,
-    endVerseKey: verses[candidate.end].verseKey,
+    startVerseKey: first?.verseKey ?? verses[candidate.start].verseKey,
+    endVerseKey: last?.verseKey ?? verses[candidate.end].verseKey,
+    firstWordIndex: (first?.wordIndex ?? 0) + 1,
+    lastWordIndex: (last?.wordIndex ?? 0) + 1,
     totalScore: Number(candidate.score.toFixed(4)),
     confidence: Number(confidence.toFixed(4)),
     textSimilarity: Number(candidate.textSimilarity.toFixed(4)),
@@ -649,6 +747,31 @@ function passageDiagnostic(candidate: ScoredCandidate, verses: readonly QuranCor
     transcriptCoverage: Number((candidate.transcriptCoverage ?? 0).toFixed(4)),
     canonicalCoverage: Number((candidate.canonicalCoverage ?? 0).toFixed(4)),
     consecutiveAyat: candidate.consecutiveAyat ?? 0,
+    explainedTranscriptTokens: matchedAsr.length,
+    unexplainedTranscriptBefore: matchedAsr[0] ?? 0,
+    unexplainedTranscriptAfter: matchedAsr.length ? candidate.alignment.evidenceTokenCount - matchedAsr.at(-1)! - 1 : candidate.alignment.evidenceTokenCount,
+  };
+}
+
+function canonicalSpan(candidate: ScoredCandidate, verses: readonly QuranCorpusVerse[]): CanonicalSpan | null {
+  if (candidate.alignment.firstCanonicalIndex === null || candidate.alignment.lastCanonicalIndex === null) return null;
+  const canonical = canonicalPassageTokens(verses.slice(candidate.start, candidate.end + 1));
+  const first = canonical[candidate.alignment.firstCanonicalIndex];
+  const last = canonical[candidate.alignment.lastCanonicalIndex];
+  if (!first || !last) return null;
+  const coveredVerseKeys = [...new Set(canonical.slice(candidate.alignment.firstCanonicalIndex, candidate.alignment.lastCanonicalIndex + 1).map((token) => token.verseKey))];
+  const lastWordCount = normalizedVerseWords(verses[candidate.start + last.ayah]).length;
+  return {
+    surah: Number(first.verseKey.split(":")[0]),
+    firstVerseKey: first.verseKey,
+    firstWordIndex: first.wordIndex + 1,
+    firstWordText: first.displayText,
+    firstBoundary: first.wordIndex === 0 ? "verse-beginning" : "mid-verse",
+    lastVerseKey: last.verseKey,
+    lastWordIndex: last.wordIndex + 1,
+    lastWordText: last.displayText,
+    lastBoundary: last.wordIndex === lastWordCount - 1 ? "verse-end" : "mid-verse",
+    coveredVerseKeys,
   };
 }
 
@@ -657,8 +780,8 @@ function bestCandidateForStarts(
   starts: readonly number[],
   verses: readonly QuranCorpusVerse[],
   maxVersesPerChunk: number,
-): ScoredCandidate | null {
-  let best: ScoredCandidate | null = null;
+): LocalCandidate | null {
+  let best: LocalCandidate | null = null;
   for (const start of starts) {
     let combinedOrthographic = "";
     let combinedRecitation = "";
@@ -677,7 +800,7 @@ function bestCandidateForStarts(
   return best;
 }
 
-function diagnosticCandidate(best: ScoredCandidate, verses: readonly QuranCorpusVerse[], normalizedText: string) {
+function diagnosticCandidate(best: LocalCandidate, verses: readonly QuranCorpusVerse[], normalizedText: string) {
   const confidence = confidenceFor(best.score, normalizedText);
   return {
     startVerseKey: verses[best.start].verseKey,
@@ -751,6 +874,8 @@ export function analyzeTranscript(
   const fullTranscript = normalizeArabic(orderedChunks.map((chunk) => chunk.text).join(" "));
   const emptyPassage: PassageInference = {
     state: "no-reliable-match", candidates: [], candidateMargin: null, selectedCandidate: null, disambiguatedByLaterChunks: false,
+    canonicalSpan: null, mappingQuality: null, transcriptCoverage: null, canonicalSpanCoverage: null, uniquenessMargin: null,
+    firstBoundaryConfidence: null, lastBoundaryConfidence: null, boundaryCompletion: { extendedBackward: false, extendedForward: false },
   };
   if (!fullTranscript || orderedChunks.some((chunk) => chunk.endMs < chunk.startMs)) return { matches: [], diagnostics, passage: emptyPassage };
 
@@ -768,8 +893,9 @@ export function analyzeTranscript(
   const sufficientEvidence = Boolean(
     best
       && best.score >= minConfidence
-      && (best.transcriptCoverage ?? 0) >= 0.45
+      && (best.transcriptCoverage ?? 0) >= 0.35
       && (best.consecutiveAyat ?? 0) >= 1
+      && (best.alignment.matchedAsrIndexes.size >= 3 || best.tokenSequenceSimilarity >= 0.75)
       && (best.textSimilarity >= 0.7 || (best.consecutiveAyat ?? 0) >= 2),
   );
   // A shorter contained window often matches the later ayat of a correct
@@ -790,16 +916,36 @@ export function analyzeTranscript(
     selectedCandidate && firstChunkBest
       && (firstChunkBest.startVerseKey !== selectedCandidate.startVerseKey || firstChunkBest.endVerseKey !== selectedCandidate.endVerseKey),
   );
+  const strongestLocalAnchor = diagnostics.reduce<RecognitionDiagnostic["topCandidate"]>((strongest, diagnostic) => {
+    if (!diagnostic.topCandidate || (strongest && strongest.confidence >= diagnostic.topCandidate.confidence)) return strongest;
+    return diagnostic.topCandidate;
+  }, undefined);
+  const span = best ? canonicalSpan(best, verses) : null;
+  const selectedStartIndex = span ? verses.findIndex((verse) => verse.verseKey === span.firstVerseKey) : -1;
+  const selectedEndIndex = span ? verses.findIndex((verse) => verse.verseKey === span.lastVerseKey) : -1;
+  const anchorStartIndex = strongestLocalAnchor ? verses.findIndex((verse) => verse.verseKey === strongestLocalAnchor.startVerseKey) : -1;
+  const anchorEndIndex = strongestLocalAnchor ? verses.findIndex((verse) => verse.verseKey === strongestLocalAnchor.endVerseKey) : -1;
   const passage: PassageInference = {
     state,
     candidates: ranked.map((candidate) => passageDiagnostic(candidate, verses)),
     candidateMargin: margin === null ? null : Number(margin.toFixed(4)),
     selectedCandidate,
     disambiguatedByLaterChunks,
+    canonicalSpan: span,
+    mappingQuality: best ? Number(best.mappingQuality.toFixed(4)) : null,
+    transcriptCoverage: best ? Number((best.transcriptCoverage ?? 0).toFixed(4)) : null,
+    canonicalSpanCoverage: best ? Number((best.canonicalCoverage ?? 0).toFixed(4)) : null,
+    uniquenessMargin: margin === null ? null : Number(margin.toFixed(4)),
+    firstBoundaryConfidence: best && best.alignment.firstCanonicalIndex !== null ? Number(((best.alignment.similarities.get(best.alignment.firstCanonicalIndex)?.[0] ?? 0)).toFixed(4)) : null,
+    lastBoundaryConfidence: best && best.alignment.lastCanonicalIndex !== null ? Number(((best.alignment.similarities.get(best.alignment.lastCanonicalIndex)?.at(-1) ?? 0)).toFixed(4)) : null,
+    boundaryCompletion: {
+      extendedBackward: selectedStartIndex >= 0 && anchorStartIndex >= 0 && selectedStartIndex < anchorStartIndex,
+      extendedForward: selectedEndIndex >= 0 && anchorEndIndex >= 0 && selectedEndIndex > anchorEndIndex,
+    },
   };
   if (state === "no-reliable-match" || !best) return { matches: [], diagnostics, passage };
   return {
-    matches: reconstructPassage(best, bestDiagnostic!.confidence, orderedChunks, verses, options.audioAnalysis),
+    matches: reconstructPassage(best, orderedChunks, verses, options.audioAnalysis),
     diagnostics,
     passage,
   };

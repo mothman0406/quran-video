@@ -12,6 +12,14 @@ const match = {
     end: { timestampMs: 900, source: "chunk-interpolated" as const },
     matchedText: "وضحى",
   },
+  wordSupport: {
+    canonicalStartWordIndex: 1,
+    canonicalEndWordIndex: 1,
+    matchedCanonicalWordCount: 1,
+    canonicalWordCount: 1,
+    coverage: 1,
+    evidenceQuality: 1,
+  },
 };
 
 test("converts recognition matches into editor verse alignments with timing evidence", () => {

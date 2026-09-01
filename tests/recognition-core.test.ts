@@ -6,6 +6,7 @@ import { quranRecognitionUnits } from "../src/lib/recognition/quran-recitation.t
 import { analyzeMonoPcm } from "../src/lib/recognition/audio-analysis.ts";
 
 const verse = (key: string) => hafsVerses.find((item) => item.verseKey === key)!;
+const canonicalWords = (key: string) => verse(key).text.split(/\s+/).filter((word) => normalizeArabic(word));
 
 test("matches clean exact text and keeps canonical display text separate", () => {
   const result = recognizeTranscript([{ startMs: 100, endMs: 1_100, text: verse("93:1").text }]);
@@ -133,6 +134,55 @@ test("maps a clip beginning mid-ayah to the containing ayah", () => {
   const result = recognizeTranscript([{ startMs: 250, endMs: 800, text: "رب العالمين" }]);
   assert.equal(result[0]?.verseKey, "1:2");
   assert.equal(result[0]?.startMs, 250);
+});
+
+test("extends a clean 6:76-77 anchor backward into a noisy 6:75 after initial silence", () => {
+  const analysis = analyzeTranscript([
+    // The lack of a chunk before 10 s represents silence, not ignored speech.
+    { startMs: 10_000, endMs: 18_000, text: "وكذلك نرى ابراهيم ملكات السماوات والارض وليكون من الموقنين" },
+    { startMs: 18_000, endMs: 31_000, text: verse("6:76").text },
+    { startMs: 31_000, endMs: 45_000, text: verse("6:77").text },
+  ]);
+  assert.deepEqual(analysis.matches.map((match) => match.verseKey), ["6:75", "6:76", "6:77"]);
+  assert.equal(analysis.passage.canonicalSpan?.firstVerseKey, "6:75");
+  assert.equal(analysis.matches[0]?.startMs, 10_000, "initial silence must not become Quran timing");
+  assert.ok((analysis.passage.transcriptCoverage ?? 0) > 0.8);
+  assert.equal(analysis.passage.boundaryCompletion.extendedBackward, true);
+});
+
+test("reports exact partial canonical boundaries without claiming unrecorded ayah words", () => {
+  const firstWords = canonicalWords("6:75");
+  const lastWords = canonicalWords("6:77");
+  const analysis = analyzeTranscript([{
+    startMs: 10_000,
+    endMs: 40_000,
+    text: `${firstWords.slice(3).join(" ")} ${verse("6:76").text} ${lastWords.slice(0, 10).join(" ")}`,
+  }]);
+  assert.deepEqual(analysis.matches.map((match) => match.verseKey), ["6:75", "6:76", "6:77"]);
+  assert.equal(analysis.passage.canonicalSpan?.firstWordIndex, 4);
+  assert.equal(analysis.passage.canonicalSpan?.lastWordIndex, 10);
+  assert.equal(analysis.passage.canonicalSpan?.firstBoundary, "mid-verse");
+  assert.equal(analysis.passage.canonicalSpan?.lastBoundary, "mid-verse");
+  assert.equal(analysis.matches[0]?.wordSupport.canonicalStartWordIndex, 4);
+  assert.equal(analysis.matches.at(-1)?.wordSupport.canonicalEndWordIndex, 10);
+});
+
+test("does not force genuine unrelated speech into the preceding Quran boundary", () => {
+  const analysis = analyzeTranscript([
+    { startMs: 0, endMs: 2_000, text: "كانت الحافلة متأخرة والطريق مزدحما" },
+    { startMs: 10_000, endMs: 22_000, text: verse("6:76").text },
+    { startMs: 22_000, endMs: 36_000, text: verse("6:77").text },
+  ]);
+  assert.deepEqual(analysis.matches.map((match) => match.verseKey), ["6:76", "6:77"]);
+  assert.equal(analysis.passage.canonicalSpan?.firstVerseKey, "6:76");
+  assert.ok((analysis.passage.transcriptCoverage ?? 1) < 1, "speech, unlike silence, remains visible as unexplained evidence");
+});
+
+test("canonical span mapping is identical in chunk fallback timing mode", () => {
+  const text = `${canonicalWords("6:75").slice(3).join(" ")} ${verse("6:76").text} ${canonicalWords("6:77").slice(0, 10).join(" ")}`;
+  const wordTimed = analyzeTranscript([{ startMs: 10_000, endMs: 40_000, text, words: text.split(/\s+/).map((word, index) => ({ text: word, startMs: 10_000 + index * 500, endMs: 10_000 + (index + 1) * 500 })) }]);
+  const chunkFallback = analyzeTranscript([{ startMs: 10_000, endMs: 40_000, text }]);
+  assert.deepEqual(chunkFallback.passage.canonicalSpan, wordTimed.passage.canonicalSpan);
 });
 
 test("returns a usable best candidate while marking an ambiguous short clip", () => {
