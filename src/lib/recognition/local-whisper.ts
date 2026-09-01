@@ -3,6 +3,7 @@ import type {
   RecognitionTranscriber,
   TranscriptionProgress,
 } from "./transcriber";
+import { analyzeMonoPcm } from "./audio-analysis.ts";
 
 export const LOCAL_WHISPER_MODEL = "onnx-community/whisper-base";
 export const LOCAL_WHISPER_APPROXIMATE_DOWNLOAD_MB = 145;
@@ -133,6 +134,7 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
 
     const startedAt = performance.now();
     const audio = await decodeAudio(source, onProgress);
+    const audioAnalysis = analyzeMonoPcm(audio, TARGET_SAMPLE_RATE);
     const { transcriber, backend } = await createPipeline(supportsWebGpu(), onProgress);
     const audioChunks = splitPcmAudio(audio);
     const transcriptChunks: LocalTranscriptionResult["chunks"] = [];
@@ -147,7 +149,9 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       const output = await transcriber(chunk.audio, {
         language: "arabic",
         task: "transcribe",
-        return_timestamps: true,
+        // Transformers.js supports word timestamps for Whisper.  These are the
+        // alignment observations; output chunk windows are never verse timing.
+        return_timestamps: "word",
       });
       const timestamped = output.chunks ?? (output.text ? [{ text: output.text, timestamp: [0, chunk.audio.length / TARGET_SAMPLE_RATE] as [number, number] }] : []);
       for (const item of timestamped) {
@@ -156,9 +160,8 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
         const text = item.text.trim();
         const startMs = Math.round((chunk.offsetSeconds + item.timestamp[0]) * 1_000);
         const endMs = Math.round((chunk.offsetSeconds + item.timestamp[1]) * 1_000);
-        // Transformers.js commonly returns word chunks for this mode. Treat a
-        // single returned word as direct ASR timing; multi-word spans remain
-        // conservative chunk evidence and are aligned internally later.
+        // A runtime may still return a multi-word span. Keep its timestamp but
+        // label it as coarser evidence; normal installations return words.
         transcriptChunks.push({
           text,
           startMs,
@@ -168,12 +171,35 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       }
     }
 
+    // 30-second windows overlap by three seconds.  Keep the first occurrence
+    // of an overlapping word and enforce monotonic timestamps so the logical
+    // recording is one transcript rather than independent chunk decisions.
+    const stitched = transcriptChunks
+      .filter((chunk) => chunk.text)
+      .sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs)
+      .reduce<LocalTranscriptionResult["chunks"]>((all, chunk) => {
+        const prior = all.at(-1);
+        const sameWord = prior?.text.trim() === chunk.text.trim();
+        const overlaps = prior ? chunk.startMs <= prior.endMs : false;
+        if (prior && sameWord && overlaps) return all;
+        const startMs = Math.max(prior?.endMs ?? 0, chunk.startMs);
+        const endMs = Math.max(startMs, chunk.endMs);
+        all.push({
+          ...chunk,
+          startMs,
+          endMs,
+          words: chunk.words?.map((word) => ({ ...word, startMs: Math.max(startMs, word.startMs), endMs: Math.max(startMs, word.endMs) })),
+        });
+        return all;
+      }, []);
+
     onProgress?.({ phase: "transcribing", message: "Local transcription complete.", completed: audioChunks.length, total: audioChunks.length });
     return {
-      chunks: transcriptChunks.filter((chunk) => chunk.text),
-      rawTranscript: transcriptChunks.map((chunk) => chunk.text).filter(Boolean).join(" "),
+      chunks: stitched,
+      rawTranscript: stitched.map((chunk) => chunk.text).join(" "),
       backend,
       durationMs: Math.round(performance.now() - startedAt),
+      audioAnalysis,
     };
   },
 };

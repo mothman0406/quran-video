@@ -8,8 +8,8 @@ const match = {
   endMs: 900,
   confidence: 0.84,
   timing: {
-    start: { timestampMs: 120, source: "direct-asr-word" as const },
-    end: { timestampMs: 900, source: "chunk-text-alignment" as const },
+    start: { timestampMs: 120, source: "word-timestamp" as const },
+    end: { timestampMs: 900, source: "chunk-interpolated" as const },
     matchedText: "وضحى",
   },
 };

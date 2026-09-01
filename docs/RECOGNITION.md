@@ -1,21 +1,21 @@
-# Recognition research note
+# Two-stage local Quran recognition
 
-The browser-local pipeline uses multilingual Whisper Base for Arabic text, then evaluates both an orthographic normalization and a conservative Hafs-aware recitation representation. This improves tolerance for connected recitation without changing canonical Quran text or claiming that Whisper emits phonemes.
+Whisper Base remains fully browser-local and now requests Transformers.js `return_timestamps: "word"`. Overlapping 30-second transcription windows are stitched into one monotonic transcript: overlap duplicates are removed and timestamp order cannot move backward. The source is decoded once to mono 16 kHz PCM and reduced to a local 10 ms RMS envelope; neither PCM nor text is uploaded.
 
-## Whole-recording passage inference
+## 1. Passage mapping
 
-Transcription chunks are retrieval and timestamp evidence only. The final result is selected from bounded, contiguous Quran windows: local chunk anchors seed candidate starts, each window is scored against the complete normalized transcript, and the top three are retained for diagnostics. The score combines fuzzy text similarity, recitation-aware token similarity, monotonic token coverage of the transcript, canonical coverage, and consecutive-ayah consistency. Windows never cross a surah boundary.
+The complete normalized recording is mapped to a bounded set of contiguous Quran windows. Cheap fuzzy token anchors retrieve candidate regions, then a dynamic-programming monotonic token alignment scores each complete candidate against all ASR evidence. Scores reward transcript coverage, canonical coverage, token order, and consecutive ayat; insertions, omissions, substitutions, repeated words, opening silence, isti'adhah, and trailing speech are tolerated. Windows cannot cross a surah boundary.
 
-The decision state is `confident-unique`, `plausible-ambiguous`, or `no-reliable-match`. A short phrase with comparably explanatory locations is deliberately returned as ambiguous; later contiguous ayat can resolve it. A high-scoring shorter suffix does not create ambiguity when it leaves meaningful earlier transcript evidence unexplained.
+Mapping reports the selected best passage, top three alternatives, global score, coverage, uniqueness margin, and `confident-unique` / `plausible-ambiguous` / `no-reliable-match`. An ambiguous but credible clip still yields its best usable passage for correction; only no reliable mapping produces no captions. Chunk-level confidence never decides the final passage.
 
-## Alignment and timing policy
+## 2. Word and PCM timing
 
-Once a unique window is chosen, its full canonical token sequence is monotonically aligned to all timestamped ASR tokens. Ayah boundaries come from those aligned tokens, with local interpolation for missing interior ayat; chunk edges, breaths, and silence do not themselves form ayah boundaries. Timing evidence records direct ASR words, chunk-text alignment, or interpolation.
+After mapping, the selected canonical passage is aligned again as one monotonic word sequence. Every canonical token retains its ayah, word index, and global passage order. Aligned ASR words supply initial timings; missing interior evidence is interpolated only between canonical neighbors.
 
-The first displayed ayah starts at its first aligned canonical token, never at the video, passage, or initial chunk start by default. When first-word evidence is weak, the fallback is conservative: show later rather than before recitation. Caption display timing remains independently editable as `CaptionSegment.startMs`/`endMs`; recognition `VerseAlignment` values are preserved as the reset evidence.
+PCM energy is consulted only inside a corridor already implied by the last aligned word of ayah A and first aligned word of ayah B. A local adaptive noise floor finds active speech offset/onset around that expected transition. A genuine gap yields distinct A end and B start times; connected recitation uses the text-derived transition instead. Silence is never a global verse segmenter, so a breath within an ayah cannot split it. The first/last ayah are refined around their first/last aligned word, preserving initial silence and elongated final vocal energy without retaining a long reverb tail.
 
-## Performance and evaluation
+Evidence is stored as `word-audio-refined`, `word-timestamp`, `token-interpolated`, `chunk-interpolated`, or `low-confidence-fallback`. Caption intervals remain exact half-open `CaptionSegment.startMs`/`endMs` values shared by preview and timeline; fades are bounded inside those intervals.
 
-The Quran corpus has 6,236 ayat. Candidate retrieval is bounded and the expensive global scorer evaluates only local anchors; for longer recordings with several strong anchors it does not reopen corpus-wide alternatives. The live-sized noisy Ad-Duha regression remains below 1.5 seconds in Node tests.
+## Performance and limitations
 
-A future evaluation should compare this generic Whisper pipeline with a Quran-specific speech-to-phoneme or phonetic model on held-out, timestamped Hafs recitations. Measure ayah retrieval, false positives on unrelated Arabic, ambiguity correctness, and boundary error separately; retain the deterministic sequence matcher as the model-independent alignment boundary.
+The full corpus has 6,236 ayat, but only bounded anchor windows receive dynamic programming. The noisy five-ayah Ad-Duha regression scores in approximately 0.73 s in Node on this workspace; PCM envelope construction is linear in source duration. This is deterministic refinement around ASR word evidence, not phonetic forced alignment: difficult ASR, heavy reverb, or weak word timestamps can still fall back to interpolation and merit manual correction. Browser fixture measurements remain required to quantify boundary error across real reciters and codecs.

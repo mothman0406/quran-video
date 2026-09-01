@@ -12,8 +12,8 @@ const alignment = {
   endMs: 1_100,
   confidence: 0.9,
   timingEvidence: {
-    start: { timestampMs: 100, source: "direct-asr-word" as const },
-    end: { timestampMs: 1_100, source: "chunk-text-alignment" as const },
+    start: { timestampMs: 100, source: "word-timestamp" as const },
+    end: { timestampMs: 1_100, source: "chunk-interpolated" as const },
     matchedText: "والضحى",
   },
 };
@@ -24,7 +24,7 @@ test("splits long ayat only at Quran word boundaries with monotonic derived timi
   const segments = createCaptionSegments([alignment], content, 3);
   assert.equal(segments.length, 3);
   assert.equal(segments.map((segment) => segment.arabic).join(" "), content["93:1"].arabic.uthmani);
-  assert.equal(segments[0].timingEvidence.start.source, "direct-asr-word");
+  assert.equal(segments[0].timingEvidence.start.source, "word-timestamp");
   assert.equal(segments[1].timingEvidence.start.source, "derived");
   assert.equal(segments[0].endMs <= segments[1].startMs, true);
   assert.equal(segments[1].endMs <= segments[2].startMs, true);

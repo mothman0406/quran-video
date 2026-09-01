@@ -252,7 +252,9 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
   });
 }
 
-export type CaptionTimingSource = "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "low-confidence" | "derived";
+// Legacy values remain readable for saved projects; new recognition writes the
+// more specific two-stage evidence values.
+export type CaptionTimingSource = "word-audio-refined" | "word-timestamp" | "token-interpolated" | "chunk-interpolated" | "low-confidence-fallback" | "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "low-confidence" | "derived";
 
 export type CaptionSegment = {
   id: string;

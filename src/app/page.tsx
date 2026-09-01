@@ -713,7 +713,7 @@ export default function Home() {
       );
       if (job !== generation.current) return;
       setStage("matching");
-      const analysis = analyzeTranscript(result.chunks);
+      const analysis = analyzeTranscript(result.chunks, { audioAnalysis: result.audioAnalysis });
       if (analysis.matches.length === 0)
         throw new Error(
           "No confident Quran passage was detected. You can try again or correct it manually.",
@@ -800,8 +800,8 @@ export default function Home() {
       ),
       confidence: 0,
       timingEvidence: {
-        start: { timestampMs: rangeStart, source: "interpolation" as const },
-        end: { timestampMs: rangeEnd, source: "interpolation" as const },
+        start: { timestampMs: rangeStart, source: "token-interpolated" as const },
+        end: { timestampMs: rangeEnd, source: "token-interpolated" as const },
         matchedText: "",
       },
     }));

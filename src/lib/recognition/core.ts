@@ -1,5 +1,7 @@
 import hafsCorpus from "../quran/hafs-corpus.json" with { type: "json" };
 import { normalizeQuranRecitation, quranRecognitionUnits, type QuranRecognitionUnits } from "./quran-recitation.ts";
+import type { AudioAnalysis } from "./audio-analysis.ts";
+import { refineTransitionWithEnergy, refineWordEdgeWithEnergy } from "./audio-analysis.ts";
 
 export type TranscriptChunk = {
   startMs: number;
@@ -20,8 +22,8 @@ export type RecognitionMatch = {
   endMs: number;
   confidence: number;
   timing: {
-    start: { timestampMs: number; source: "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "low-confidence" };
-    end: { timestampMs: number; source: "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "low-confidence" };
+    start: { timestampMs: number; source: "word-audio-refined" | "word-timestamp" | "token-interpolated" | "chunk-interpolated" | "low-confidence-fallback" };
+    end: { timestampMs: number; source: "word-audio-refined" | "word-timestamp" | "token-interpolated" | "chunk-interpolated" | "low-confidence-fallback" };
     matchedText: string;
   };
 };
@@ -52,6 +54,7 @@ export type PassageCandidateDiagnostic = {
   textSimilarity: number;
   sequenceConsistency: number;
   transcriptCoverage: number;
+  canonicalCoverage: number;
   consecutiveAyat: number;
 };
 
@@ -387,15 +390,22 @@ function reconstructPassage(
   confidence: number,
   chunks: readonly TranscriptChunk[],
   verses: readonly QuranCorpusVerse[],
+  audioAnalysis?: AudioAnalysis,
 ): RecognitionMatch[] {
   const passage = verses.slice(selected.start, selected.end + 1);
-  const canonical: Array<{ units: QuranRecognitionUnits; ayah: number }> = [];
+  // Keep canonical word identity throughout the timing stage.  This is a
+  // different alignment from passage selection: it has one known passage and
+  // maps every usable timestamped ASR word monotonically onto it.
+  const canonical: Array<{ units: QuranRecognitionUnits; ayah: number; verseKey: string; wordIndex: number; globalWordIndex: number }> = [];
   passage.forEach((verse, ayah) => {
     const orthographicWords = normalizedVerseWords(verse);
     const recitationWords = recitationVerseWords(verse);
     orthographicWords.forEach((word, index) => canonical.push({
       units: { orthographic: word, recitation: recitationWords[index] ?? normalizeQuranRecitation(word) },
       ayah,
+      verseKey: verse.verseKey,
+      wordIndex: index,
+      globalWordIndex: canonical.length,
     }));
   });
   const evidence = timedTokens(chunks);
@@ -414,7 +424,7 @@ function reconstructPassage(
   if (firstSupported < 0 || lastSupported < firstSupported) return [];
   const activeStart = firstSupported;
   const activeEnd = lastSupported;
-  const sourceDuration = Math.max(0, ...chunks.map((chunk) => chunk.endMs));
+  const sourceDuration = Math.max(0, audioAnalysis?.durationMs ?? 0, ...chunks.map((chunk) => chunk.endMs));
   const rawStarts = byAyah.map((tokens) => tokens.length ? Math.min(...tokens.map((token) => token.startMs)) : null);
   const rawEnds = byAyah.map((tokens) => tokens.length ? Math.max(...tokens.map((token) => token.endMs)) : null);
   const starts = [...rawStarts];
@@ -433,21 +443,62 @@ function reconstructPassage(
     starts[index] = Math.round(left + share * (index - previous - 1));
     ends[index] = Math.round(left + share * (index - previous));
   }
+  const startSources = passage.map<RecognitionMatch["timing"]["start"]["source"]>((_, index) =>
+    byAyah[index].length ? (byAyah[index].some((token) => token.source === "direct-asr-word") ? "word-timestamp" : "chunk-interpolated") : "token-interpolated",
+  );
+  const endSources = [...startSources];
+
+  // Refine only expected canonical verse transitions.  Energy is never scanned
+  // as a generic segmenter, so breaths surrounded by tokens from one ayah are
+  // intentionally ignored.
+  for (let index = activeStart; index < activeEnd; index += 1) {
+    const previous = byAyah[index];
+    const next = byAyah[index + 1];
+    const previousLast = previous.length ? Math.max(...previous.map((token) => token.endMs)) : null;
+    const nextFirst = next.length ? Math.min(...next.map((token) => token.startMs)) : null;
+    if (previousLast === null || nextFirst === null) continue;
+    const refined = audioAnalysis ? refineTransitionWithEnergy(audioAnalysis, previousLast, nextFirst) : null;
+    if (refined?.foundGap) {
+      ends[index] = Math.max(starts[index] ?? 0, refined.speechOffsetMs);
+      starts[index + 1] = Math.max(ends[index]!, refined.speechOnsetMs);
+      endSources[index] = "word-audio-refined";
+      startSources[index + 1] = "word-audio-refined";
+    } else {
+      // Connected recitation gets a textual transition inside the two observed
+      // words, rather than a made-up silence or an early next-ayah display.
+      const transition = Math.round((previousLast + nextFirst) / 2);
+      ends[index] = Math.max(starts[index] ?? 0, transition);
+      starts[index + 1] = Math.max(transition, starts[index + 1] ?? transition);
+    }
+  }
+  const firstTokens = byAyah[activeStart];
+  const lastTokens = byAyah[activeEnd];
+  if (audioAnalysis && firstTokens.length) {
+    const refined = refineWordEdgeWithEnergy(audioAnalysis, Math.min(...firstTokens.map((token) => token.startMs)), "start");
+    if (refined !== null) {
+      starts[activeStart] = Math.max(0, Math.min(refined, ends[activeStart]! - 1));
+      startSources[activeStart] = "word-audio-refined";
+    }
+  }
+  if (audioAnalysis && lastTokens.length) {
+    const refined = refineWordEdgeWithEnergy(audioAnalysis, Math.max(...lastTokens.map((token) => token.endMs)), "end");
+    if (refined !== null) {
+      ends[activeEnd] = Math.max(starts[activeEnd]! + 1, Math.min(sourceDuration, refined));
+      endSources[activeEnd] = "word-audio-refined";
+    }
+  }
   return passage.slice(activeStart, activeEnd + 1).map((verse, offset) => {
     const index = activeStart + offset;
-    const tokens = byAyah[index];
-    const direct = tokens.some((token) => token.source === "direct-asr-word");
-    const source = tokens.length ? (direct ? "direct-asr-word" : "chunk-text-alignment") : "interpolation";
-    const startMs = Math.max(0, Math.min(sourceDuration, starts[index] ?? 0));
-    const endMs = Math.max(startMs + 1, Math.min(sourceDuration, ends[index] ?? startMs + 1));
+    const startMs = Math.round(Math.max(0, Math.min(sourceDuration, starts[index] ?? 0)));
+    const endMs = Math.round(Math.max(startMs + 1, Math.min(sourceDuration, ends[index] ?? startMs + 1)));
     return {
       verseKey: verse.verseKey,
       startMs,
       endMs,
       confidence: Number(confidence.toFixed(4)),
       timing: {
-        start: { timestampMs: startMs, source },
-        end: { timestampMs: endMs, source },
+        start: { timestampMs: startMs, source: startSources[index] },
+        end: { timestampMs: endMs, source: endSources[index] },
         matchedText: textByAyah[index].join(" "),
       },
     };
@@ -596,6 +647,7 @@ function passageDiagnostic(candidate: ScoredCandidate, verses: readonly QuranCor
     textSimilarity: Number(candidate.textSimilarity.toFixed(4)),
     sequenceConsistency: Number(((candidate.consecutiveAyat ?? 0) / (candidate.end - candidate.start + 1)).toFixed(4)),
     transcriptCoverage: Number((candidate.transcriptCoverage ?? 0).toFixed(4)),
+    canonicalCoverage: Number((candidate.canonicalCoverage ?? 0).toFixed(4)),
     consecutiveAyat: candidate.consecutiveAyat ?? 0,
   };
 }
@@ -637,12 +689,25 @@ function diagnosticCandidate(best: ScoredCandidate, verses: readonly QuranCorpus
   };
 }
 
+export type RecognitionOptions = {
+  corpus?: readonly QuranCorpusVerse[];
+  minConfidence?: number;
+  maxVersesPerChunk?: number;
+  maxPassageVerses?: number;
+  ambiguityMargin?: number;
+  /** Local decoded PCM envelope from the same recording, never uploaded. */
+  audioAnalysis?: AudioAnalysis;
+};
+
 export function analyzeTranscript(
   chunks: readonly TranscriptChunk[],
-  options: { corpus?: readonly QuranCorpusVerse[]; minConfidence?: number; maxVersesPerChunk?: number; maxPassageVerses?: number; ambiguityMargin?: number } = {},
+  options: RecognitionOptions = {},
 ): RecognitionAnalysis {
   const verses = options.corpus ?? hafsVerses;
-  const minConfidence = options.minConfidence ?? 0.64;
+  // This is only a floor against unrelated speech.  Whole-passage coverage and
+  // sequence evidence decide credibility; individual noisy ayat never need a
+  // high lexical confidence to participate in a mapped passage.
+  const minConfidence = options.minConfidence ?? 0.52;
   const maxVersesPerChunk = options.maxVersesPerChunk ?? 5;
   const maxPassageVerses = options.maxPassageVerses ?? Math.max(5, Math.min(14, chunks.length * 3 + 4));
   const ambiguityMargin = options.ambiguityMargin ?? 0.075;
@@ -717,7 +782,9 @@ export function analyzeTranscript(
       && runnerUp.textSimilarity >= best!.textSimilarity - 0.02,
   );
   const state: PassageAmbiguityState = !sufficientEvidence ? "no-reliable-match" : ambiguous ? "plausible-ambiguous" : "confident-unique";
-  const selectedCandidate = state === "confident-unique" ? bestDiagnostic : null;
+  // Ambiguity is metadata for correction UI, not a reason to discard the best
+  // contiguous explanation of a short recording.
+  const selectedCandidate = sufficientEvidence ? bestDiagnostic : null;
   const firstChunkBest = diagnostics.find((diagnostic) => diagnostic.topCandidate)?.topCandidate;
   const disambiguatedByLaterChunks = Boolean(
     selectedCandidate && firstChunkBest
@@ -730,9 +797,9 @@ export function analyzeTranscript(
     selectedCandidate,
     disambiguatedByLaterChunks,
   };
-  if (state !== "confident-unique" || !best) return { matches: [], diagnostics, passage };
+  if (state === "no-reliable-match" || !best) return { matches: [], diagnostics, passage };
   return {
-    matches: reconstructPassage(best, bestDiagnostic!.confidence, orderedChunks, verses),
+    matches: reconstructPassage(best, bestDiagnostic!.confidence, orderedChunks, verses, options.audioAnalysis),
     diagnostics,
     passage,
   };
@@ -740,7 +807,7 @@ export function analyzeTranscript(
 
 export function recognizeTranscript(
   chunks: readonly TranscriptChunk[],
-  options: { corpus?: readonly QuranCorpusVerse[]; minConfidence?: number; maxVersesPerChunk?: number; maxPassageVerses?: number; ambiguityMargin?: number } = {},
+  options: RecognitionOptions = {},
 ): RecognitionResult {
   return analyzeTranscript(chunks, options).matches;
 }

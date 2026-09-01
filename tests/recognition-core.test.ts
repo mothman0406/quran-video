@@ -3,6 +3,7 @@ import test from "node:test";
 import { performance } from "node:perf_hooks";
 import { analyzeTranscript, hafsVerses, normalizeArabic, recognizeTranscript } from "../src/lib/recognition/core.ts";
 import { quranRecognitionUnits } from "../src/lib/recognition/quran-recitation.ts";
+import { analyzeMonoPcm } from "../src/lib/recognition/audio-analysis.ts";
 
 const verse = (key: string) => hafsVerses.find((item) => item.verseKey === key)!;
 
@@ -124,7 +125,7 @@ test("reconstructs a contiguous passage and aligns ayah timing across mid-ayah b
   assert.ok(v76.startMs <= 33_000 && v76.endMs >= 43_000, "the 0:38 breath remains inside 6:76");
   assert.ok(v74.endMs <= v75.startMs && v75.endMs <= v76.startMs && v76.endMs <= v77.startMs);
   assert.ok(v74.endMs - v74.startMs !== v77.endMs - v77.startMs, "ayah timing must not be evenly distributed");
-  assert.equal(v74.timing.start.source, "chunk-text-alignment");
+  assert.equal(v74.timing.start.source, "chunk-interpolated");
   assert.ok(v75.timing.matchedText.length > 0, "weak interior text should contribute to timing");
 });
 
@@ -134,16 +135,18 @@ test("maps a clip beginning mid-ayah to the containing ayah", () => {
   assert.equal(result[0]?.startMs, 250);
 });
 
-test("reports an ambiguous short clip instead of committing to one repeated passage", () => {
+test("returns a usable best candidate while marking an ambiguous short clip", () => {
   const analysis = analyzeTranscript([{ startMs: 0, endMs: 420, text: "الحمد لله" }]);
-  assert.deepEqual(analysis.matches, []);
+  assert.ok(analysis.matches.length > 0);
   assert.equal(analysis.passage.state, "plausible-ambiguous");
+  assert.ok(analysis.passage.selectedCandidate);
   assert.ok(analysis.passage.candidates.length >= 2);
 });
 
-test("does not overclaim an ambiguous short phrase", () => {
-  const result = recognizeTranscript([{ startMs: 0, endMs: 300, text: "الله" }]);
-  assert.deepEqual(result, []);
+test("keeps a one-word Quran candidate explicitly ambiguous", () => {
+  const analysis = analyzeTranscript([{ startMs: 0, endMs: 300, text: "الله" }]);
+  assert.equal(analysis.passage.state, "plausible-ambiguous");
+  assert.ok(analysis.matches.length > 0);
 });
 
 test("uses later contiguous ayat to overturn an early repeated-phrase hypothesis", () => {
@@ -171,8 +174,55 @@ test("leaves a repeated short recording ambiguous until subsequent Quran evidenc
     { verseKey: "2:2", text: "ثم رجع" },
   ];
   const analysis = analyzeTranscript([{ startMs: 800, endMs: 1_300, text: "قال الله" }], { corpus, minConfidence: 0.6 });
-  assert.deepEqual(analysis.matches, []);
+  assert.deepEqual(analysis.matches.map((match) => match.verseKey), ["1:1"]);
   assert.equal(analysis.passage.state, "plausible-ambiguous");
+});
+
+test("does not show the first ayah during initial silence before its first aligned word", () => {
+  const corpus = [{ verseKey: "1:1", text: "قال الله" }];
+  const analysis = analyzeTranscript([{
+    startMs: 7_200,
+    endMs: 8_000,
+    text: "قال الله",
+    words: [{ text: "قال", startMs: 7_200, endMs: 7_550 }, { text: "الله", startMs: 7_550, endMs: 8_000 }],
+  }], { corpus, minConfidence: 0.6 });
+  assert.equal(analysis.matches[0]?.startMs, 7_200);
+  assert.equal(analysis.matches[0]?.timing.start.source, "word-timestamp");
+});
+
+test("uses canonical word transitions even when two ayat have no acoustic pause", () => {
+  const corpus = [{ verseKey: "1:1", text: "قال الله" }, { verseKey: "1:2", text: "ثم رجع" }];
+  const analysis = analyzeTranscript([{
+    startMs: 100,
+    endMs: 1_400,
+    text: "قال الله ثم رجع",
+    words: [
+      { text: "قال", startMs: 100, endMs: 350 }, { text: "الله", startMs: 350, endMs: 700 },
+      { text: "ثم", startMs: 700, endMs: 950 }, { text: "رجع", startMs: 950, endMs: 1_400 },
+    ],
+  }], { corpus, minConfidence: 0.6 });
+  assert.deepEqual(analysis.matches.map((match) => match.verseKey), ["1:1", "1:2"]);
+  assert.equal(analysis.matches[0]?.endMs, 700);
+  assert.equal(analysis.matches[1]?.startMs, 700);
+});
+
+test("refines only the expected text boundary with a local PCM energy gap", () => {
+  const corpus = [{ verseKey: "1:1", text: "قال" }, { verseKey: "1:2", text: "رجع" }];
+  const pcm = new Float32Array(2_000);
+  for (let index = 100; index < 750; index += 1) pcm[index] = 0.2;
+  for (let index = 1_050; index < 1_600; index += 1) pcm[index] = 0.2;
+  const analysis = analyzeTranscript([{
+    startMs: 100,
+    endMs: 1_600,
+    text: "قال رجع",
+    words: [{ text: "قال", startMs: 100, endMs: 800 }, { text: "رجع", startMs: 1_000, endMs: 1_600 }],
+  }], { corpus, minConfidence: 0.6, audioAnalysis: analyzeMonoPcm(pcm, 1_000) });
+  const [first, second] = analysis.matches;
+  assert.equal(first?.endMs, 750);
+  assert.equal(second?.startMs, 1_050);
+  assert.equal(first?.timing.end.source, "word-audio-refined");
+  assert.equal(second?.timing.start.source, "word-audio-refined");
+  assert.ok(first!.endMs < second!.startMs, "a real ayah pause remains a caption gap");
 });
 
 test("rejects unrelated Arabic prose even when approximate retrieval runs", () => {

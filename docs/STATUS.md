@@ -4,13 +4,13 @@
 
 Complete:
 
-- Replaced chunk-by-chunk final verse commitment with bounded whole-recording inference over contiguous Quran windows. Candidate scores combine normalized/recitation-aware similarity, monotonic token alignment, transcript coverage, canonical coverage, and consecutive-ayah consistency; top candidates, score margin, and later-chunk disambiguation are exposed at `/recognition`.
-- Added explicit `confident-unique`, `plausible-ambiguous`, and `no-reliable-match` passage outcomes. Brief repeated phrases remain unresolved until enough later Quran sequence evidence distinguishes a passage.
-- Aligned the full accepted canonical passage against all timestamped ASR tokens to derive ayah starts, transitions, and ends. Initial caption timing is anchored to the first aligned canonical token, with conservative interpolation for missing interior evidence rather than chunk/breath boundaries.
+- Replaced chunk-by-chunk final verse commitment with two-stage, bounded whole-recording inference: fuzzy anchor retrieval proposes contiguous Quran windows and dynamic-programming sequence alignment scores every candidate against the complete transcript. Candidate scores combine normalized/recitation-aware token similarity, transcript/canonical coverage, word order, and consecutive-ayah support; top candidates, margin, and late disambiguation are exposed at `/recognition`.
+- Whisper now requests word timestamps and overlap-stitches its 30-second windows into one monotonic recording without duplicate overlap words or backward timestamps. Ambiguous-but-credible clips expose `plausible-ambiguous` and retain a usable best passage for correction; only `no-reliable-match` creates no captions.
+- The selected passage is aligned again as one canonical word sequence against all timestamped ASR words. A 10 ms local PCM RMS envelope is built once per recognition job. It uses a local adaptive noise floor only around canonical ayah transition corridors to refine active speech offset/onset; breaths within 6:74 or 6:76 cannot create a verse split. Initial silence and final vocal completion are refined around the first/last aligned word.
 - Made editable `CaptionSegment.startMs`/`endMs` the shared preview/timeline interval. Preview transitions now stay strictly inside that half-open range, so an upcoming caption cannot appear before its start and a caption is inactive at its end. Recognition `VerseAlignment` timing stays independent reset evidence.
-- Added deterministic ambiguity/disambiguation and exact caption-boundary regression coverage while preserving 93:1–5, 6:74–77, noisy-ASR, and unrelated-Arabic regressions.
+- Added explicit regressions for 5+ seconds initial silence, connected ayat with no acoustic gap, expected-transition PCM gaps, ambiguous best-candidate behavior, and the 6:74–77 mid-ayah breath fixture while preserving 93:1–5, noisy-ASR, and unrelated-Arabic regressions.
 
-Verification: targeted recognition/caption/editor tests, `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass.
+Measured: the noisy five-ayah Ad-Duha mapping completes in about 0.73 s in this Node workspace; PCM envelope construction is linear in source duration. Browser codec/reciter boundary measurements remain manual verification work.
 
 ## Current milestone: Compact Quran video editor workspace
 
