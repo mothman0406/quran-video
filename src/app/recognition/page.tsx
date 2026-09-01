@@ -1,7 +1,10 @@
 "use client";
 
-import { type ChangeEvent, useEffect, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { analyzeTranscript, type RecognitionAnalysis, type RecognitionResult } from "@/lib/recognition/core";
+import { createCaptionSegments, getActiveCaptionSegment, type CaptionSegment } from "@/lib/editor/captions";
+import { recognitionToVerseAlignments, type VerseAlignment } from "@/lib/editor/recognition";
+import { getVerses } from "@/lib/quran/local";
 import {
   LOCAL_WHISPER_APPROXIMATE_DOWNLOAD_MB,
   LOCAL_WHISPER_MODEL,
@@ -19,17 +22,34 @@ function formatTime(value: number) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
+function formatClockMilliseconds(value: number) {
+  const milliseconds = Math.max(0, Math.round(value));
+  return `${String(Math.floor(milliseconds / 60_000)).padStart(2, "0")}:${String(Math.floor((milliseconds % 60_000) / 1_000)).padStart(2, "0")}.${String(milliseconds % 1_000).padStart(3, "0")}`;
+}
+
+type GroundTruthKind = "recitation-start" | "set-start" | "transition" | "recitation-end";
+type GroundTruthMark = { id: string; kind: GroundTruthKind; timeMs: number; segmentId: string | null };
+
 const INITIAL_RUNTIME_SUPPORT = { supported: false, reason: "Checking browser capabilities…" };
 
 export default function RecognitionSpikePage() {
+  const videoRef = useRef<HTMLVideoElement>(null);
   const [support, setSupport] = useState(INITIAL_RUNTIME_SUPPORT);
   const [file, setFile] = useState<File | null>(null);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [durationMs, setDurationMs] = useState(0);
+  const [currentTimeMs, setCurrentTimeMs] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [result, setResult] = useState<LocalTranscriptionResult | null>(null);
   const [matches, setMatches] = useState<RecognitionResult>([]);
   const [analysis, setAnalysis] = useState<RecognitionAnalysis | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
+  const [alignments, setAlignments] = useState<VerseAlignment[]>([]);
+  const [segments, setSegments] = useState<CaptionSegment[]>([]);
+  const [marks, setMarks] = useState<GroundTruthMark[]>([]);
+  const [editingMarkId, setEditingMarkId] = useState<string | null>(null);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setSupport(localTranscriptionSupport()));
@@ -38,12 +58,20 @@ export default function RecognitionSpikePage() {
 
   function selectFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
     setFile(next);
+    setVideoUrl(next ? URL.createObjectURL(next) : null);
+    setDurationMs(0);
+    setCurrentTimeMs(0);
+    setIsPlaying(false);
     setResult(null);
     setMatches([]);
     setAnalysis(null);
     setError(null);
     setProgress(null);
+    setAlignments([]);
+    setSegments([]);
+    setMarks([]);
   }
 
   async function transcribe() {
@@ -58,11 +86,52 @@ export default function RecognitionSpikePage() {
       const nextAnalysis = analyzeTranscript(output.chunks, { audioAnalysis: output.audioAnalysis });
       setAnalysis(nextAnalysis);
       setMatches(nextAnalysis.matches);
+      const nextAlignments = recognitionToVerseAlignments(nextAnalysis.matches);
+      setAlignments(nextAlignments);
+      const verseContent = nextAlignments.length ? Object.fromEntries(getVerses(nextAlignments[0].verseKey, nextAlignments.at(-1)!.verseKey).map((verse) => [verse.verseKey, verse])) : {};
+      setSegments(createCaptionSegments(nextAlignments, verseContent));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Local transcription failed.");
     } finally {
       setIsRunning(false);
     }
+  }
+
+  function onVideoTimeUpdate() {
+    setCurrentTimeMs(Math.round((videoRef.current?.currentTime ?? 0) * 1_000));
+  }
+  function seekTo(value: number) {
+    const next = Math.max(0, Math.min(durationMs, Math.round(value)));
+    if (videoRef.current) videoRef.current.currentTime = next / 1_000;
+    setCurrentTimeMs(next);
+  }
+  function mark(kind: GroundTruthKind) {
+    const active = getActiveCaptionSegment(segments, currentTimeMs);
+    const nextSegment = segments.find((segment) => segment.startMs >= currentTimeMs) ?? active;
+    setMarks((current) => [...current, { id: crypto.randomUUID(), kind, timeMs: Math.round(currentTimeMs), segmentId: kind === "transition" || kind === "set-start" ? nextSegment?.id ?? null : null }]);
+  }
+  function updateMark(id: string, patch: Partial<GroundTruthMark>) {
+    setMarks((current) => current.map((item) => item.id === id ? { ...item, ...patch, timeMs: patch.timeMs === undefined ? item.timeMs : Math.max(0, Math.min(durationMs, Math.round(patch.timeMs))) } : item));
+  }
+  function deleteMark(id: string) {
+    setMarks((current) => current.filter((item) => item.id !== id));
+    if (editingMarkId === id) setEditingMarkId(null);
+  }
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
+      if (event.key.toLowerCase() === "r") mark("recitation-start");
+      if (event.key.toLowerCase() === "m") mark("transition");
+      if (event.key.toLowerCase() === "e") mark("recitation-end");
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  });
+
+  if (process.env.NODE_ENV === "production") {
+    return <main className="min-h-screen bg-[#f5f2eb] px-5 py-10 text-[#17211b]"><div className="mx-auto max-w-2xl rounded-2xl border border-[#d8d5cc] bg-[#fbfaf6] p-6"><p className="text-xs font-bold uppercase tracking-[0.22em] text-[#a06b31]">Developer tool</p><h1 className="mt-3 font-serif text-3xl text-[#173c32]">Timing Lab unavailable</h1><p className="mt-3 text-[#68716a]">The local recognition timing lab is available in development builds only.</p></div></main>;
   }
 
   const firstMatch = matches[0];
@@ -86,7 +155,7 @@ export default function RecognitionSpikePage() {
           <label className="block text-sm font-semibold text-[#173c32]" htmlFor="local-video">Local video</label>
           <input accept="video/*" className="mt-3 block text-sm" id="local-video" type="file" onChange={selectFile} />
           {file && <p className="mt-2 text-sm text-[#68716a]">{file.name} · {(file.size / 1_000_000).toFixed(1)} MB</p>}
-          <button className="mt-4 rounded-full bg-[#173c32] px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!file || !support.supported || isRunning} type="button" onClick={transcribe}>Transcribe locally</button>
+          <button className="mt-4 rounded-full bg-[#173c32] px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled={!file || !support.supported || isRunning} type="button" onClick={transcribe}>Run recognition locally</button>
           {progress && <p aria-live="polite" className="mt-3 text-sm text-[#35604f]">{progress.message}{progress.phase === "transcribing" && progress.total ? ` ${progress.completed ?? 0}/${progress.total}` : ""}{progress.bytesLoaded && progress.bytesTotal ? ` ${(progress.bytesLoaded / progress.bytesTotal * 100).toFixed(0)}%` : ""}</p>}
           {error && <p className="mt-3 rounded-lg bg-[#fff3ed] p-3 text-sm text-[#984b32]">{error}</p>}
         </section>
@@ -105,6 +174,18 @@ export default function RecognitionSpikePage() {
           {analysis && <details className="mt-4 text-sm text-[#68716a]"><summary className="cursor-pointer font-semibold text-[#35604f]">Passage-mapping diagnostics</summary><p className="mt-2" dir="rtl" lang="ar">Complete transcript: {result.rawTranscript || "—"}</p>{canonicalSpan ? <><p className="mt-3 font-semibold text-[#173c32]">Detected canonical span · Surah {canonicalSpan.surah}</p><p>Start: {canonicalSpan.firstVerseKey}, word {canonicalSpan.firstWordIndex} <span dir="rtl" lang="ar">“{canonicalSpan.firstWordText}”</span> ({canonicalSpan.firstBoundary}). End: {canonicalSpan.lastVerseKey}, word {canonicalSpan.lastWordIndex} <span dir="rtl" lang="ar">“{canonicalSpan.lastWordText}”</span> ({canonicalSpan.lastBoundary}).</p><p>Verse coverage: {matches.map((match) => `${match.verseKey} words ${match.wordSupport.canonicalStartWordIndex}-${match.wordSupport.canonicalEndWordIndex}/${match.wordSupport.canonicalWordCount}`).join(" · ")}</p></> : <p className="mt-2">No reliable canonical word span.</p>}<p className="mt-2">Mapping quality: {analysis.passage.mappingQuality ?? "n/a"}; transcript coverage: {analysis.passage.transcriptCoverage ?? "n/a"}; canonical span coverage: {analysis.passage.canonicalSpanCoverage ?? "n/a"}; uniqueness margin: {analysis.passage.uniquenessMargin ?? "n/a"}; boundary confidence: {analysis.passage.firstBoundaryConfidence ?? "n/a"} / {analysis.passage.lastBoundaryConfidence ?? "n/a"}. Boundary completion: {analysis.passage.boundaryCompletion.extendedBackward ? "backward extended" : "no backward extension"}{analysis.passage.boundaryCompletion.extendedForward ? ", forward extended" : ""}.</p><p className="mt-2">Selected passage: {analysis.passage.selectedCandidate ? `${analysis.passage.selectedCandidate.startVerseKey} – ${analysis.passage.selectedCandidate.endVerseKey}` : "none"}; decision: {analysis.passage.state}; later chunks disambiguated: {analysis.passage.disambiguatedByLaterChunks ? "yes" : "no"}.</p>{analysis.passage.candidates.map((candidate) => <p className="mt-2" key={`${candidate.startVerseKey}-${candidate.endVerseKey}-${candidate.firstWordIndex}`}>{candidate.startVerseKey} word {candidate.firstWordIndex} – {candidate.endVerseKey} word {candidate.lastWordIndex}: score {candidate.totalScore}, explained {candidate.explainedTranscriptTokens} tokens, uncovered prefix/suffix {candidate.unexplainedTranscriptBefore}/{candidate.unexplainedTranscriptAfter}, transcript coverage {candidate.transcriptCoverage}, Quran coverage {candidate.canonicalCoverage}, sequence {candidate.sequenceConsistency}.</p>)}{analysis.diagnostics.map((diagnostic) => diagnostic.rejectionReason ? <p className="mt-2" key={`${diagnostic.startMs}-${diagnostic.endMs}`}>Chunk {formatTime(diagnostic.startMs)}–{formatTime(diagnostic.endMs)}: {diagnostic.rejectionReason}; local candidate {diagnostic.topCandidate ? `${diagnostic.topCandidate.startVerseKey} – ${diagnostic.topCandidate.endVerseKey}` : "none"}.</p> : null)}</details>}
           <details className="mt-5"><summary className="cursor-pointer text-sm font-semibold text-[#35604f]">Raw transcript ({result.chunks.length} timestamped chunks)</summary><p className="mt-3 whitespace-pre-wrap rounded-lg bg-[#f7f5ef] p-3 text-sm leading-7" dir="rtl" lang="ar">{result.rawTranscript || "No speech was returned."}</p></details>
         </section>}
+
+        {videoUrl && <section className="rounded-2xl border border-[#d8d5cc] bg-[#fbfaf6] p-5">
+          <h2 className="font-serif text-2xl font-semibold text-[#173c32]">Ground-truth timing controls</h2>
+          <p className="mt-2 text-sm text-[#68716a]">Watch the local recording and mark what you actually hear. R marks recitation onset, M marks the next transition, and E marks final recitation end.</p>
+          <video ref={videoRef} className="mt-4 w-full rounded-xl bg-black" controls playsInline preload="metadata" src={videoUrl} onLoadedMetadata={() => setDurationMs(Math.round((videoRef.current?.duration ?? 0) * 1_000))} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onEnded={() => setIsPlaying(false)} onTimeUpdate={onVideoTimeUpdate} onSeeked={onVideoTimeUpdate} />
+          <div className="mt-4 flex flex-wrap items-center gap-3"><button className="rounded-full border border-[#b8cabc] px-4 py-2 text-sm font-semibold text-[#315846]" type="button" onClick={() => void (isPlaying ? videoRef.current?.pause() : videoRef.current?.play())}>{isPlaying ? "Pause" : "Play"}</button><span className="font-mono text-sm text-[#173c32]">{formatClockMilliseconds(currentTimeMs)} · {currentTimeMs} ms / {formatClockMilliseconds(durationMs)}</span></div>
+          <input aria-label="Scrub video" className="mt-4 w-full accent-[#b36f3c]" type="range" min="0" max={Math.max(1, durationMs)} step="1" value={Math.min(currentTimeMs, Math.max(1, durationMs))} onChange={(event) => seekTo(Number(event.target.value))} />
+          <div className="mt-4 flex flex-wrap gap-2"><button className="rounded-full bg-[#b36f3c] px-4 py-2 text-sm font-semibold text-white" type="button" onClick={() => mark("recitation-start")}>Mark recitation start (R)</button><button className="rounded-full bg-[#315846] px-4 py-2 text-sm font-semibold text-white" type="button" onClick={() => mark("set-start")}>Mark current set start</button><button className="rounded-full border border-[#b8cabc] px-4 py-2 text-sm font-semibold text-[#315846]" type="button" onClick={() => mark("transition")}>Mark next transition (M)</button><button className="rounded-full border border-[#b8cabc] px-4 py-2 text-sm font-semibold text-[#315846]" type="button" onClick={() => mark("recitation-end")}>Mark recitation end (E)</button><button className="rounded-full border border-[#d0a89b] px-4 py-2 text-sm font-semibold text-[#984b32]" type="button" onClick={() => setMarks([])}>Clear all marks</button></div>
+          {marks.length > 0 && <div className="mt-5 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b text-[#68716a]"><tr><th className="py-2">Kind</th><th className="py-2">Time</th><th className="py-2">Caption set</th><th className="py-2">Actions</th></tr></thead><tbody>{marks.map((item) => <tr className="border-b border-[#e3e0d8]" key={item.id}><td className="py-2 font-semibold">{item.kind}</td><td className="py-2">{editingMarkId === item.id ? <input className="w-28 rounded border border-[#b8cabc] px-2 py-1 font-mono" type="number" min="0" max={durationMs} step="1" value={item.timeMs} onChange={(event) => updateMark(item.id, { timeMs: Number(event.target.value) })} /> : <button className="font-mono text-[#315846] underline" type="button" onClick={() => seekTo(item.timeMs)}>{formatClockMilliseconds(item.timeMs)} <span className="text-[#68716a]">({item.timeMs} ms)</span></button>}</td><td className="py-2"><select aria-label={`Associate ${item.kind} mark`} className="rounded border border-[#d8d5cc] bg-white px-2 py-1" value={item.segmentId ?? ""} onChange={(event) => updateMark(item.id, { segmentId: event.target.value || null })}><option value="">Not associated</option>{segments.map((segment) => <option key={segment.id} value={segment.id}>{segment.verseKeys.join(", ")}</option>)}</select></td><td className="py-2"><button className="mr-3 text-[#315846] underline" type="button" onClick={() => setEditingMarkId(editingMarkId === item.id ? null : item.id)}>{editingMarkId === item.id ? "Done" : "Edit"}</button><button className="text-[#984b32] underline" type="button" onClick={() => deleteMark(item.id)}>Delete</button></td></tr>)}</tbody></table></div>}
+        </section>}
+
+        {result && <section className="rounded-2xl border border-[#d8d5cc] bg-[#fbfaf6] p-5"><h2 className="font-serif text-2xl font-semibold text-[#173c32]">Authoritative timing model</h2><p className="mt-2 text-sm text-[#68716a]">Preview and timeline use only CaptionSegment startMs/endMs. VerseAlignment remains recognition evidence and reset input.</p>{segments.length > 0 ? <div className="mt-4 overflow-x-auto"><table className="w-full text-left text-sm"><thead className="border-b text-[#68716a]"><tr><th className="py-2">Set</th><th className="py-2">Start</th><th className="py-2">End</th><th className="py-2">Recognition evidence</th></tr></thead><tbody>{segments.map((segment) => <tr className="border-b border-[#e3e0d8]" key={segment.id}><td className="py-2 font-semibold">{segment.verseKeys.join(", ")}</td><td className="py-2 font-mono">{segment.startMs} ms</td><td className="py-2 font-mono">{segment.endMs} ms</td><td className="py-2 text-xs">{segment.timingEvidence.start.source} → {segment.timingEvidence.end.source}</td></tr>)}</tbody></table></div> : <p className="mt-3 text-sm text-[#68716a]">No CaptionSegments were created.</p>}<details className="mt-5"><summary className="cursor-pointer text-sm font-semibold text-[#35604f]">Detailed recognition/timing pipeline log</summary><pre className="mt-3 max-h-[32rem] overflow-auto rounded-lg bg-[#f7f5ef] p-3 text-xs leading-5">{JSON.stringify({ recognitionTiming: "VerseAlignment.startMs/endMs + timingEvidence", displayTiming: "CaptionSegment.startMs/endMs (authoritative, half-open)", transcription: { backend: result.backend, timestampMode: result.timestampMode, modelLoadMs: result.modelLoadMs, transcriptionMs: result.transcriptionMs, durationMs: result.durationMs, timestampValidation: result.timestampValidation }, audioAnalysis: { sampleRate: result.audioAnalysis.sampleRate, durationMs: result.audioAnalysis.durationMs, windowMs: result.audioAnalysis.windowMs, rmsWindowCount: result.audioAnalysis.rms.length }, passage: analysis?.passage, diagnostics: analysis?.diagnostics, verseAlignments: alignments, captionSegments: segments, groundTruthMarks: marks }, null, 2)}</pre></details></section>}
       </div>
     </main>
   );

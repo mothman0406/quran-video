@@ -1,5 +1,18 @@
 # Status
 
+## Current milestone: Caption timing observability + timeline editing
+
+Complete:
+
+- Kept recognition timing evidence (`VerseAlignment`) separate from authoritative editable display timing (`CaptionSegment.startMs`/`endMs`). Generated caption sets begin at the detected first Quran onset; later sets start at their detected onset while the previous set remains visible through pauses, and no caption appears before the first onset.
+- Centralized half-open active-caption selection in `getActiveCaptionSegment`; preview transitions and timeline active state use the same editable interval, including exact start/end boundary behavior.
+- Every timeline caption set is a visible block with draggable body, left edge, and right edge. Body drag preserves duration; edge edits use integer milliseconds, subtle playhead/neighbor/80 ms snapping, and a live `00:00.000` tooltip. Manual edits do not ripple neighbors and can intentionally create gaps or overlaps.
+- Added per-set and all-set timing reset actions that restore recognition-derived timing evidence without mutating `VerseAlignment`.
+- Expanded the development-only `/recognition` route into a Timing Lab with local video playback, millisecond scrubbing, detailed transcription/audio/passage/timing diagnostics, and editable/deletable/clearable ground-truth marks. R/M/E mark recitation start, transitions, and final recitation end; transition marks can be associated with detected CaptionSegments.
+- Added regressions for detected-onset defaults, pause-closing continuous display timing, exact half-open boundaries, independent manual gaps/overlaps, and reset-all behavior. Recognition/matching code was not changed.
+
+Verification: `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. Manual browser verification remains required with a real recitation: confirm no pre-onset caption, pause behavior, timeline body/edge drag, snapping tooltip, preview agreement, ground-truth marks, and persistence through save/open.
+
 ## Current milestone: Holistic Quran passage alignment
 
 Complete:

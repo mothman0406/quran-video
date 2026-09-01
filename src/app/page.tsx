@@ -26,6 +26,7 @@ import {
   mergeCaptionWithNext,
   mergeCaptionWithPrevious,
   resetCaptionPositioning,
+  resetAllCaptionSegmentTiming,
   resetCaptionSegmentTiming,
   resetTypography as resetTypographyDefaults,
   resizeCaptionWidth,
@@ -143,6 +144,7 @@ export default function Home() {
     {},
   );
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
+  const [timelineTooltip, setTimelineTooltip] = useState<string | null>(null);
   const [segments, setSegments] = useState<CaptionSegment[]>([]);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(
     null,
@@ -216,6 +218,13 @@ export default function Home() {
     positioning: CaptionPositioning;
   } | null>(null);
   const draggingEdge = useRef<"start" | "end" | null>(null);
+  const timelineInteraction = useRef<{
+    id: string;
+    mode: "start" | "end" | "body";
+    pointerStartMs: number;
+    initialStartMs: number;
+    initialEndMs: number;
+  } | null>(null);
   const exportAbort = useRef<AbortController | null>(null);
   const exportCoordinator = useRef(new ExportCoordinator());
 
@@ -403,6 +412,7 @@ export default function Home() {
     setSegments([]);
     setContent({});
     setCurrentTimeMs(0);
+    setTimelineTooltip(null);
     setSelectedSegmentId(null);
     setSelectedObject(null);
     setStage("idle");
@@ -771,6 +781,7 @@ export default function Home() {
     setStage("idle");
     setErrorMessage(null);
     setCurrentTimeMs(0);
+    setTimelineTooltip(null);
     setSelectedObject(null);
     setPositioning(resetCaptionPositioning(projectFormat));
     setExportState(null);
@@ -928,6 +939,27 @@ export default function Home() {
   function seekTimeline(event: PointerEvent<HTMLElement>) {
     seekTo(timelineTimeFromPointer(event));
   }
+  function formatTimelineTime(value: number) {
+    const milliseconds = Math.max(0, Math.round(value));
+    const minutes = Math.floor(milliseconds / 60_000);
+    const seconds = Math.floor((milliseconds % 60_000) / 1_000);
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(milliseconds % 1_000).padStart(3, "0")}`;
+  }
+  function snapTimelineTime(value: number, id: string) {
+    const maxMs = Math.max(1, (videoMetadata?.durationSeconds ?? 0) * 1_000);
+    const candidates = [currentTimeMs, ...segments.flatMap((segment) => segment.id === id ? [] : [segment.startMs, segment.endMs])];
+    const nearby = candidates.find((candidate) => Math.abs(candidate - value) <= 80);
+    return Math.max(0, Math.min(maxMs, Math.round(nearby ?? value)));
+  }
+  function handleSegmentPointerDown(event: PointerEvent<HTMLButtonElement>, segment: CaptionSegment) {
+    event.stopPropagation();
+    const pointerStartMs = timelineTimeFromPointer(event);
+    setSelectedSegmentId(segment.id);
+    setSelectedObject(null);
+    setSplitBoundary(Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)));
+    timelineInteraction.current = { id: segment.id, mode: "body", pointerStartMs, initialStartMs: segment.startMs, initialEndMs: segment.endMs };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
   function handleEdgeDown(
     event: PointerEvent<HTMLElement>,
     edge: "start" | "end",
@@ -935,36 +967,38 @@ export default function Home() {
   ) {
     event.stopPropagation();
     selectSegment(segment);
+    timelineInteraction.current = { id: segment.id, mode: edge, pointerStartMs: timelineTimeFromPointer(event), initialStartMs: segment.startMs, initialEndMs: segment.endMs };
     draggingEdge.current = edge;
+    setTimelineTooltip(formatTimelineTime(edge === "start" ? segment.startMs : segment.endMs));
     event.currentTarget.setPointerCapture(event.pointerId);
   }
   function handleEdgeMove(event: PointerEvent<HTMLElement>) {
-    if (!draggingEdge.current || !selectedSegment) return;
+    const interaction = timelineInteraction.current;
+    if (!interaction) return;
     const nextTime = timelineTimeFromPointer(event);
+    const snapped = snapTimelineTime(nextTime, interaction.id);
+    const delta = snapped - interaction.pointerStartMs;
+    const nextPatch = interaction.mode === "body"
+      ? (() => {
+          const duration = interaction.initialEndMs - interaction.initialStartMs;
+          const startMs = Math.max(0, Math.min(Math.max(1, (videoMetadata?.durationSeconds ?? 0) * 1_000) - duration, snapTimelineTime(interaction.initialStartMs + delta, interaction.id)));
+          return { startMs, endMs: startMs + duration };
+        })()
+      : interaction.mode === "start" ? { startMs: snapped } : { endMs: snapped };
     setSegments((current) =>
       updateCaptionSegmentTiming(
         current,
-        selectedSegment.id,
-        draggingEdge.current === "start"
-          ? { startMs: nextTime }
-          : { endMs: nextTime },
+        interaction.id,
+        nextPatch,
         (videoMetadata?.durationSeconds ?? 0) * 1000,
       ),
     );
+    setTimelineTooltip(formatTimelineTime(interaction.mode === "end" ? nextPatch.endMs ?? snapped : nextPatch.startMs ?? snapped));
   }
   function handleEdgeUp() {
     draggingEdge.current = null;
-  }
-  function updateTiming(key: "startMs" | "endMs", value: number) {
-    if (!selectedSegment) return;
-    setSegments((current) =>
-      updateCaptionSegmentTiming(
-        current,
-        selectedSegment.id,
-        { [key]: value },
-        (videoMetadata?.durationSeconds ?? 0) * 1000,
-      ),
-    );
+    timelineInteraction.current = null;
+    setTimelineTooltip(null);
   }
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -1211,6 +1245,7 @@ export default function Home() {
         exportDiagnostics={exportDiagnostics}
         errorMessage={errorMessage}
         timingWarning={timingWarning}
+        timelineTooltip={timelineTooltip}
         showCorrection={showCorrection}
         surah={surah}
         startAyah={startAyah}
@@ -1229,6 +1264,7 @@ export default function Home() {
         onObjectPointerUp={handleObjectPointerUp}
         onCanvasBackgroundPointerDown={() => setSelectedObject(null)}
         onSelectSegment={selectSegment}
+        onSegmentPointerDown={handleSegmentPointerDown}
         onTimelinePointerDown={seekTimeline}
         onTimelinePointerMove={handleEdgeMove}
         onEdgeDown={handleEdgeDown}
@@ -1262,12 +1298,12 @@ export default function Home() {
         onSetLocalStyleName={setLocalStyleName}
         onResetSelectedObjectStyle={resetSelectedObjectStyle}
         onAlignTranslation={alignTranslationBelowArabic}
-        onUpdateTiming={updateTiming}
         onSetSplitBoundary={setSplitBoundary}
         onSplit={splitSelected}
         onMergePrevious={mergePrevious}
         onMergeNext={mergeNext}
         onResetTiming={() => selectedSegment && setSegments((current) => resetCaptionSegmentTiming(current, selectedSegment.id, (videoMetadata?.durationSeconds ?? 0) * 1000))}
+        onResetAllTiming={() => setSegments((current) => resetAllCaptionSegmentTiming(current, (videoMetadata?.durationSeconds ?? 0) * 1000))}
       />
       {/* <div className="hidden" aria-hidden="true">
       <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-5 py-5 sm:px-8 lg:px-12 lg:py-8">

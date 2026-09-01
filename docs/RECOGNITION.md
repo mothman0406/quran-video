@@ -22,6 +22,10 @@ PCM energy is consulted only inside a corridor already implied by the last align
 
 Evidence is stored as `word-audio-refined`, `word-timestamp`, `token-interpolated`, `chunk-interpolated`, or `low-confidence-fallback`. Caption intervals remain exact half-open `CaptionSegment.startMs`/`endMs` values shared by preview and timeline; fades are bounded inside those intervals.
 
+## 4. Timing Lab
+
+Development builds expose `/recognition` as the local Timing Lab. It keeps the selected video in the browser, shows transcription/timestamp/audio-analysis/passage diagnostics, and materializes the same `VerseAlignment` → `CaptionSegment` display model used by the editor. The lab records integer-millisecond ground-truth marks for recitation onset, set transitions, and final recitation end; marks can be associated with detected segments and edited or removed. Production builds show no detailed recognition diagnostics.
+
 ## Performance and limitations
 
 The full corpus has 6,236 ayat, but only bounded anchor windows receive dynamic programming. The noisy five-ayah Ad-Duha regression scores in approximately 0.73 s in Node on this workspace; PCM envelope construction is linear in source duration. This is deterministic refinement around ASR word evidence, not phonetic forced alignment: difficult ASR, heavy reverb, or weak word timestamps can still fall back to interpolation and merit manual correction. Browser fixture measurements remain required to quantify boundary error across real reciters and codecs.

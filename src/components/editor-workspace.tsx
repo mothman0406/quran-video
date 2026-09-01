@@ -9,6 +9,7 @@ import type { OutputProfile } from "@/lib/export/output";
 import type { LocalCaptionStyle } from "@/lib/editor/styles";
 import type { CaptionObject, CaptionResizeEdge } from "@/components/caption-preview";
 import type { QuranContentResponse } from "@/lib/quran/content";
+import { getActiveCaptionSegment } from "@/lib/editor/captions";
 import CaptionPreview from "@/components/caption-preview";
 import SafeAreaOverlay from "@/components/safe-area-overlay";
 import AccountPanel from "@/components/account-panel";
@@ -62,6 +63,7 @@ type EditorWorkspaceProps = {
   exportDiagnostics: LocalExportDiagnostics | null;
   errorMessage: string | null;
   timingWarning: string | null;
+  timelineTooltip: string | null;
   showCorrection: boolean;
   surah: number;
   startAyah: number;
@@ -80,6 +82,7 @@ type EditorWorkspaceProps = {
   onObjectPointerUp: () => void;
   onCanvasBackgroundPointerDown: () => void;
   onSelectSegment: (segment: CaptionSegment) => void;
+  onSegmentPointerDown: (event: PointerEvent<HTMLButtonElement>, segment: CaptionSegment) => void;
   onTimelinePointerDown: (event: PointerEvent<HTMLElement>) => void;
   onTimelinePointerMove: (event: PointerEvent<HTMLElement>) => void;
   onEdgeDown: (event: PointerEvent<HTMLElement>, edge: "start" | "end", segment: CaptionSegment) => void;
@@ -113,12 +116,12 @@ type EditorWorkspaceProps = {
   onSetLocalStyleName: (value: string) => void;
   onResetSelectedObjectStyle: () => void;
   onAlignTranslation: () => void;
-  onUpdateTiming: (key: "startMs" | "endMs", value: number) => void;
   onSetSplitBoundary: (value: number) => void;
   onSplit: () => void;
   onMergePrevious: () => void;
   onMergeNext: () => void;
   onResetTiming: () => void;
+  onResetAllTiming: () => void;
 };
 
 const formatDuration = (seconds: number) => {
@@ -143,16 +146,16 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     selectedObject, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, showVerseNumber, showSafeArea, projectName, dirty, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage, timingWarning,
-    showCorrection, surah, startAyah, endAyah, entitlements, selectedFormatDefinition,
+    showCorrection, surah, startAyah, endAyah, entitlements, selectedFormatDefinition, timelineTooltip,
     onProjectNameChange, onVideoSelect, onLoadedMetadata, onVideoTimeUpdate, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown,
-    onSelectSegment, onTimelinePointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onChangeFormat, onDetect,
+    onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onChangeFormat, onDetect,
     onCorrectDetection, onToggleCorrection, onClearVideo, onSaveProject, onSaveToAccount, onOpenProjects,
     onOpenCloudProjects, onSessionChange, onPlanChange, onDiscard, onNewProject, onExportOpen, onExport, onCancelExport, onDownloadExport,
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange,
     onSetShowVerseNumber, onSetShowSafeArea, onApplyStyle, onSaveCurrentStyle, onSetLocalStyleName,
-    onResetSelectedObjectStyle, onAlignTranslation, onUpdateTiming, onSetSplitBoundary, onSplit, onMergePrevious,
-    onMergeNext, onResetTiming,
+    onResetSelectedObjectStyle, onAlignTranslation, onSetSplitBoundary, onSplit, onMergePrevious,
+    onMergeNext, onResetTiming, onResetAllTiming,
   } = props;
   const maxTime = Math.max(1, (videoMetadata?.durationSeconds ?? 0) * 1000);
   const objectLabel = selectedObject === "arabic" ? "Arabic" : selectedObject === "translation" ? "Translation" : null;
@@ -214,7 +217,8 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
         <div className="editor-playback-row"><span className="editor-playback-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(videoMetadata?.durationSeconds ?? 0)}</span><span className="editor-playback-hint">Space to play · ← → to nudge</span></div>
         {segments.length > 0 && <div className="editor-timeline-panel"><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(videoMetadata?.durationSeconds ?? 0)}</span></div><div ref={timelineRef} className="editor-timeline" onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove}>
           <div className="editor-playhead" style={{ left: `${(currentTimeMs / maxTime) * 100}%` }} />
-          <div className="editor-timeline-track">{segments.map((segment) => <button key={segment.id} type="button" aria-label={`Caption ${segment.verseKeys.join(", ")}`} onClick={(event) => { event.stopPropagation(); onSelectSegment(segment); }} className={`editor-caption-block ${segment.id === selectedSegmentId ? "is-selected" : ""}`} style={{ width: `${Math.max(1, ((segment.endMs - segment.startMs) / maxTime) * 100)}%`, marginLeft: `${(segment.startMs / maxTime) * 100}%` }}><span>{segment.verseKeys[0]}</span>{segment.id === selectedSegmentId && <><span className="editor-timing-handle editor-timing-handle-start" onPointerDown={(event) => onEdgeDown(event, "start", segment)} onPointerUp={onEdgeUp} /><span className="editor-timing-handle editor-timing-handle-end" onPointerDown={(event) => onEdgeDown(event, "end", segment)} onPointerUp={onEdgeUp} /></>}</button>)}</div>
+          <div className="editor-timeline-track">{segments.map((segment) => <button key={segment.id} type="button" aria-label={`Caption ${segment.verseKeys.join(", ")}`} onPointerDown={(event) => onSegmentPointerDown(event, segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.stopPropagation(); onSelectSegment(segment); }} className={`editor-caption-block ${segment.id === selectedSegmentId ? "is-selected" : ""} ${getActiveCaptionSegment(segments, currentTimeMs)?.id === segment.id ? "is-active" : ""}`} style={{ width: `${Math.max(1, ((segment.endMs - segment.startMs) / maxTime) * 100)}%`, left: `${(segment.startMs / maxTime) * 100}%` }}><span>{segment.verseKeys[0]}</span><span className="editor-caption-block-range">{(segment.startMs / 1000).toFixed(2)}–{(segment.endMs / 1000).toFixed(2)}s</span><span className="editor-timing-handle editor-timing-handle-start" aria-label={`Resize ${segment.verseKeys.join(", ")} start`} onPointerDown={(event) => onEdgeDown(event, "start", segment)} onPointerUp={onEdgeUp} /><span className="editor-timing-handle editor-timing-handle-end" aria-label={`Resize ${segment.verseKeys.join(", ")} end`} onPointerDown={(event) => onEdgeDown(event, "end", segment)} onPointerUp={onEdgeUp} /></button>)}</div>
+          {timelineTooltip && <div className="editor-timeline-tooltip" role="status">{timelineTooltip}</div>}
         </div></div>}
         {(busy || (stage === "complete" && alignments.length > 0) || showCorrection || errorMessage || timingWarning || exportState) && <div className="editor-notices">
           {busy && <div className="editor-notice"><strong>{stage === "loading-model" ? "Loading recognition model" : stage === "transcribing" ? "Transcribing locally" : stage === "matching" ? "Matching Quran" : "Preparing captions"}</strong><span>Audio stays in this browser{progress?.total ? ` · ${progress.completed ?? 0}/${progress.total} chunks` : ""}.</span></div>}
@@ -253,7 +257,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
             <button className="editor-text-button" type="button" onClick={onResetSelectedObjectStyle}>Reset {(objectLabel ?? "object").toLowerCase()} style</button>
           </> : <div className="editor-inspector-empty"><span className="editor-inspector-glyph">＋</span><h2>Select a caption</h2><p>Click Arabic or translation on the canvas to edit its style, position, and width.</p></div>}
 
-          {selectedSegment && <div className="editor-segment-inspector"><div className="editor-divider" /><SectionLabel>Caption segment</SectionLabel><strong>{selectedSegment.verseKeys.join(", ")}</strong><div className="editor-time-grid"><label>In<input aria-label="Segment start time" type="number" min="0" step="0.01" value={(selectedSegment.startMs / 1000).toFixed(2)} onChange={(event) => onUpdateTiming("startMs", Number(event.target.value) * 1000)} /></label><label>Out<input aria-label="Segment end time" type="number" min="0" step="0.01" value={(selectedSegment.endMs / 1000).toFixed(2)} onChange={(event) => onUpdateTiming("endMs", Number(event.target.value) * 1000)} /></label></div><div className="editor-segment-actions"><select aria-label="Split Quran word boundary" className="editor-select" value={splitBoundary} onChange={(event) => onSetSplitBoundary(Number(event.target.value))}>{Array.from({ length: Math.max(0, selectedSegment.arabic.trim().split(/\s+/).length - 1) }, (_, index) => <option key={index + 1} value={index + 1}>After word {index + 1}</option>)}</select><button className="editor-button editor-button-primary" type="button" onClick={onSplit}>Split</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedIndex < 1} onClick={onMergePrevious}>Merge ←</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedIndex >= segments.length - 1} onClick={onMergeNext}>Merge →</button></div><button className="editor-text-button" type="button" onClick={onResetTiming}>Reset timing</button></div>}
+          {selectedSegment && <div className="editor-segment-inspector"><div className="editor-divider" /><SectionLabel>Caption segment</SectionLabel><strong>{selectedSegment.verseKeys.join(", ")}</strong><div className="editor-time-readout"><span>In <b>{(selectedSegment.startMs / 1000).toFixed(3)}s</b></span><span>Out <b>{(selectedSegment.endMs / 1000).toFixed(3)}s</b></span></div><p className="editor-muted">Drag the block or either edge to edit timing. Gaps and overlaps are allowed.</p><div className="editor-segment-actions"><select aria-label="Split Quran word boundary" className="editor-select" value={splitBoundary} onChange={(event) => onSetSplitBoundary(Number(event.target.value))}>{Array.from({ length: Math.max(0, selectedSegment.arabic.trim().split(/\s+/).length - 1) }, (_, index) => <option key={index + 1} value={index + 1}>After word {index + 1}</option>)}</select><button className="editor-button editor-button-primary" type="button" onClick={onSplit}>Split</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedIndex < 1} onClick={onMergePrevious}>Merge ←</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedIndex >= segments.length - 1} onClick={onMergeNext}>Merge →</button></div><div className="editor-segment-reset-actions"><button className="editor-text-button" type="button" onClick={onResetTiming}>Reset this timing</button><button className="editor-text-button" type="button" onClick={onResetAllTiming}>Reset all timing</button></div></div>}
         </div>
         <div className="editor-sidebar-footer"><button className="editor-text-button" type="button" onClick={onSaveToAccount}>Save to account</button><button className="editor-text-button" type="button" onClick={onDiscard}>Discard changes</button></div>
       </aside>

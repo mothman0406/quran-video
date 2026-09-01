@@ -199,6 +199,15 @@ export type CaptionTransitionState = {
   blurPx: number;
 };
 
+/** The one authoritative half-open interval lookup used by preview and timeline. */
+export function getActiveCaptionSegment<T extends { startMs: number; endMs: number }>(
+  segments: readonly T[],
+  currentTimeMs: number,
+): T | null {
+  if (!Number.isFinite(currentTimeMs)) return null;
+  return segments.find((segment) => segment.startMs <= currentTimeMs && currentTimeMs < segment.endMs) ?? null;
+}
+
 function blurAtOpacity(opacity: number, settings: TransitionSettings): number {
   return settings.blurFadeEnabled ? settings.blurFadeMaxPx * (1 - opacity) : 0;
 }
@@ -246,10 +255,9 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
   timeMs: number,
   settings: TransitionSettings = DEFAULT_TRANSITION_SETTINGS,
 ): CaptionVisualState<T>[] {
-  return segments.flatMap((segment) => {
-    const baseState = captionTransitionAtTime(segment, timeMs, settings);
-    return timeMs >= segment.startMs && timeMs < segment.endMs ? [{ segment, ...baseState }] : [];
-  });
+  const active = getActiveCaptionSegment(segments, timeMs);
+  if (!active) return [];
+  return [{ segment: active, ...captionTransitionAtTime(active, timeMs, settings) }];
 }
 
 // Legacy values remain readable for saved projects; new recognition writes the
@@ -276,7 +284,11 @@ export type CaptionSegment = {
 
 export type CaptionTimingPatch = { startMs?: number; endMs?: number };
 
-/** Clamp editable display timing to duration and neighboring display segments. */
+/**
+ * CaptionSegment timing is the editable display model. Recognition evidence is
+ * retained separately in timingEvidence so a manual edit is never mistaken for
+ * a new recognition result.
+ */
 export function updateCaptionSegmentTiming(
   segments: readonly CaptionSegment[],
   id: string,
@@ -286,17 +298,11 @@ export function updateCaptionSegmentTiming(
   const index = segments.findIndex((segment) => segment.id === id);
   if (index < 0) return [...segments];
   const current = segments[index];
-  const minimumStart = index > 0 ? segments[index - 1].endMs : 0;
-  const maximumEnd = index < segments.length - 1 ? segments[index + 1].startMs : Math.max(0, durationMs);
-  const lowerEnd = Math.min(maximumEnd, Math.max(minimumStart + 1, current.endMs));
   let startMs = Math.round(Number.isFinite(patch.startMs ?? current.startMs) ? patch.startMs ?? current.startMs : current.startMs);
   let endMs = Math.round(Number.isFinite(patch.endMs ?? current.endMs) ? patch.endMs ?? current.endMs : current.endMs);
-  startMs = Math.max(minimumStart, Math.min(startMs, lowerEnd - 1));
-  endMs = Math.min(maximumEnd, Math.max(endMs, startMs + 1));
-  if (endMs > maximumEnd) {
-    endMs = maximumEnd;
-    startMs = Math.min(startMs, endMs - 1);
-  }
+  const maximumTime = Math.max(1, Number.isFinite(durationMs) ? durationMs : 1);
+  startMs = Math.max(0, Math.min(startMs, maximumTime - 1));
+  endMs = Math.max(startMs + 1, Math.min(endMs, maximumTime));
   return segments.map((segment, segmentIndex) => segmentIndex === index ? { ...segment, startMs, endMs } : segment);
 }
 
@@ -307,6 +313,14 @@ export function resetCaptionSegmentTiming(segments: readonly CaptionSegment[], i
     startMs: segment.timingEvidence.start.timestampMs,
     endMs: segment.timingEvidence.end.timestampMs,
   }, durationMs);
+}
+
+/** Restore every display interval to its recognition-derived recommendation. */
+export function resetAllCaptionSegmentTiming(segments: readonly CaptionSegment[], durationMs: number): CaptionSegment[] {
+  return segments.reduce(
+    (current, segment) => resetCaptionSegmentTiming(current, segment.id, durationMs),
+    [...segments],
+  );
 }
 
 /** Translation remains attached to the parent verse when Arabic is visually split. */
@@ -357,13 +371,32 @@ function segmentTiming(alignment: VerseAlignment, startWord: number, endWord: nu
   };
 }
 
+/**
+ * Default display timing deliberately differs from recognition timing: after
+ * the first detected Quran onset, each next set starts at its own detected
+ * onset and the previous set remains visible until that transition.
+ */
+function continuousDisplayTiming(segments: CaptionSegment[]): CaptionSegment[] {
+  if (!segments.length) return segments;
+  return segments.map((segment, index) => ({
+    ...segment,
+    startMs: segment.timingEvidence.start.timestampMs,
+    endMs: index < segments.length - 1
+      ? segments[index + 1].timingEvidence.start.timestampMs
+      : segment.timingEvidence.end.timestampMs,
+  })).map((segment) => ({
+    ...segment,
+    endMs: Math.max(segment.startMs + 1, segment.endMs),
+  }));
+}
+
 export function createCaptionSegments(
   alignments: readonly VerseAlignment[],
   content: Readonly<Record<string, QuranVerseContent | undefined>>,
   maxWordsPerSegment = DEFAULT_MAX_WORDS_PER_SEGMENT,
 ): CaptionSegment[] {
   if (!Number.isInteger(maxWordsPerSegment) || maxWordsPerSegment < 1) throw new Error("maxWordsPerSegment must be a positive integer");
-  return alignments.flatMap((alignment) => {
+  const generated = alignments.flatMap((alignment) => {
     const verse = content[alignment.verseKey];
     const arabic = verse ? quranDisplayText(verse) : "";
     const verseWords = words(arabic);
@@ -385,6 +418,7 @@ export function createCaptionSegments(
     }
     return chunks;
   });
+  return continuousDisplayTiming(generated);
 }
 
 export function splitCaptionSegment(segment: CaptionSegment, boundary: number): CaptionSegment[] {

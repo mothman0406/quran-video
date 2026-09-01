@@ -1,4 +1,5 @@
-import type { RecognitionMatch } from "@/lib/recognition/core";
+import type { RecognitionMatch } from "../recognition/core.ts";
+import { getActiveCaptionSegment } from "./captions.ts";
 
 export type VerseAlignment = {
   verseKey: string;
@@ -31,5 +32,5 @@ export function captionForPlaybackTime<T extends { startMs: number; endMs: numbe
   captions: readonly T[],
   timeMs: number,
 ): T | null {
-  return captions.find((caption) => timeMs >= caption.startMs && timeMs < caption.endMs) ?? null;
+  return getActiveCaptionSegment(captions, timeMs);
 }

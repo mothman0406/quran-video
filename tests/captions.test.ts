@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, mergeCaptionWithNext, mergeCaptionWithPrevious, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -95,6 +95,19 @@ test("playback selects the correct caption after splitting", () => {
   assert.equal(captionForPlaybackTime(split, split[1].startMs + 1)?.id, split[1].id);
 });
 
+test("generated display timing starts at detected onset and closes pauses at the next detected set", () => {
+  const second = { ...alignment, verseKey: "93:2", ayahNumber: 2, startMs: 1_600, endMs: 2_400, timingEvidence: { ...alignment.timingEvidence, start: { timestampMs: 1_600, source: "word-timestamp" as const }, end: { timestampMs: 2_400, source: "word-timestamp" as const } } };
+  const generated = createCaptionSegments([alignment, second], { ...content, "93:2": { ...content["93:1"], verseKey: "93:2", translation: "And the night" } }, 99);
+  assert.equal(generated[0].startMs, 100);
+  assert.equal(generated[0].endMs, 1_600);
+  assert.equal(generated[1].startMs, 1_600);
+  assert.equal(generated[1].endMs, 2_400);
+  assert.equal(getActiveCaptionSegment(generated, 99), null);
+  assert.equal(getActiveCaptionSegment(generated, 100)?.id, generated[0].id);
+  assert.equal(getActiveCaptionSegment(generated, 1_600)?.id, generated[1].id);
+  assert.equal(getActiveCaptionSegment(generated, 2_400), null);
+});
+
 test("typography defaults are neutral and independently configurable", () => {
   assert.equal(DEFAULT_TYPOGRAPHY.arabicOutlineEnabled, false);
   assert.equal(DEFAULT_TYPOGRAPHY.translationVisible, true);
@@ -166,12 +179,15 @@ test("canvas object width resizing is normalized, independent, and leaves Quran 
   assert.equal(content["93:1"].arabic.uthmani, "وَالضُّحَى وَاللَّيْلِ إِذَا سَجَى وَمَا وَدَّعَكَ رَبُّكَ");
 });
 
-test("manual timing clamps to duration and neighboring boundaries", () => {
+test("manual timing clamps to duration without changing neighboring segments", () => {
   const base = createCaptionSegments([alignment], content, 3);
   const changed = updateCaptionSegmentTiming(base, base[1].id, { startMs: -100, endMs: 99_999 }, 2_000);
-  assert.equal(changed[1].startMs, base[0].endMs);
-  assert.equal(changed[1].endMs, base[2].startMs);
-  assert.equal(changed[0].startMs, alignment.startMs);
+  assert.equal(changed[1].startMs, 0);
+  assert.equal(changed[1].endMs, 2_000);
+  assert.equal(changed[0].startMs, base[0].startMs);
+  assert.equal(changed[0].endMs, base[0].endMs);
+  assert.equal(changed[2].startMs, base[2].startMs);
+  assert.equal(changed[2].endMs, base[2].endMs);
   assert.equal(alignment.startMs, 100);
 });
 
@@ -182,6 +198,13 @@ test("reset timing restores generated timing evidence without touching recogniti
   assert.equal(reset[0].startMs, base[0].timingEvidence.start.timestampMs);
   assert.equal(reset[0].endMs, base[0].timingEvidence.end.timestampMs);
   assert.equal(alignment.startMs, 100);
+});
+
+test("reset all timing restores each recognition recommendation", () => {
+  const base = createCaptionSegments([alignment], content, 3);
+  const edited = updateCaptionSegmentTiming(updateCaptionSegmentTiming(base, base[0].id, { startMs: 400 }, 2_000), base[1].id, { endMs: 1_900 }, 2_000);
+  const reset = resetAllCaptionSegmentTiming(edited, 2_000);
+  assert.deepEqual(reset.map((segment) => [segment.startMs, segment.endMs]), base.map((segment) => [segment.timingEvidence.start.timestampMs, segment.timingEvidence.end.timestampMs]));
 });
 
 test("split and merge remain valid after manual timing edits", () => {
