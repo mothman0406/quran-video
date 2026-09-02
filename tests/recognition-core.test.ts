@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { performance } from "node:perf_hooks";
-import { analyzeTranscript, hafsVerses, normalizeArabic, recognizeTranscript } from "../src/lib/recognition/core.ts";
+import { analyzeTranscript, createPrimaryTranscript, hafsVerses, identifyQuranPassage, normalizeArabic, recognizeTranscript } from "../src/lib/recognition/core.ts";
 import { quranRecognitionUnits } from "../src/lib/recognition/quran-recitation.ts";
 import { analyzeMonoPcm } from "../src/lib/recognition/audio-analysis.ts";
 
@@ -183,6 +183,54 @@ test("canonical span mapping is identical in chunk fallback timing mode", () => 
   const wordTimed = analyzeTranscript([{ startMs: 10_000, endMs: 40_000, text, words: text.split(/\s+/).map((word, index) => ({ text: word, startMs: 10_000 + index * 500, endMs: 10_000 + (index + 1) * 500 })) }]);
   const chunkFallback = analyzeTranscript([{ startMs: 10_000, endMs: 40_000, text }]);
   assert.deepEqual(chunkFallback.passage.canonicalSpan, wordTimed.passage.canonicalSpan);
+});
+
+test("primary transcript identifies the same passage with word and chunk-fallback timestamps", () => {
+  const text = `${verse("93:1").text} ${verse("93:2").text}`;
+  const wordPrimary = createPrimaryTranscript([{
+    startMs: 0,
+    endMs: 4_000,
+    text,
+    // A runtime may supply a sentence-level timestamp unit. Its shape must
+    // not change the text-only passage matcher.
+    words: [{ text, startMs: 0, endMs: 3_900 }],
+  }], "word");
+  const fallbackPrimary = createPrimaryTranscript([{ startMs: 0, endMs: 4_000, text }], "chunk-fallback");
+  const wordPassage = identifyQuranPassage(wordPrimary);
+  const fallbackPassage = identifyQuranPassage(fallbackPrimary);
+  assert.deepEqual(wordPassage.passage.canonicalSpan, fallbackPassage.passage.canonicalSpan);
+  assert.equal(fallbackPassage.passage.passageSource, "primary-transcript");
+});
+
+test("empty or contradictory micro-ASR evidence cannot replace the primary passage", () => {
+  const corpus = [
+    { verseKey: "1:1", text: "الف باء جيم دال هاء واو" },
+    { verseKey: "1:2", text: "زاي حاء طاء ياء" },
+    { verseKey: "2:1", text: "نون سين عين فاء صاد قاف" },
+  ];
+  const primary = createPrimaryTranscript([{
+    startMs: 1_000,
+    endMs: 5_000,
+    text: `${corpus[0].text} ${corpus[1].text}`,
+  }], "chunk-fallback");
+  const initial = analyzeTranscript(primary, { corpus, minConfidence: 0.55 });
+  const emptyRecovery = analyzeTranscript(primary, {
+    corpus,
+    minConfidence: 0.55,
+    timingEvidenceChunks: [],
+    timingRecoveryAttempted: true,
+  });
+  const contradictoryRecovery = analyzeTranscript(primary, {
+    corpus,
+    minConfidence: 0.55,
+    timingEvidenceChunks: [{ startMs: 2_000, endMs: 3_000, text: corpus[2].text, timingSource: "micro-asr" }],
+    timingRecoveryAttempted: true,
+  });
+  assert.deepEqual(emptyRecovery.passage.canonicalSpan, initial.passage.canonicalSpan);
+  assert.deepEqual(contradictoryRecovery.passage.canonicalSpan, initial.passage.canonicalSpan);
+  assert.deepEqual(contradictoryRecovery.matches.map((match) => match.verseKey), ["1:1", "1:2"]);
+  assert.equal(contradictoryRecovery.passage.passageSource, "primary-transcript");
+  assert.equal(contradictoryRecovery.passage.shadowComparison.regressionDetected, false);
 });
 
 test("returns a usable best candidate while marking an ambiguous short clip", () => {
@@ -384,7 +432,8 @@ test("chunk fallback retains complete canonical ayat and recovers a missing midd
     endMs: 20_000,
     text: "جيم دال واو زاي حاء طاء خاء ذال ضاد ظاء غين ياء الف",
   }];
-  const initial = analyzeTranscript(coarse, {
+  const primary = createPrimaryTranscript(coarse, "chunk-fallback");
+  const initial = analyzeTranscript(primary, {
     corpus,
     minConfidence: 0.55,
     audioAnalysis: analyzeMonoPcm(pcm, 1_000),
@@ -395,7 +444,8 @@ test("chunk fallback retains complete canonical ayat and recovers a missing midd
   assert.ok(initial.timingRecoveryPlan?.required);
   assert.ok(initial.timingRecoveryPlan?.missingVerseKeys.includes("6:75"));
 
-  const recovered = analyzeTranscript([...coarse, {
+  const recovered = analyzeTranscript(primary, {
+    timingEvidenceChunks: [{
     startMs: 9_500,
     endMs: 12_000,
     timingSource: "micro-asr" as const,
@@ -410,7 +460,7 @@ test("chunk fallback retains complete canonical ayat and recovers a missing midd
     endMs: 18_000,
     timingSource: "micro-asr" as const,
     text: corpus[2].text,
-  }], {
+  }],
     corpus,
     minConfidence: 0.55,
     audioAnalysis: analyzeMonoPcm(pcm, 1_000),

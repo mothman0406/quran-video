@@ -14,6 +14,35 @@ export type TranscriptChunk = {
   timingSource?: "whole-recording" | "micro-asr";
 };
 
+/**
+ * The immutable textual result of the initial whole-recording ASR pass.
+ * Passage identification consumes this value exclusively; later timing
+ * recovery can add temporal evidence but cannot replace these words.
+ */
+export type PrimaryTranscript = {
+  readonly chunks: readonly TranscriptChunk[];
+  readonly rawText: string;
+  readonly normalizedTokens: readonly string[];
+  readonly timestampMode: "word" | "chunk-fallback";
+};
+
+export function createPrimaryTranscript(
+  chunks: readonly TranscriptChunk[],
+  timestampMode: "word" | "chunk-fallback",
+): PrimaryTranscript {
+  const immutableChunks = chunks.map((chunk) => ({
+    ...chunk,
+    words: chunk.words?.map((word) => ({ ...word })),
+  }));
+  const rawText = immutableChunks.map((chunk) => chunk.text).join(" ");
+  return {
+    chunks: immutableChunks,
+    rawText,
+    normalizedTokens: normalizeArabic(rawText).split(" ").filter(Boolean),
+    timestampMode,
+  };
+}
+
 export type TimingEvidenceSource =
   | "word-timestamp"
   | "micro-asr"
@@ -96,6 +125,8 @@ export type PassageCandidateDiagnostic = {
 export type PassageAmbiguityState = "confident-unique" | "plausible-ambiguous" | "no-reliable-match";
 
 export type PassageInference = {
+  /** Passage identity always comes from the initial whole-recording ASR text. */
+  passageSource: "primary-transcript";
   state: PassageAmbiguityState;
   candidates: PassageCandidateDiagnostic[];
   candidateMargin: number | null;
@@ -109,6 +140,11 @@ export type PassageInference = {
   firstBoundaryConfidence: number | null;
   lastBoundaryConfidence: number | null;
   boundaryCompletion: { extendedBackward: boolean; extendedForward: boolean };
+  shadowComparison: {
+    stablePreF0840e7: { state: PassageAmbiguityState; selectedCandidate: PassageCandidateDiagnostic | null };
+    current: { state: PassageAmbiguityState; selectedCandidate: PassageCandidateDiagnostic | null };
+    regressionDetected: boolean;
+  };
 };
 
 export type CanonicalSpan = {
@@ -552,6 +588,22 @@ function timedTokens(chunks: readonly TranscriptChunk[]): TimedToken[] {
     })));
     return all;
   }, []).filter((token) => token.endMs >= token.startMs);
+}
+
+/** Textual evidence for passage search never consults word offsets or timing. */
+function transcriptTokens(chunks: readonly TranscriptChunk[]): TimedToken[] {
+  return chunks.flatMap((chunk) => chunk.text
+    .split(/\s+/)
+    .map((displayText) => ({ displayText, orthographic: normalizeArabic(displayText) }))
+    .filter((word) => word.orthographic)
+    .map((word) => ({
+      units: quranRecognitionUnits(word.orthographic, word.displayText),
+      displayText: word.displayText,
+      startMs: 0,
+      endMs: 0,
+      source: "chunk-coarse" as const,
+      hasWordTimestamp: false,
+    })));
 }
 
 type TokenAlignment = {
@@ -1250,7 +1302,9 @@ function scoreGlobalPassages(
   const transcript = chunks.map((chunk) => chunk.text).join(" ");
   const normalized = normalizeArabic(transcript);
   const transcriptUnits = quranRecognitionUnits(normalized, transcript);
-  const evidence = timedTokens(chunks);
+  // Passage matching is textual: timestamp mode and word offsets cannot
+  // change its token sequence or its confidence.
+  const evidence = transcriptTokens(chunks);
   const starts = globalCandidateStarts(chunks, transcriptUnits, verses, maxPassageVerses, priorityStarts);
   const candidates: ScoredCandidate[] = [];
   const seen = new Set<string>();
@@ -1362,24 +1416,56 @@ export type RecognitionOptions = {
   /** Chunk fallback is useful lexical evidence but cannot be treated as word
    * timing. The browser passes this directly from its transcriber result. */
   timestampMode?: "word" | "chunk-fallback";
+  /**
+   * Bounded local ASR output is timing-only evidence for an already-selected
+   * passage. It is deliberately excluded from candidate retrieval and passage
+   * confidence scoring.
+   */
+  timingEvidenceChunks?: readonly TranscriptChunk[];
   /** Records an attempted browser recovery even when local ASR returned no
    * usable Arabic text, preventing silent repeated interpolation attempts. */
   timingRecoveryAttempted?: boolean;
 };
 
-export function analyzeTranscript(
-  chunks: readonly TranscriptChunk[],
-  options: RecognitionOptions = {},
-): RecognitionAnalysis {
+type PrimaryPassageIdentification = {
+  diagnostics: RecognitionDiagnostic[];
+  passage: PassageInference;
+  best: ScoredCandidate | null;
+};
+
+function passageStateFor(
+  best: ScoredCandidate | undefined,
+  minConfidence: number,
+  includeInteriorRecoveryEvidence: boolean,
+): PassageAmbiguityState {
+  const sufficientEvidence = Boolean(
+    best
+      && best.score >= minConfidence
+      && (best.transcriptCoverage ?? 0) >= 0.35
+      && (best.consecutiveAyat ?? 0) >= 1
+      && (best.alignment.matchedAsrIndexes.size >= 3 || best.tokenSequenceSimilarity >= 0.75)
+      && (best.textSimilarity >= 0.7
+        || (best.consecutiveAyat ?? 0) >= 2
+        // f0840e7 deliberately retained a weak interior ayah when strong
+        // canonical evidence exists on both sides. This is passage evidence,
+        // not timing confidence.
+        || (includeInteriorRecoveryEvidence
+          && best.alignment.matched.size >= 6
+          && (best.transcriptCoverage ?? 0) >= 0.7)),
+  );
+  return sufficientEvidence ? "confident-unique" : "no-reliable-match";
+}
+
+function identifyPrimaryTranscript(
+  primary: PrimaryTranscript,
+  options: RecognitionOptions,
+): PrimaryPassageIdentification {
   const verses = options.corpus ?? hafsVerses;
-  // This is only a floor against unrelated speech.  Whole-passage coverage and
-  // sequence evidence decide credibility; individual noisy ayat never need a
-  // high lexical confidence to participate in a mapped passage.
   const minConfidence = options.minConfidence ?? 0.52;
   const maxVersesPerChunk = options.maxVersesPerChunk ?? 5;
-  const maxPassageVerses = options.maxPassageVerses ?? Math.max(5, Math.min(14, chunks.length * 3 + 4));
+  const maxPassageVerses = options.maxPassageVerses ?? Math.max(5, Math.min(14, primary.chunks.length * 3 + 4));
   const ambiguityMargin = options.ambiguityMargin ?? 0.075;
-  const orderedChunks = [...chunks].sort((left, right) => left.startMs - right.startMs);
+  const orderedChunks = [...primary.chunks].sort((left, right) => left.startMs - right.startMs);
   const diagnostics: RecognitionDiagnostic[] = [];
 
   for (const chunk of orderedChunks) {
@@ -1416,13 +1502,21 @@ export function analyzeTranscript(
     }
     diagnostics.push(diagnostic);
   }
-  const fullTranscript = normalizeArabic(orderedChunks.map((chunk) => chunk.text).join(" "));
+
   const emptyPassage: PassageInference = {
+    passageSource: "primary-transcript",
     state: "no-reliable-match", candidates: [], candidateMargin: null, selectedCandidate: null, disambiguatedByLaterChunks: false,
     canonicalSpan: null, mappingQuality: null, transcriptCoverage: null, canonicalSpanCoverage: null, uniquenessMargin: null,
     firstBoundaryConfidence: null, lastBoundaryConfidence: null, boundaryCompletion: { extendedBackward: false, extendedForward: false },
+    shadowComparison: {
+      stablePreF0840e7: { state: "no-reliable-match", selectedCandidate: null },
+      current: { state: "no-reliable-match", selectedCandidate: null },
+      regressionDetected: false,
+    },
   };
-  if (!fullTranscript || orderedChunks.some((chunk) => chunk.endMs < chunk.startMs)) return { matches: [], diagnostics, passage: emptyPassage, timingTrace: null, forcedAlignment: null, timingRecoveryPlan: null };
+  if (!primary.normalizedTokens.length || orderedChunks.some((chunk) => chunk.endMs < chunk.startMs)) {
+    return { diagnostics, passage: emptyPassage, best: null };
+  }
 
   const priorityStarts = diagnostics.flatMap((diagnostic) => {
     const key = diagnostic.topCandidate?.startVerseKey;
@@ -1430,36 +1524,21 @@ export function analyzeTranscript(
     return index >= 0 ? [index] : [];
   });
   const global = scoreGlobalPassages(orderedChunks, verses, maxPassageVerses, priorityStarts);
-  const ranked = global.candidates.slice(0, 3);
+  const ranked = global.candidates.slice(0, 5);
   const best = ranked[0];
   const runnerUp = ranked.find((candidate) => candidate.start !== best?.start || candidate.end !== best.end);
   const margin = best && runnerUp ? best.score - runnerUp.score : null;
   const bestDiagnostic = best ? passageDiagnostic(best, verses) : null;
-  const sufficientEvidence = Boolean(
-    best
-      && best.score >= minConfidence
-      && (best.transcriptCoverage ?? 0) >= 0.35
-      && (best.consecutiveAyat ?? 0) >= 1
-      && (best.alignment.matchedAsrIndexes.size >= 3 || best.tokenSequenceSimilarity >= 0.75)
-      && (best.textSimilarity >= 0.7
-        || (best.consecutiveAyat ?? 0) >= 2
-        // A missing interior ayah may break consecutive support even though
-        // substantial anchors exist on both sides. Preserve that known span
-        // for targeted recovery rather than discarding the middle ayah.
-        || (best.alignment.matched.size >= 6 && (best.transcriptCoverage ?? 0) >= 0.7)),
-  );
-  // A shorter contained window often matches the later ayat of a correct
-  // passage. It is not a real ambiguity when it leaves meaningful transcript
-  // evidence unexplained. Reserve ambiguity for candidates that explain the
-  // same evidence almost equally well at a different Quran location.
+  const currentBaseState = passageStateFor(best, minConfidence, true);
+  const sufficientEvidence = currentBaseState !== "no-reliable-match";
   const ambiguous = Boolean(
     sufficientEvidence && runnerUp && (margin ?? 0) < ambiguityMargin && runnerUp.score >= minConfidence
       && (runnerUp.transcriptCoverage ?? 0) >= (best!.transcriptCoverage ?? 0) - 0.02
       && runnerUp.textSimilarity >= best!.textSimilarity - 0.02,
   );
   const state: PassageAmbiguityState = !sufficientEvidence ? "no-reliable-match" : ambiguous ? "plausible-ambiguous" : "confident-unique";
-  // Ambiguity is metadata for correction UI, not a reason to discard the best
-  // contiguous explanation of a short recording.
+  const stableBaseState = passageStateFor(best, minConfidence, false);
+  const stableState: PassageAmbiguityState = stableBaseState === "no-reliable-match" ? stableBaseState : ambiguous ? "plausible-ambiguous" : "confident-unique";
   const selectedCandidate = sufficientEvidence ? bestDiagnostic : null;
   const firstChunkBest = diagnostics.find((diagnostic) => diagnostic.topCandidate)?.topCandidate;
   const disambiguatedByLaterChunks = Boolean(
@@ -1476,6 +1555,7 @@ export function analyzeTranscript(
   const anchorStartIndex = strongestLocalAnchor ? verses.findIndex((verse) => verse.verseKey === strongestLocalAnchor.startVerseKey) : -1;
   const anchorEndIndex = strongestLocalAnchor ? verses.findIndex((verse) => verse.verseKey === strongestLocalAnchor.endVerseKey) : -1;
   const passage: PassageInference = {
+    passageSource: "primary-transcript",
     state,
     candidates: ranked.map((candidate) => passageDiagnostic(candidate, verses)),
     candidateMargin: margin === null ? null : Number(margin.toFixed(4)),
@@ -1492,18 +1572,61 @@ export function analyzeTranscript(
       extendedBackward: selectedStartIndex >= 0 && anchorStartIndex >= 0 && selectedStartIndex < anchorStartIndex,
       extendedForward: selectedEndIndex >= 0 && anchorEndIndex >= 0 && selectedEndIndex > anchorEndIndex,
     },
+    shadowComparison: {
+      stablePreF0840e7: { state: stableState, selectedCandidate: stableBaseState === "no-reliable-match" ? null : bestDiagnostic },
+      current: { state, selectedCandidate },
+      regressionDetected: stableBaseState !== "no-reliable-match" && state === "no-reliable-match",
+    },
   };
-  if (state === "no-reliable-match" || !best) return { matches: [], diagnostics, passage, timingTrace: null, forcedAlignment: null, timingRecoveryPlan: null };
-  const reconstructed = reconstructPassage(best, orderedChunks, verses, options.audioAnalysis);
-  const forcedAlignment = forceAlignPassage(best, orderedChunks, verses, reconstructed.matches, options.audioAnalysis, options.timingRecoveryAttempted);
-  const timestampMode = options.timestampMode ?? (orderedChunks.some((chunk) => chunk.words?.length) ? "word" : "chunk-fallback");
+  return { diagnostics, passage, best: state === "no-reliable-match" ? null : best ?? null };
+}
+
+/** Passage matching is intentionally text-only and independently testable. */
+export function identifyQuranPassage(
+  primary: PrimaryTranscript,
+  options: Pick<RecognitionOptions, "corpus" | "minConfidence" | "maxVersesPerChunk" | "maxPassageVerses" | "ambiguityMargin"> = {},
+): Pick<PrimaryPassageIdentification, "diagnostics" | "passage"> {
+  const { diagnostics, passage } = identifyPrimaryTranscript(primary, options);
+  return { diagnostics, passage };
+}
+
+function withTimingEvidence(
+  selected: ScoredCandidate,
+  timingChunks: readonly TranscriptChunk[],
+  verses: readonly QuranCorpusVerse[],
+): ScoredCandidate {
+  const canonical = canonicalPassageTokens(verses.slice(selected.start, selected.end + 1));
+  return { ...selected, alignment: alignTokens(canonical, timedTokens(timingChunks)) };
+}
+
+function isPrimaryTranscript(
+  input: readonly TranscriptChunk[] | PrimaryTranscript,
+): input is PrimaryTranscript {
+  return !Array.isArray(input);
+}
+
+export function analyzeTranscript(
+  input: readonly TranscriptChunk[] | PrimaryTranscript,
+  options: RecognitionOptions = {},
+): RecognitionAnalysis {
+  const primary = isPrimaryTranscript(input)
+    ? input
+    : createPrimaryTranscript(input, options.timestampMode ?? (input.some((chunk) => chunk.words?.length) ? "word" : "chunk-fallback"));
+  const { diagnostics, passage, best } = identifyPrimaryTranscript(primary, options);
+  if (!best) return { matches: [], diagnostics, passage, timingTrace: null, forcedAlignment: null, timingRecoveryPlan: null };
+  const verses = options.corpus ?? hafsVerses;
+  const timingChunks = [...primary.chunks, ...(options.timingEvidenceChunks ?? [])]
+    .sort((left, right) => left.startMs - right.startMs);
+  const timingCandidate = withTimingEvidence(best, timingChunks, verses);
+  const reconstructed = reconstructPassage(timingCandidate, timingChunks, verses, options.audioAnalysis);
+  const forcedAlignment = forceAlignPassage(timingCandidate, timingChunks, verses, reconstructed.matches, options.audioAnalysis, options.timingRecoveryAttempted);
   return {
     matches: reconstructed.matches,
     diagnostics,
     passage,
     timingTrace: reconstructed.timingTrace,
     forcedAlignment,
-    timingRecoveryPlan: timingRecoveryPlan(forcedAlignment, reconstructed.matches, options.audioAnalysis, timestampMode),
+    timingRecoveryPlan: timingRecoveryPlan(forcedAlignment, reconstructed.matches, options.audioAnalysis, primary.timestampMode),
   };
 }
 

@@ -6,11 +6,12 @@ Recognition is a browser-local, accuracy-first hybrid pipeline:
 
 1. Decode the selected media once to mono PCM and build a 10 ms RMS envelope.
 2. Run lazy-loaded local Whisper Base Timestamped over overlapping 30-second windows.
-3. Retrieve high-recall Quran candidates, then score contiguous passages against the whole recording.
-4. Freeze the selected contiguous canonical ayat. Canonical display ranges default to each full ayah; an unmatched first or last ASR word is not evidence that the reciter skipped it.
-5. Run a canonical-first alignment pass. Each canonical word receives an evidence-graded timing record, including interpolated words between anchors. Timestamped ASR words are direct evidence; chunk text is only coarse evidence. A backward jump requires a following sequential word, so one noisy token cannot invent a repetition.
-6. If word timestamps are unavailable, or an ayah has no direct anchor, trim the timing search to detected speech regions and run bounded overlapping local micro-ASR windows against the already-known passage. The first verified Quran-containing window anchors onset; a missing interior ayah is explicitly searched between neighbouring evidence before interpolation is allowed.
-7. Refine verified onset, offset, and ayah transitions from the local PCM envelope. Derive one complete-ayah caption display set per ayah, without mutating the canonical recognition result.
+3. Freeze a `PrimaryTranscript`: the complete stitched ASR text, normalized tokens, whole-recording chunks, available word offsets, and timestamp mode.
+4. Retrieve high-recall Quran candidates and score contiguous passages from `PrimaryTranscript` only. This matcher has no PCM, word-timestamp, forced-alignment, or micro-ASR input.
+5. Freeze the selected contiguous canonical ayat. Canonical display ranges default to each full ayah; an unmatched first or last ASR word is not evidence that the reciter skipped it.
+6. Run a canonical-first alignment pass. Each canonical word receives an evidence-graded timing record, including interpolated words between anchors. Timestamped ASR words are direct evidence; chunk text is only coarse evidence. A backward jump requires a following sequential word, so one noisy token cannot invent a repetition.
+7. If word timestamps are unavailable, or an ayah has no direct anchor, trim the timing search to detected speech regions and run bounded overlapping local micro-ASR windows against the already-known passage. Micro-ASR is timing-only evidence and cannot replace the primary passage. The first verified Quran-containing window anchors onset; a missing interior ayah is explicitly searched between neighbouring evidence before interpolation is allowed.
+8. Refine verified onset, offset, and ayah transitions from the local PCM envelope. Derive one complete-ayah caption display set per ayah, without mutating the canonical recognition result.
 
 The canonical Hafs corpus is the displayed text authority. Whisper supplies retrieval and coarse temporal evidence only.
 
@@ -35,7 +36,7 @@ Manual timeline edits remain authoritative for presentation and never rewrite ca
 
 ## Debugging
 
-Every recognition run stores a JSON-safe report at `window.__QURAN_ALIGNMENT_DEBUG__` in development. The normal editor exposes **Copy Alignment Debug** after recognition; the development `/recognition` route includes the same data in its debug export. Reports explicitly include word-timestamp availability, micro-ASR use, direct/recovered coverage by ayah, verse-start evidence, recovery windows, the first-onset trace, canonical word alignments, direct observations, and display sets—never media bytes.
+Every recognition run stores a JSON-safe report at `window.__QURAN_ALIGNMENT_DEBUG__` in development. The normal editor exposes **Copy Alignment Debug** after recognition; the development `/recognition` route includes the same data in its debug export. Reports explicitly include the primary raw text/token count/timestamp mode, top five passage candidates, mapping coverage and uniqueness, `passageSource: "primary-transcript"`, the stable pre-f0840e7 shadow comparison, word-timestamp availability, micro-ASR text/windows, direct/recovered coverage by ayah, verse-start evidence, the first-onset trace, canonical word alignments, direct observations, and display sets—never media bytes.
 
 ## Current limitations
 

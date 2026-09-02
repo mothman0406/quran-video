@@ -4,6 +4,10 @@
 
 Complete:
 
+- Fixed the f0840e7 regression where the editor appended bounded micro-ASR chunks to the original whole-recording chunks and ran passage detection again. A poor or contradictory timing window could then lower global transcript coverage and overwrite a valid initial passage with `no-reliable-match`.
+- Added immutable `PrimaryTranscript` construction (raw stitched ASR text, normalized tokens, original chunks, and timestamp mode). Passage identification now reads only that value through the independently callable `identifyQuranPassage`; `passageSource` is always `primary-transcript`.
+- Made recovery chunks explicit timing evidence. The second pass preserves the already selected canonical passage while using micro-ASR/PCM only for local verse and word timing; empty or alternate-passage recovery text cannot alter identity.
+- Added primary-vs-pre-f0840e7 shadow diagnostics, top-five candidate/debug output, and regressions for word versus chunk-fallback identity, empty micro-ASR, contradictory micro-ASR, and the retained missing-verse recovery path.
 - Corrected the fallback architecture so canonical ayat and their words are retained independently of Whisper observations. `CanonicalWordAlignment` now represents every word in the selected full-ayah range; direct ASR, bounded micro-ASR recovery, PCM refinement, interpolation, coarse chunk timing, and unknown timing are explicit evidence classes.
 - Stopped distributing a coarse Whisper chunk across individual words. `chunk-fallback` text remains useful for passage identity, but cannot create direct word anchors or precise-looking word timing.
 - Added a second local timing pass after passage selection. It uses detected speech regions and bounded overlapping 8-second PCM windows, scores the known passage again, targets ayat with no direct anchors, and preserves absolute source timestamps. A 6:75-style ayah between anchored neighbours is searched before interpolation.

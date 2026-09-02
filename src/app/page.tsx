@@ -10,7 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { analyzeTranscript, hafsSurahs } from "@/lib/recognition/core";
+import { analyzeTranscript, createPrimaryTranscript, hafsSurahs } from "@/lib/recognition/core";
 import type { TranscriptionProgress } from "@/lib/recognition/transcriber";
 import {
   recognitionToVerseAlignments,
@@ -733,20 +733,21 @@ export default function Home() {
       );
       if (job !== generation.current) return;
       setStage("matching");
-      let analysis = analyzeTranscript(result.chunks, {
+      const primaryTranscript = createPrimaryTranscript(result.chunks, result.timestampMode);
+      let recovery: Awaited<ReturnType<NonNullable<typeof result.recoverTiming>>> | null = null;
+      let analysis = analyzeTranscript(primaryTranscript, {
         audioAnalysis: result.audioAnalysis,
-        timestampMode: result.timestampMode,
       });
       if (analysis.timingRecoveryPlan?.required && result.recoverTiming) {
         setStage("transcribing");
-        const recovery = await result.recoverTiming(analysis.timingRecoveryPlan, (next) => {
+        recovery = await result.recoverTiming(analysis.timingRecoveryPlan, (next) => {
           if (job !== generation.current) return;
           setProgress(next);
         });
         if (job !== generation.current) return;
-        analysis = analyzeTranscript([...result.chunks, ...recovery.chunks], {
+        analysis = analyzeTranscript(primaryTranscript, {
           audioAnalysis: result.audioAnalysis,
-          timestampMode: result.timestampMode,
+          timingEvidenceChunks: recovery.chunks,
           timingRecoveryAttempted: true,
         });
       }
@@ -773,6 +774,23 @@ export default function Home() {
         source: { durationMs: result.audioAnalysis.durationMs, sampleRate: result.audioAnalysis.sampleRate },
         transcriber: { model: "onnx-community/whisper-base_timestamped", backend: result.backend, timestampMode: result.timestampMode, runtimes: { modelLoadMs: result.modelLoadMs, transcriptionMs: result.transcriptionMs, totalMs: result.durationMs } },
         passage: analysis.passage,
+        primaryTranscript: {
+          rawText: primaryTranscript.rawText,
+          normalizedTokenCount: primaryTranscript.normalizedTokens.length,
+          timestampMode: primaryTranscript.timestampMode,
+        },
+        passageIdentification: {
+          passageSource: analysis.passage.passageSource,
+          topCandidates: analysis.passage.candidates,
+          resultState: analysis.passage.state,
+          shadowComparison: analysis.passage.shadowComparison,
+        },
+        timingRecovery: {
+          ran: recovery !== null,
+          windowsRun: recovery?.windowsRun ?? 0,
+          microAsrChunks: recovery?.chunks.map((chunk) => ({ startMs: chunk.startMs, endMs: chunk.endMs, text: chunk.text })) ?? [],
+          attemptedPassageIdentityChange: false,
+        },
         timestampQuality: {
           wordTimestampsAvailable: result.timestampMode === "word",
           microAsrFallbackUsed: Boolean(analysis.forcedAlignment?.verseTimings.some((item) => item.recoveryAttempted)),

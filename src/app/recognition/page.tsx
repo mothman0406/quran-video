@@ -1,7 +1,7 @@
 "use client";
 
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
-import { analyzeTranscript, type RecognitionAnalysis, type RecognitionResult } from "@/lib/recognition/core";
+import { analyzeTranscript, createPrimaryTranscript, type RecognitionAnalysis, type RecognitionResult } from "@/lib/recognition/core";
 import { createCaptionSegments, createCaptionSegmentsFromForcedAlignment, getActiveCaptionSegment, type CaptionSegment } from "@/lib/editor/captions";
 import { recognitionToVerseAlignments, type VerseAlignment } from "@/lib/editor/recognition";
 import { getVerses } from "@/lib/quran/local";
@@ -88,15 +88,16 @@ export default function RecognitionSpikePage() {
     try {
       const output = await localWhisperTranscriber.transcribe(file, setProgress);
       setResult(output);
-      let nextAnalysis = analyzeTranscript(output.chunks, {
+      const primaryTranscript = createPrimaryTranscript(output.chunks, output.timestampMode);
+      let recovery: Awaited<ReturnType<NonNullable<typeof output.recoverTiming>>> | null = null;
+      let nextAnalysis = analyzeTranscript(primaryTranscript, {
         audioAnalysis: output.audioAnalysis,
-        timestampMode: output.timestampMode,
       });
       if (nextAnalysis.timingRecoveryPlan?.required && output.recoverTiming) {
-        const recovery = await output.recoverTiming(nextAnalysis.timingRecoveryPlan, setProgress);
-        nextAnalysis = analyzeTranscript([...output.chunks, ...recovery.chunks], {
+        recovery = await output.recoverTiming(nextAnalysis.timingRecoveryPlan, setProgress);
+        nextAnalysis = analyzeTranscript(primaryTranscript, {
           audioAnalysis: output.audioAnalysis,
-          timestampMode: output.timestampMode,
+          timingEvidenceChunks: recovery.chunks,
           timingRecoveryAttempted: true,
         });
       }
@@ -110,6 +111,23 @@ export default function RecognitionSpikePage() {
         source: { durationMs: output.audioAnalysis.durationMs, sampleRate: output.audioAnalysis.sampleRate },
         transcriber: { model: LOCAL_WHISPER_MODEL, backend: output.backend, timestampMode: output.timestampMode, runtimes: { modelLoadMs: output.modelLoadMs, transcriptionMs: output.transcriptionMs, totalMs: output.durationMs } },
         passage: nextAnalysis.passage,
+        primaryTranscript: {
+          rawText: primaryTranscript.rawText,
+          normalizedTokenCount: primaryTranscript.normalizedTokens.length,
+          timestampMode: primaryTranscript.timestampMode,
+        },
+        passageIdentification: {
+          passageSource: nextAnalysis.passage.passageSource,
+          topCandidates: nextAnalysis.passage.candidates,
+          resultState: nextAnalysis.passage.state,
+          shadowComparison: nextAnalysis.passage.shadowComparison,
+        },
+        timingRecovery: {
+          ran: recovery !== null,
+          windowsRun: recovery?.windowsRun ?? 0,
+          microAsrChunks: recovery?.chunks.map((chunk) => ({ startMs: chunk.startMs, endMs: chunk.endMs, text: chunk.text })) ?? [],
+          attemptedPassageIdentityChange: false,
+        },
         timestampQuality: {
           wordTimestampsAvailable: output.timestampMode === "word",
           microAsrFallbackUsed: Boolean(nextAnalysis.forcedAlignment?.verseTimings.some((item) => item.recoveryAttempted)),
