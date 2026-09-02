@@ -741,6 +741,7 @@ export default function Home() {
         audioAnalysis: result.audioAnalysis,
         speechRegions: result.speechRegions,
       });
+      const initialTimingRecoveryPlan = analysis.timingRecoveryPlan;
       if (analysis.timingRecoveryPlan?.required && result.recoverTiming) {
         setStage("transcribing");
         recovery = await result.recoverTiming(analysis.timingRecoveryPlan, (next) => {
@@ -794,6 +795,7 @@ export default function Home() {
           ran: recovery !== null,
           windowsRun: recovery?.windowsRun ?? 0,
           microAsrChunks: recovery?.chunks.map((chunk) => ({ startMs: chunk.startMs, endMs: chunk.endMs, text: chunk.text })) ?? [],
+          localAsrWindows: initialTimingRecoveryPlan?.windows ?? [],
           attemptedPassageIdentityChange: false,
         },
         timestampQuality: {
@@ -806,6 +808,20 @@ export default function Home() {
         canonicalWordAlignment: analysis.forcedAlignment?.canonicalWordAlignments ?? [],
         wordAlignment: analysis.forcedAlignment?.wordOccurrences ?? [],
         verseTiming: analysis.forcedAlignment?.verseTimings ?? [],
+        verseTimingTable: next.map((item) => ({
+          verse: item.verseKey,
+          predictedStartMs: item.startMs,
+          predictedEndMs: item.endMs,
+          startEvidence: item.timingEvidence.start,
+          endEvidence: item.timingEvidence.end,
+        })),
+        transitions: (analysis.timingTrace?.transitions ?? []).map((transition) => ({
+          ...transition,
+          localAsrWindows: (initialTimingRecoveryPlan?.windows ?? []).filter((window) => window.reason === "transition"
+            && window.verseKeys.includes(transition.previousVerseKey)
+            && window.verseKeys.includes(transition.nextVerseKey)),
+        })),
+        finalAyahEnd: analysis.timingTrace?.finalAyahEnd ?? null,
         pauses: analysis.forcedAlignment?.pauseCandidates ?? [],
         displaySets: analysis.forcedAlignment?.captionSets ?? [],
       };

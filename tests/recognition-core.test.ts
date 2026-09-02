@@ -316,11 +316,103 @@ test("refines only the expected text boundary with a local PCM energy gap", () =
     words: [{ text: "قال", startMs: 100, endMs: 800 }, { text: "رجع", startMs: 1_000, endMs: 1_600 }],
   }], { corpus, minConfidence: 0.6, audioAnalysis: analyzeMonoPcm(pcm, 1_000) });
   const [first, second] = analysis.matches;
-  assert.equal(first?.endMs, 750);
+  assert.equal(first?.endMs, 1_050);
   assert.equal(second?.startMs, 1_050);
   assert.equal(first?.timing.end.source, "pcm-refined");
   assert.equal(second?.timing.start.source, "pcm-refined");
-  assert.ok(first!.endMs < second!.startMs, "a real ayah pause remains a caption gap");
+  assert.equal(first!.endMs, second!.startMs, "the previous ayah remains visible throughout a real pause");
+});
+
+test("connected ayat use the first spoken next-ayah word as the shared boundary", () => {
+  const corpus = [{ verseKey: "1:1", text: "الف باء" }, { verseKey: "1:2", text: "جيم دال" }];
+  const analysis = analyzeTranscript([{
+    startMs: 100,
+    endMs: 900,
+    text: "الف باء جيم دال",
+    words: [
+      { text: "الف", startMs: 100, endMs: 280 }, { text: "باء", startMs: 280, endMs: 500 },
+      { text: "جيم", startMs: 500, endMs: 700 }, { text: "دال", startMs: 700, endMs: 900 },
+    ],
+  }], { corpus, minConfidence: 0.6, speechRegions: [{ startMs: 100, endMs: 900, durationMs: 800, confidence: 0.95 }] });
+  assert.equal(analysis.matches[1]?.startMs, 500);
+  assert.equal(analysis.matches[0]?.endMs, 500);
+  assert.equal(analysis.timingTrace?.transitions[0]?.selectedTransitionMs, 500);
+  assert.ok(analysis.timingRecoveryPlan?.windows.some((window) => window.reason === "transition" && window.verseKeys.join(":") === "1:1:1:2"));
+});
+
+test("a late clean next-ayah anchor recovers the local missing prefix instead of becoming the ayah start", () => {
+  const corpus = [{ verseKey: "1:1", text: "الف باء جيم" }, { verseKey: "1:2", text: "دال هاء واو زاي" }];
+  const analysis = analyzeTranscript([{
+    startMs: 100,
+    endMs: 4_000,
+    text: "الف باء جيم واو زاي",
+    words: [
+      { text: "الف", startMs: 100, endMs: 700 }, { text: "باء", startMs: 700, endMs: 1_400 }, { text: "جيم", startMs: 1_400, endMs: 2_200 },
+      { text: "واو", startMs: 3_400, endMs: 3_700 }, { text: "زاي", startMs: 3_900, endMs: 4_000 },
+    ],
+  }], { corpus, minConfidence: 0.55, speechRegions: [{ startMs: 100, endMs: 4_000, durationMs: 3_900, confidence: 0.95 }] });
+  assert.ok((analysis.matches[1]?.startMs ?? Infinity) < 3_400, "the two missing prefix words are recovered backward from word three");
+  assert.equal(analysis.matches[0]?.endMs, analysis.matches[1]?.startMs);
+  assert.equal(analysis.timingTrace?.transitions[0]?.firstNextCanonicalWordSupported, 3);
+});
+
+test("a clear pause keeps the previous ayah visible until next Quran speech begins", () => {
+  const corpus = [{ verseKey: "1:1", text: "الف" }, { verseKey: "1:2", text: "باء" }];
+  const pcm = new Float32Array(2_000);
+  for (let index = 100; index < 720; index += 1) pcm[index] = 0.2;
+  for (let index = 1_060; index < 1_700; index += 1) pcm[index] = 0.2;
+  const analysis = analyzeTranscript([{
+    startMs: 100,
+    endMs: 1_700,
+    text: "الف باء",
+    words: [{ text: "الف", startMs: 100, endMs: 760 }, { text: "باء", startMs: 1_000, endMs: 1_700 }],
+  }], { corpus, minConfidence: 0.6, audioAnalysis: analyzeMonoPcm(pcm, 1_000), speechRegions: [
+    { startMs: 100, endMs: 720, durationMs: 620, confidence: 0.95 },
+    { startMs: 1_060, endMs: 1_700, durationMs: 640, confidence: 0.95 },
+  ] });
+  assert.equal(analysis.matches[1]?.startMs, 1_060);
+  assert.equal(analysis.matches[0]?.endMs, 1_060);
+});
+
+test("a long final ayah remains displayed through its Quran-aligned VAD speech region", () => {
+  const corpus = [{ verseKey: "1:1", text: "الف باء جيم" }];
+  const analysis = analyzeTranscript([{
+    startMs: 100,
+    endMs: 2_000,
+    text: "الف باء جيم",
+    words: [{ text: "الف", startMs: 100, endMs: 700 }, { text: "باء", startMs: 700, endMs: 1_400 }, { text: "جيم", startMs: 1_400, endMs: 2_000 }],
+  }], { corpus, minConfidence: 0.6, speechRegions: [{ startMs: 100, endMs: 15_000, durationMs: 14_900, confidence: 0.94 }] });
+  assert.equal(analysis.matches[0]?.endMs, 15_000);
+  assert.equal(analysis.timingTrace?.finalAyahEnd?.lastCanonicalAsrEvidenceMs, 2_000);
+  assert.equal(analysis.timingTrace?.finalAyahEnd?.selectedFinalEndMs, 15_000);
+  assert.ok(analysis.timingRecoveryPlan?.windows.some((window) => window.reason === "final-end"));
+});
+
+test("a final long madd extends beyond the last lexical ASR anchor to voice completion", () => {
+  const corpus = [{ verseKey: "1:1", text: "الف باء" }];
+  const pcm = new Float32Array(4_000);
+  for (let index = 100; index < 4_000; index += 1) pcm[index] = 0.2;
+  const analysis = analyzeTranscript([{
+    startMs: 100,
+    endMs: 2_000,
+    text: "الف باء",
+    words: [{ text: "الف", startMs: 100, endMs: 900 }, { text: "باء", startMs: 900, endMs: 2_000 }],
+  }], { corpus, minConfidence: 0.6, audioAnalysis: analyzeMonoPcm(pcm, 1_000), speechRegions: [{ startMs: 100, endMs: 4_000, durationMs: 3_900, confidence: 0.94 }] });
+  assert.equal(analysis.matches[0]?.endMs, 4_000);
+});
+
+test("a video cut during the final ayah keeps its caption through the video duration", () => {
+  const corpus = [{ verseKey: "1:1", text: "الف باء" }];
+  const pcm = new Float32Array(7_000);
+  for (let index = 100; index < 7_000; index += 1) pcm[index] = 0.2;
+  const analysis = analyzeTranscript([{
+    startMs: 100,
+    endMs: 1_800,
+    text: "الف باء",
+    words: [{ text: "الف", startMs: 100, endMs: 900 }, { text: "باء", startMs: 900, endMs: 1_800 }],
+  }], { corpus, minConfidence: 0.6, audioAnalysis: analyzeMonoPcm(pcm, 1_000), speechRegions: [{ startMs: 100, endMs: 7_000, durationMs: 6_900, confidence: 0.94 }] });
+  assert.equal(analysis.matches[0]?.endMs, 7_000);
+  assert.equal(analysis.timingTrace?.finalAyahEnd?.videoDurationMs, 7_000);
 });
 
 test("first Quran onset ignores early audio and a lone Whisper-like aligned token", () => {

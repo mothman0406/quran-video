@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Refine Quran ayah boundaries
+
+Complete:
+
+- Added a timing-only recovery pass for every selected ayah transition and for the final ayah. Passage identification still uses only the immutable primary transcript; canonical Quran text remains the display source.
+- The next ayah's local canonical/ASR anchor now selects a bounded VAD corridor. When the first clean anchor is word 3 or later, timing recovers backward by local cadence inside that corridor instead of displaying the ayah at the late anchor. Each non-final ayah ends exactly at the recovered next-ayah onset, including across a real pause.
+- Final-ayah timing now retains the VAD speech region containing the final Quran-aligned evidence, so a long madd, weak final words, or a recording cut cannot make the final caption disappear at the last strong lexical timestamp.
+- Extended Copy Alignment Debug with a compact `verseTimingTable`, transition corridors/VAD regions/next-ayah evidence/selected boundary/local-ASR windows, and final-end evidence/region/speech-end/video-duration fields.
+- Added regressions for connected ayat, late clean next-ayah anchors, clear pauses, long final ayat, final madd, and video cuts during a final ayah. Existing first-onset, full canonical text, forced whole-ayah display, passage-independence, VAD, preview/timeline, and manual-timing tests remain green.
+
+Verification: `npm test` (140 passing), `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. The production build retains the existing non-fatal `vad-web` critical-dependency warning. Real-browser validation with the affected recording remains advisable for empirical boundary accuracy.
+
 ## Current milestone: Fix browser-local VAD runtime assets
 
 Complete:

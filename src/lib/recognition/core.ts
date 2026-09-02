@@ -253,7 +253,7 @@ export type TimingRecoveryWindow = {
   startMs: number;
   endMs: number;
   verseKeys: string[];
-  reason: "first-onset" | "missing-verse" | "transition";
+  reason: "first-onset" | "missing-verse" | "transition" | "final-end";
 };
 
 export type TimingRecoveryPlan = {
@@ -279,6 +279,27 @@ export type VerseTimingTrace = {
   verseAlignmentEndMs: number;
 };
 
+export type TransitionTimingTrace = {
+  previousVerseKey: string;
+  nextVerseKey: string;
+  searchCorridor: { startMs: number; endMs: number };
+  vadRegions: VadSpeechRegion[];
+  firstPreviousAyahEvidenceMs: number | null;
+  firstNextAyahEvidenceMs: number | null;
+  firstNextCanonicalWordSupported: number | null;
+  selectedTransitionMs: number;
+  evidence: TimingEvidenceSource;
+};
+
+export type FinalAyahEndTrace = {
+  verseKey: string;
+  lastCanonicalAsrEvidenceMs: number | null;
+  lastQuranAlignedVadRegion: VadSpeechRegion | null;
+  detectedSpeechEndMs: number | null;
+  videoDurationMs: number;
+  selectedFinalEndMs: number;
+};
+
 export type RecognitionTimingTrace = {
   /** Silero—not energy—defines whether a voice is actually present. */
   firstVadSpeechRegionMs: number | null;
@@ -292,6 +313,8 @@ export type RecognitionTimingTrace = {
   rawVerseAlignmentStartMs: number | null;
   verseAlignmentStartMs: number | null;
   verses: VerseTimingTrace[];
+  transitions: TransitionTimingTrace[];
+  finalAyahEnd: FinalAyahEndTrace | null;
 };
 
 type CorpusChapter = {
@@ -748,6 +771,47 @@ function selectFirstQuranSpeechRegion(
   return null;
 }
 
+/**
+ * A later clean lexical anchor proves the ayah identity, but it is not itself
+ * the ayah onset. Estimate the short unobserved prefix from the local word
+ * cadence and keep that estimate inside the VAD-approved speech corridor.
+ * A subsequent bounded micro-ASR pass normally replaces this recovery with
+ * direct evidence for the first canonical word.
+ */
+function recoverAyahOnsetFromLocalAnchor(
+  anchor: AlignedAyahEvidence | null,
+  evidence: readonly AlignedAyahEvidence[],
+  region: VadSpeechRegion | null,
+): { onsetMs: number; source: TimingEvidenceSource } | null {
+  if (!anchor) return null;
+  if (anchor.canonicalWordIndex === 0) return { onsetMs: anchor.token.startMs, source: anchor.token.source === "micro-asr" ? "micro-asr" : "word-timestamp" };
+  const ordered = evidence
+    .filter((item) => item.token.startMs <= anchor.token.startMs && item.canonicalWordIndex <= anchor.canonicalWordIndex)
+    .sort((left, right) => left.canonicalWordIndex - right.canonicalWordIndex || left.token.startMs - right.token.startMs);
+  const cadences = ordered.slice(1).flatMap((item, index) => {
+    const previous = ordered[index];
+    const wordsApart = item.canonicalWordIndex - previous.canonicalWordIndex;
+    return wordsApart > 0 ? [(item.token.startMs - previous.token.startMs) / wordsApart] : [];
+  }).filter((value) => value >= 120 && value <= 1_100);
+  const cadenceMs = cadences.length
+    ? cadences.slice().sort((left, right) => left - right)[Math.floor(cadences.length / 2)]!
+    : 480;
+  const lookbackMs = Math.min(2_800, Math.max(320, anchor.canonicalWordIndex * cadenceMs));
+  const lowerBound = region?.startMs ?? Math.max(0, anchor.token.startMs - lookbackMs);
+  return {
+    onsetMs: Math.max(Math.round(lowerBound), Math.round(anchor.token.startMs - lookbackMs)),
+    source: anchor.token.source === "micro-asr" ? "micro-asr" : "word-timestamp",
+  };
+}
+
+function regionsInCorridor(
+  speechRegions: readonly VadSpeechRegion[] | undefined,
+  startMs: number,
+  endMs: number,
+): VadSpeechRegion[] {
+  return (speechRegions ?? []).filter((region) => region.startMs < endMs && region.endMs > startMs);
+}
+
 function reconstructPassage(
   selected: ScoredCandidate,
   chunks: readonly TranscriptChunk[],
@@ -777,6 +841,8 @@ function reconstructPassage(
       rawVerseAlignmentStartMs: null,
       verseAlignmentStartMs: null,
       verses: [],
+      transitions: [],
+      finalAyahEnd: null,
     } };
   }
   // Passage selection identifies contiguous ayat. Missing boundary ASR words
@@ -801,7 +867,7 @@ function reconstructPassage(
       similarity: similarities[tokenIndex] ?? 0,
     }));
   });
-  const sourceDuration = Math.max(0, audioAnalysis?.durationMs ?? 0, ...chunks.map((chunk) => chunk.endMs));
+  const sourceDuration = Math.max(0, audioAnalysis?.durationMs ?? 0, ...chunks.map((chunk) => chunk.endMs), ...(speechRegions ?? []).map((region) => region.endMs));
   // Once local recovery or word offsets are available, a whole-recording
   // coarse chunk must not pull a verse back into its leading silence.
   const temporalTokensByAyah = byAyah.map((tokens) => {
@@ -841,30 +907,52 @@ function reconstructPassage(
   const startSources = passage.map<RecognitionMatch["timing"]["start"]["source"]>((_, index) => evidenceSourceFor(byAyah[index]));
   const endSources = [...startSources];
 
-  // Refine only expected canonical verse transitions.  Energy is never scanned
-  // as a generic segmenter, so breaths surrounded by tokens from one ayah are
-  // intentionally ignored.
+  // Refine only expected canonical verse transitions. The next ayah's Quran
+  // evidence chooses the transition; PCM/VAD only constrain and sharpen its
+  // local search corridor. A pause is therefore held by the previous ayah.
+  const transitionTraces: TransitionTimingTrace[] = [];
   for (let index = activeStart; index < activeEnd; index += 1) {
     const previous = temporalTokensByAyah[index];
     const next = temporalTokensByAyah[index + 1];
     const previousLast = previous.length ? Math.max(...previous.map((token) => token.endMs)) : null;
-    const nextFirst = next.length ? Math.min(...next.map((token) => token.startMs)) : null;
-    if (previousLast === null || nextFirst === null
-      || previous.every((token) => token.source === "chunk-coarse")
-      || next.every((token) => token.source === "chunk-coarse")) continue;
-    const refined = audioAnalysis ? refineTransitionWithEnergy(audioAnalysis, previousLast, nextFirst) : null;
+    const nextEvidence = alignedEvidenceByAyah[index + 1]
+      .filter((item) => item.token.source !== "chunk-coarse"
+        && (!speechRegions || Boolean(speechRegionContaining(speechRegions, item.token.startMs, item.token.endMs))));
+    const nextAnchor = selectFirstAyahOnsetAnchor(nextEvidence);
+    const nextFirst = nextAnchor?.token.startMs ?? (next.length ? Math.min(...next.map((token) => token.startMs)) : null);
+    const predicted = starts[index + 1] ?? nextFirst ?? ends[index] ?? 0;
+    const corridorStart = Math.max(0, Math.round(predicted - 2_800));
+    const corridorEnd = Math.min(sourceDuration, Math.round(predicted + 2_200));
+    const vadRegions = regionsInCorridor(speechRegions, corridorStart, corridorEnd);
+    const region = nextAnchor ? speechRegionContaining(speechRegions, nextAnchor.token.startMs, nextAnchor.token.endMs) : null;
+    const recovered = recoverAyahOnsetFromLocalAnchor(nextAnchor, nextEvidence, region);
+    let transition = recovered?.onsetMs ?? nextFirst ?? starts[index + 1] ?? ends[index] ?? 0;
+    let evidenceSource = recovered?.source ?? startSources[index + 1];
+    const refined = audioAnalysis && previousLast !== null && nextFirst !== null
+      ? refineTransitionWithEnergy(audioAnalysis, previousLast, nextFirst)
+      : null;
     if (refined?.foundGap) {
-      ends[index] = Math.max(starts[index] ?? 0, refined.speechOffsetMs);
-      starts[index + 1] = Math.max(ends[index]!, refined.speechOnsetMs);
-      endSources[index] = "pcm-refined";
-      startSources[index + 1] = "pcm-refined";
-    } else {
-      // Connected recitation gets a textual transition inside the two observed
-      // words, rather than a made-up silence or an early next-ayah display.
-      const transition = Math.round((previousLast + nextFirst) / 2);
-      ends[index] = Math.max(starts[index] ?? 0, transition);
-      starts[index + 1] = Math.max(transition, starts[index + 1] ?? transition);
+      // The onset after a text-derived corridor is the next ayah boundary.
+      transition = refined.speechOnsetMs;
+      evidenceSource = "pcm-refined";
     }
+    if (region) transition = Math.max(region.startMs, Math.min(region.endMs - 1, transition));
+    transition = Math.round(Math.max(starts[index] ?? 0, transition));
+    starts[index + 1] = transition;
+    ends[index] = transition;
+    startSources[index + 1] = evidenceSource;
+    endSources[index] = evidenceSource;
+    transitionTraces.push({
+      previousVerseKey: passage[index].verseKey,
+      nextVerseKey: passage[index + 1].verseKey,
+      searchCorridor: { startMs: corridorStart, endMs: corridorEnd },
+      vadRegions,
+      firstPreviousAyahEvidenceMs: previous.length ? Math.min(...previous.map((token) => token.startMs)) : null,
+      firstNextAyahEvidenceMs: nextFirst,
+      firstNextCanonicalWordSupported: nextAnchor ? nextAnchor.canonicalWordIndex + 1 : null,
+      selectedTransitionMs: transition,
+      evidence: evidenceSource,
+    });
   }
   const lastTokens = temporalTokensByAyah[activeEnd];
   const rawFirstStartMs = starts[activeStart] ?? null;
@@ -902,12 +990,35 @@ function reconstructPassage(
     starts[activeStart] = Math.max(firstQuranSpeechRegion?.startMs ?? 0, Math.min(refinedStart, ends[activeStart]! - 1));
     if (pcmLocalOnsetCandidateMs !== null) startSources[activeStart] = "pcm-refined";
   }
-  if (audioAnalysis && lastTokens.length) {
-    const refined = refineWordEdgeWithEnergy(audioAnalysis, Math.max(...lastTokens.map((token) => token.endMs)), "end");
-    if (refined !== null) {
-      ends[activeEnd] = Math.max(starts[activeEnd]! + 1, Math.min(sourceDuration, refined));
+  let finalAyahEnd: FinalAyahEndTrace | null = null;
+  if (lastTokens.length) {
+    const lastEvidenceMs = Math.max(...lastTokens.map((token) => token.endMs));
+    const finalRegion = speechRegionContaining(speechRegions, lastEvidenceMs, lastEvidenceMs);
+    const detectedSpeechEndMs = finalRegion?.endMs ?? null;
+    // A final madd or weak final word is still Quran while it remains in the
+    // VAD region tied to the last canonical ayah. Do not let the last clean
+    // lexical anchor shorten that display interval.
+    if (detectedSpeechEndMs !== null && detectedSpeechEndMs > (ends[activeEnd] ?? 0)) {
+      ends[activeEnd] = Math.min(sourceDuration, detectedSpeechEndMs);
       endSources[activeEnd] = "pcm-refined";
     }
+    if (audioAnalysis) {
+    const refined = refineWordEdgeWithEnergy(audioAnalysis, Math.max(...lastTokens.map((token) => token.endMs)), "end");
+    if (refined !== null) {
+        // Energy may sharpen an observed terminal word, but never pull the
+        // caption before continued VAD-approved final recitation.
+        ends[activeEnd] = Math.max(ends[activeEnd] ?? 0, starts[activeEnd]! + 1, Math.min(sourceDuration, refined));
+        endSources[activeEnd] = "pcm-refined";
+      }
+    }
+    finalAyahEnd = {
+      verseKey: passage[activeEnd].verseKey,
+      lastCanonicalAsrEvidenceMs: lastEvidenceMs,
+      lastQuranAlignedVadRegion: finalRegion,
+      detectedSpeechEndMs,
+      videoDurationMs: sourceDuration,
+      selectedFinalEndMs: Math.round(ends[activeEnd] ?? lastEvidenceMs),
+    };
   }
   const matches = passage.slice(activeStart, activeEnd + 1).map((verse, offset) => {
     const index = activeStart + offset;
@@ -966,6 +1077,8 @@ function reconstructPassage(
     rawVerseAlignmentStartMs: rawFirstStartMs,
     verseAlignmentStartMs: constrainedMatches[0]?.startMs ?? null,
     verses: verseTrace,
+    transitions: transitionTraces,
+    finalAyahEnd,
   } };
 }
 
@@ -1178,7 +1291,11 @@ function timingRecoveryPlan(
     .map((item) => item.verseKey);
   const first = forcedAlignment.verseTimings[0];
   const firstOnsetRequired = timestampMode === "chunk-fallback" || first.startEvidence === "chunk-coarse" || first.startEvidence === "interpolated";
-  const required = !recoveryAttempted && (timestampMode === "chunk-fallback" || missingVerseKeys.length > 0 || firstOnsetRequired);
+  // Every expected ayah transition and the terminal ayah get a bounded local
+  // ASR read. This is timing-only evidence after passage identity is fixed.
+  const hasBoundaryRecovery = matches.length > 1;
+  const hasFinalRecovery = matches.length > 0;
+  const required = !recoveryAttempted && (timestampMode === "chunk-fallback" || missingVerseKeys.length > 0 || firstOnsetRequired || hasBoundaryRecovery || hasFinalRecovery);
   if (!required) return {
     required: false,
     timestampMode,
@@ -1199,6 +1316,14 @@ function timingRecoveryPlan(
       const end = Math.max(start + 1, Math.round(candidate.endMs));
       if (windows.some((item) => item.reason === reason && Math.abs(item.startMs - start) < 500 && Math.abs(item.endMs - end) < 500)) continue;
       windows.push({ startMs: start, endMs: end, verseKeys, reason });
+    }
+  };
+  const addOverlappingWindows = (startMs: number, endMs: number, verseKeys: string[], reason: TimingRecoveryWindow["reason"]) => {
+    const windowMs = 4_800;
+    const stepMs = 2_800;
+    for (let start = startMs; start < endMs; start += stepMs) {
+      addWindow(start, Math.min(endMs, start + windowMs), verseKeys, reason);
+      if (endMs - start <= windowMs) break;
     }
   };
   const allVerseKeys = forcedAlignment.verseTimings.map((item) => item.verseKey);
@@ -1224,11 +1349,31 @@ function timingRecoveryPlan(
     const right = next?.startMs ?? Math.min(audioAnalysis?.durationMs ?? current?.endMs ?? left + 8_000, (current?.endMs ?? left + 4_000) + 4_000);
     addWindow(Math.max(0, left - 700), Math.max(left + 1, right + 700), [verseKey], "missing-verse");
   }
+  for (let index = 0; index < matches.length - 1; index += 1) {
+    const predicted = matches[index + 1]!.startMs;
+    const durationMs = audioAnalysis?.durationMs ?? matches.at(-1)?.endMs ?? predicted + 2_200;
+    addOverlappingWindows(
+      Math.max(0, predicted - 2_800),
+      Math.min(durationMs, predicted + 2_200),
+      [matches[index]!.verseKey, matches[index + 1]!.verseKey],
+      "transition",
+    );
+  }
+  const lastMatch = matches.at(-1);
+  if (lastMatch) {
+    const durationMs = audioAnalysis?.durationMs ?? lastMatch.endMs;
+    addOverlappingWindows(
+      Math.max(0, lastMatch.startMs - 600),
+      durationMs,
+      [lastMatch.verseKey],
+      "final-end",
+    );
+  }
   if (firstOnsetRequired && !windows.some((item) => item.reason === "first-onset")) {
     const firstMatch = matches[0];
     addWindow(Math.max(0, (firstMatch?.startMs ?? 0) - 1_000), Math.min(audioAnalysis?.durationMs ?? firstMatch?.endMs ?? 8_000, (firstMatch?.startMs ?? 0) + 7_000), [first.verseKey], "first-onset");
   }
-  return { required, timestampMode, windows: windows.slice(0, 24), missingVerseKeys, firstOnsetRequired };
+  return { required, timestampMode, windows: windows.slice(0, 48), missingVerseKeys, firstOnsetRequired };
 }
 
 type LocalCandidate = {
