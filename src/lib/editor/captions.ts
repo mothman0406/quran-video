@@ -1,6 +1,7 @@
 import { quranDisplayText } from "../quran/content.ts";
 import type { QuranVerseContent } from "../quran/content.ts";
 import type { VerseAlignment } from "./recognition.ts";
+import type { ForcedAlignment } from "../recognition/core.ts";
 import type { z } from "zod";
 import type { CaptionBackgroundSchema, CaptionPositioningSchema, TransitionSettingsSchema, TypographySchema } from "../schemas/project.ts";
 import type { ProjectFormat } from "../schemas/project.ts";
@@ -262,7 +263,7 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
 
 // Legacy values remain readable for saved projects; new recognition writes the
 // more specific two-stage evidence values.
-export type CaptionTimingSource = "word-audio-refined" | "word-timestamp" | "token-interpolated" | "chunk-interpolated" | "low-confidence-fallback" | "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "low-confidence" | "derived";
+export type CaptionTimingSource = "word-audio-refined" | "word-timestamp" | "token-interpolated" | "chunk-interpolated" | "low-confidence-fallback" | "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "low-confidence" | "forced-alignment" | "derived";
 
 export type CaptionSegment = {
   id: string;
@@ -395,6 +396,42 @@ export function createCaptionSegments(
     }];
   });
   return continuousDisplayTiming(generated);
+}
+
+/** Creates editor display blocks from the canonical forced-alignment plan.
+ * Recognition data remains separate: manual timing edits still only mutate
+ * these user-facing intervals. */
+export function createCaptionSegmentsFromForcedAlignment(
+  alignment: ForcedAlignment,
+  content: Readonly<Record<string, QuranVerseContent | undefined>>,
+): CaptionSegment[] {
+  const generated = alignment.captionSets.flatMap((set) => {
+    const verse = content[set.verseKey];
+    const verseWords = words(verse ? quranDisplayText(verse) : "");
+    const selectedWords = verseWords.slice(set.canonicalStartWordIndex - 1, set.canonicalEndWordIndex);
+    if (!selectedWords.length) return [];
+    return [{
+      id: set.id,
+      verseKeys: [set.verseKey],
+      startMs: set.startMs,
+      endMs: set.endMs,
+      arabic: selectedWords.join(" "),
+      translation: verse?.translation ?? null,
+      transliteration: verse?.transliteration ?? null,
+      wordStart: set.canonicalStartWordIndex - 1,
+      wordEnd: set.canonicalEndWordIndex,
+      wordCount: selectedWords.length,
+      timingEvidence: {
+        start: { timestampMs: set.startMs, source: "forced-alignment" as const },
+        end: { timestampMs: set.endMs, source: "forced-alignment" as const },
+        derived: false,
+      },
+    }];
+  });
+  return generated.map((segment, index) => ({
+    ...segment,
+    endMs: Math.max(segment.startMs + 1, index < generated.length - 1 ? generated[index + 1].startMs : segment.endMs),
+  }));
 }
 
 export function splitCaptionSegment(segment: CaptionSegment, boundary: number): CaptionSegment[] {

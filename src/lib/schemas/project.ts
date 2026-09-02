@@ -50,8 +50,8 @@ export const CaptionSegmentSchema = z.strictObject({
   wordEnd: z.number().int().positive(),
   wordCount: z.number().int().positive(),
   timingEvidence: z.strictObject({
-    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "low-confidence", "derived"]) }),
-    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "low-confidence", "derived"]) }),
+    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "low-confidence", "forced-alignment", "derived"]) }),
+    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "low-confidence", "forced-alignment", "derived"]) }),
     derived: z.boolean(),
   }).optional(),
 });

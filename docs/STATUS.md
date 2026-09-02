@@ -1,5 +1,18 @@
 # Status
 
+## Current milestone: Accuracy-first Quran forced word alignment
+
+Complete:
+
+- Added a separate canonical-first forced-alignment layer after whole-recording passage inference. It represents canonical passage words, every aligned audible `WordOccurrence`, repeated local occurrences, ayah timing with partial boundaries, text-associated pause candidates, and word-boundary caption-set plans.
+- Retained local timestamped Whisper only as lazy-loaded retrieval/coarse timing evidence; the corpus controls canonical text. A bounded five-word local backward jump models phrase repetition without allowing Quran-wide jumps.
+- Added local PCM edge refinement and pause scoring after canonical words. Caption plans preserve the old text through pauses, split long ayat only at canonical word boundaries, and delay set advancement across backward repetition.
+- The editor now creates initial display blocks from forced-alignment plans while `VerseAlignment` remains the persistence/reset compatibility layer. Manual timing remains authoritative.
+- Added development `window.__QURAN_ALIGNMENT_DEBUG__`, the normal-editor **Copy Alignment Debug** action, and expanded the recognition route debug output. Reports contain no audio bytes.
+- Documented the architecture decision, rejected second-model alternative, local runtime cost, and current phonetic-alignment limitation in `docs/RECOGNITION.md`.
+
+Verification: targeted forced-alignment/caption tests, `npx tsc --noEmit`, `npm test`, `npm run lint`, `npm run build`, and `git diff --check` are run for this milestone. Real recitation browser validation remains required, especially for noisy multi-ayah recordings and ASR timestamp fallback.
+
 ## Current milestone: Whole-ayah captions and first-ayah timing correction
 
 Complete:

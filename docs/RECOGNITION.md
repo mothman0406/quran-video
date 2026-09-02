@@ -1,35 +1,41 @@
-# Two-stage local Quran recognition
+# Quran recognition and forced alignment
 
-The recognition transcriber uses `onnx-community/whisper-base_timestamped`, the multilingual Whisper Base ONNX export that retains the decoder cross-attention outputs Transformers.js needs for `return_timestamps: "word"`. It remains fully browser-local: q4 is selected for the encoder and merged decoder (about 145 MB including tokenizer/config assets on first download), WebGPU is preferred, and the same cached model runs through local WASM when WebGPU cannot initialize. The source is decoded once to mono 16 kHz PCM and reduced to a local 10 ms RMS envelope; neither PCM nor text is uploaded.
+## Architecture decision
 
-## Timestamp capability and fallback
+Recognition is a browser-local, accuracy-first hybrid pipeline:
 
-Word timing is a declared capability of the timestamped export; the ordinary `onnx-community/whisper-base` export must not be used for that mode. Each run validates non-empty word timestamps after absolute-time overlap stitching: values must be finite, ordered, within the source duration, and not all identical. An occasional zero-duration word is retained for neighboring interpolation, but missing timestamps, large regressions, out-of-duration values, or identical timestamps invalidate precise timing.
+1. Decode the selected media once to mono PCM and build a 10 ms RMS envelope.
+2. Run lazy-loaded local Whisper Base Timestamped over overlapping 30-second windows.
+3. Retrieve high-recall Quran candidates, then score contiguous passages against the whole recording.
+4. Freeze the selected canonical Quran word span.
+5. Run a second, canonical-first alignment pass. Timestamped ASR words are mapped onto that fixed word sequence with a strongly forward path and a bounded five-word backward allowance for immediate repetitions.
+6. Refine word edges and text-associated pause candidates from the local PCM envelope.
+7. Derive ayah timings and caption display sets from word occurrences, without mutating the canonical recognition result.
 
-If Transformers.js reports its known missing-cross-attention/output-attentions failure, or validation rejects the returned words, the transcriber retries once with `return_timestamps: true` on the same model. Passage mapping continues from coarse timestamped chunks, but the result is marked `chunk-fallback`, records its reason in developer diagnostics, and the editor warns that timing is approximate. This fallback never claims word precision.
+The canonical Hafs corpus is the displayed text authority. Whisper supplies retrieval and coarse temporal evidence only.
 
-## 1. Passage mapping
+## Alternatives considered
 
-The complete normalized recording is mapped to a bounded set of candidate Quran regions. Cheap fuzzy token anchors retrieve and expand surrounding ayat, then a semi-global dynamic-programming alignment finds the best *contiguous canonical Quran word span* inside each region. Canonical gaps before the first and after the last matched word are free, so a clip can start/end inside an ayah. ASR gaps are not free: speech tokens that cannot be explained by a candidate remain an explicit penalty and coverage loss. Thus silence contributes no mapping evidence, but a substantial Quran-like prefix cannot be silently discarded in favor of a later clean anchor. Windows cannot cross a surah boundary.
+- Better use of Whisper word timestamps alone: rejected because timestamps cannot represent repeated canonical words and are not a forced-alignment model.
+- Existing ASR-to-ayah interpolation: retained only as a compatibility fallback for persisted `VerseAlignment`; it collapses too much timing detail for caption generation.
+- A second browser-local Arabic CTC/forced-alignment model: rejected for now. No tested, compact Arabic Quran CTC model is available in the current local runtime; adding an unvalidated large model would increase first-run download and memory without demonstrated accuracy improvement.
 
-Mapping reports the selected word span (first/last verse, one-based canonical word index, canonical word text, and boundary state), intersected ayat, per-ayah word coverage, top three alternatives, mapping quality, transcript coverage, canonical-span coverage, uniqueness margin, and `confident-unique` / `plausible-ambiguous` / `no-reliable-match`. A strong interior anchor is locally expanded backward and forward before final selection; partial boundary ayat are supported by token alignment and continuity rather than a full-ayah threshold. An ambiguous but credible clip still yields its best usable passage for correction; only no reliable mapping produces no captions. Chunk-level confidence never decides the final passage.
+Whisper Base Timestamped remains lazy loaded, local, and approximately 145 MB q4 on first download. The canonical second pass is linear in ASR words times a small local (15-word) corridor, so it adds modest CPU work but no model/network cost. Processing may be roughly up to twice the old timing stage for difficult recordings, by design.
 
-## 2. Word and PCM timing
+## Output layers
 
-After mapping, the selected canonical passage is aligned again as one monotonic word sequence when validated ASR words are available. Every canonical token retains its ayah, word index, and global passage order. Aligned ASR words supply initial timings; under a documented chunk fallback, missing interior evidence uses timestamped chunk text and interpolation only between canonical neighbors.
+- `CanonicalPassageWord`: fixed Quran identity and canonical position.
+- `WordOccurrence`: each audible occurrence, including repeated local words, with evidence and confidence.
+- `ForcedVerseTiming`: timing for every intersected ayah, including partial-start/end metadata.
+- `PauseCandidate`: low-energy interval associated with a canonical boundary, never global silence segmentation.
+- `CaptionSetPlan`: natural, word-boundary-only display proposals. Long ayat prefer scored pauses near a readable word count; prior text remains visible until the next set begins.
 
-PCM energy is consulted only inside a corridor already implied by the last aligned word of ayah A and first aligned word of ayah B. A local adaptive noise floor finds active speech offset/onset around that expected transition. A genuine gap yields distinct A end and B start times; connected recitation uses the text-derived transition instead. Silence is never a global verse segmenter, so a breath within an ayah cannot split it.
+Manual timeline edits remain authoritative for presentation and never rewrite canonical recognition.
 
-The first ayah has an additional safeguard: its start is anchored to the strongest local run of ASR tokens that actually aligned to that first canonical ayah. A lone, much-earlier token is not allowed to beat a later multi-word aligned run. PCM then searches only a bounded lookback corridor around that anchor; generic audio activity is recorded for debugging but is never timing input. If the clip starts partway through an ayah, the canonical word span remains exact and the local corridor begins near the first supported canonical word. Weak evidence biases toward the anchor rather than showing Quran text seconds early.
+## Debugging
 
-Automatic display generation is deliberately simpler than recognition: each detected ayah creates exactly one whole-ayah `CaptionSegment`. Partial canonical start/end words remain recognition metadata, while the visible Arabic and translation remain the entire ayah. Repeated words do not create or advance a display set; only the next ayah's credible onset changes the active caption. Manual split/merge remains available as an editor operation, but is never performed automatically.
+Every recognition run stores a JSON-safe report at `window.__QURAN_ALIGNMENT_DEBUG__` in development. The normal editor exposes **Copy Alignment Debug** after recognition; the development `/recognition` route includes the same data in its debug export. Reports contain source metadata, transcriber/runtime details, passage candidates, word occurrences, verse timings, pause candidates, and display sets—never media bytes.
 
-Evidence is stored as `word-audio-refined`, `word-timestamp`, `token-interpolated`, `chunk-interpolated`, or `low-confidence-fallback`. Caption intervals remain exact half-open `CaptionSegment.startMs`/`endMs` values shared by preview and timeline; fades are bounded inside those intervals.
+## Current limitations
 
-## 4. Timing Lab
-
-Development builds expose `/recognition` as the local Timing Lab. It keeps the selected video in the browser, shows transcription/timestamp/audio-analysis/passage diagnostics, and materializes the same `VerseAlignment` → `CaptionSegment` display model used by the editor. The lab records integer-millisecond ground-truth marks for recitation onset, set transitions, and final recitation end; marks can be associated with detected segments and edited or removed. `Copy Timing Report` produces plain text and `Export Debug JSON` saves structured timing/canonical/ASR diagnostics without source media bytes. Both include first-onset trace values, per-ayah alignment/display/manual-error values, and observed lab caption activations. Production builds show no detailed recognition diagnostics.
-
-## Performance and limitations
-
-The full corpus has 6,236 ayat, but only bounded anchor windows receive dynamic programming. The noisy five-ayah Ad-Duha regression scores in approximately 0.73 s in Node on this workspace; PCM envelope construction is linear in source duration. This is deterministic refinement around ASR word evidence, not phonetic forced alignment: difficult ASR, heavy reverb, or weak word timestamps can still fall back to interpolation and merit manual correction. Browser fixture measurements remain required to quantify boundary error across real reciters and codecs.
+This is text-constrained forced alignment rather than phoneme/CTC alignment. Its accuracy is bounded by local Whisper anchors, especially where ASR misses several consecutive words or fails to emit Arabic timestamps. Acoustic refinement uses RMS energy (not phonetic boundaries), so it marks reliable onset/offset and pauses rather than claiming sub-phoneme precision.

@@ -108,6 +108,66 @@ export type RecognitionAnalysis = {
   diagnostics: RecognitionDiagnostic[];
   passage: PassageInference;
   timingTrace: RecognitionTimingTrace | null;
+  /** Detailed, canonical-first alignment. This deliberately remains separate
+   * from the legacy VerseAlignment-shaped matches used by saved projects. */
+  forcedAlignment: ForcedAlignment | null;
+};
+
+export type CanonicalPassageWord = {
+  verseKey: string;
+  canonicalWordIndex: number;
+  globalWordIndex: number;
+  canonicalText: string;
+  normalizedText: string;
+};
+
+export type WordOccurrence = CanonicalPassageWord & {
+  occurrenceIndex: number;
+  startMs: number;
+  endMs: number;
+  confidence: number;
+  evidence: "direct-word-alignment" | "chunk-text-forced-alignment" | "acoustic-refinement";
+  asrText: string;
+};
+
+export type ForcedVerseTiming = {
+  verseKey: string;
+  startMs: number;
+  endMs: number;
+  firstCanonicalWordIndex: number;
+  lastCanonicalWordIndex: number;
+  partialStart: boolean;
+  partialEnd: boolean;
+  confidence: number;
+};
+
+export type PauseCandidate = {
+  afterVerseKey: string;
+  afterWordIndex: number;
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+  depth: number;
+  confidence: number;
+  score: number;
+};
+
+export type CaptionSetPlan = {
+  id: string;
+  verseKey: string;
+  canonicalStartWordIndex: number;
+  canonicalEndWordIndex: number;
+  startMs: number;
+  endMs: number;
+  cutReason: "short-ayah" | "acoustic-pause" | "visual-length" | "partial-ayah";
+};
+
+export type ForcedAlignment = {
+  canonicalPassage: readonly CanonicalPassageWord[];
+  wordOccurrences: readonly WordOccurrence[];
+  verseTimings: readonly ForcedVerseTiming[];
+  pauseCandidates: readonly PauseCandidate[];
+  captionSets: readonly CaptionSetPlan[];
 };
 
 export type VerseTimingTrace = {
@@ -727,6 +787,167 @@ function reconstructPassage(
   } };
 }
 
+/**
+ * Second-pass, canonical-first timing. The selected passage is fixed before
+ * this runs; ASR text is therefore evidence for where a known Quran word was
+ * heard, never the source of the displayed Quran text. The small backward
+ * allowance represents a reciter repeating a local phrase without permitting
+ * a jump to another Quran location.
+ */
+function forceAlignPassage(
+  selected: ScoredCandidate,
+  chunks: readonly TranscriptChunk[],
+  verses: readonly QuranCorpusVerse[],
+  matches: readonly RecognitionMatch[],
+  audioAnalysis?: AudioAnalysis,
+): ForcedAlignment | null {
+  const allCanonical = canonicalPassageTokens(verses.slice(selected.start, selected.end + 1));
+  const first = selected.alignment.firstCanonicalIndex;
+  const last = selected.alignment.lastCanonicalIndex;
+  if (first === null || last === null) return null;
+  const canonical = allCanonical.slice(first, last + 1);
+  const canonicalPassage = canonical.map((word, index) => ({
+    verseKey: word.verseKey,
+    canonicalWordIndex: word.wordIndex + 1,
+    globalWordIndex: index + 1,
+    canonicalText: word.displayText,
+    normalizedText: word.units.orthographic,
+  }));
+  const evidence = timedTokens(chunks);
+  const occurrences: WordOccurrence[] = [];
+  let cursor = 0;
+  for (const token of evidence) {
+    const lower = Math.max(0, cursor - 5);
+    const upper = Math.min(canonical.length - 1, cursor + 10);
+    let winner: { index: number; similarity: number; value: number } | null = null;
+    for (let index = lower; index <= upper; index += 1) {
+      const similarity = recognitionUnitSimilarity(canonical[index].units, token.units);
+      const movement = index - cursor;
+      // Forward movement is normal; a short repeat is accepted but slightly
+      // less attractive than an equally credible forward match.
+      const value = similarity * 2 - (movement < 0 ? Math.abs(movement) * 0.055 : movement * 0.012);
+      if (!winner || value > winner.value) winner = { index, similarity, value };
+    }
+    if (!winner || winner.similarity < 0.58) continue;
+    const occurrenceIndex = occurrences.filter((item) => item.globalWordIndex === winner.index + 1).length + 1;
+    let startMs = Math.round(token.startMs);
+    let endMs = Math.max(startMs + 1, Math.round(token.endMs));
+    let acoustic = false;
+    if (audioAnalysis) {
+      const refinedStart = refineWordEdgeWithEnergy(audioAnalysis, startMs, "start");
+      const refinedEnd = refineWordEdgeWithEnergy(audioAnalysis, endMs, "end");
+      if (refinedStart !== null && refinedStart <= endMs) { startMs = refinedStart; acoustic = true; }
+      if (refinedEnd !== null && refinedEnd >= startMs) { endMs = refinedEnd; acoustic = true; }
+    }
+    const word = canonicalPassage[winner.index];
+    occurrences.push({
+      ...word,
+      occurrenceIndex,
+      startMs,
+      endMs,
+      confidence: Number(winner.similarity.toFixed(4)),
+      evidence: acoustic ? "acoustic-refinement" : token.source === "direct-asr-word" ? "direct-word-alignment" : "chunk-text-forced-alignment",
+      asrText: token.displayText,
+    });
+    cursor = winner.index;
+  }
+  const relevantVerseKeys = [...new Set(canonical.map((word) => word.verseKey))];
+  const canonicalWordCountByVerse = new Map(verses.slice(selected.start, selected.end + 1).map((verse) => [verse.verseKey, normalizedVerseWords(verse).length]));
+  const verseTimings = relevantVerseKeys.map((verseKey) => {
+    const words = canonicalPassage.filter((word) => word.verseKey === verseKey);
+    const heard = occurrences.filter((word) => word.verseKey === verseKey);
+    const fallback = matches.find((match) => match.verseKey === verseKey);
+    const firstWord = heard[0] ?? words[0];
+    const lastWord = heard.at(-1) ?? words.at(-1)!;
+    const confidence = heard.length
+      ? heard.reduce((sum, word) => sum + word.confidence, 0) / heard.length
+      : fallback?.confidence ?? 0;
+    return {
+      verseKey,
+      startMs: Math.round(heard.length ? Math.min(...heard.map((word) => word.startMs)) : fallback?.startMs ?? 0),
+      endMs: Math.round(heard.length ? Math.max(...heard.map((word) => word.endMs)) : fallback?.endMs ?? 1),
+      firstCanonicalWordIndex: firstWord.canonicalWordIndex,
+      lastCanonicalWordIndex: lastWord.canonicalWordIndex,
+      partialStart: firstWord.canonicalWordIndex > 1,
+      partialEnd: lastWord.canonicalWordIndex < (canonicalWordCountByVerse.get(verseKey) ?? words.at(-1)!.canonicalWordIndex),
+      confidence: Number(confidence.toFixed(4)),
+    };
+  }).map((timing) => ({ ...timing, endMs: Math.max(timing.startMs + 1, timing.endMs) }));
+
+  const pauseCandidates: PauseCandidate[] = [];
+  for (let index = 0; index < occurrences.length - 1; index += 1) {
+    const previous = occurrences[index];
+    const next = occurrences[index + 1];
+    if (next.startMs <= previous.endMs || next.globalWordIndex < previous.globalWordIndex) continue;
+    const refined = audioAnalysis ? refineTransitionWithEnergy(audioAnalysis, previous.endMs, next.startMs) : null;
+    const startMs = refined?.speechOffsetMs ?? previous.endMs;
+    const endMs = refined?.speechOnsetMs ?? next.startMs;
+    const durationMs = endMs - startMs;
+    if (durationMs < 80) continue;
+    const local = audioAnalysis?.rms.slice(Math.max(0, Math.floor(startMs / (audioAnalysis?.windowMs ?? 10))), Math.ceil(endMs / (audioAnalysis?.windowMs ?? 10))) ?? [];
+    const depth = local.length ? 1 - Math.min(1, local.reduce((sum, value) => sum + value, 0) / local.length / Math.max(0.0001, Math.max(...audioAnalysis!.rms))) : 0.3;
+    const confidence = Math.min(previous.confidence, next.confidence);
+    const ayahBonus = previous.verseKey !== next.verseKey ? 0.14 : 0;
+    pauseCandidates.push({
+      afterVerseKey: previous.verseKey,
+      afterWordIndex: previous.canonicalWordIndex,
+      startMs,
+      endMs,
+      durationMs,
+      depth: Number(depth.toFixed(4)),
+      confidence: Number(confidence.toFixed(4)),
+      score: Number(Math.min(1, durationMs / 700 * 0.42 + depth * 0.28 + confidence * 0.16 + ayahBonus + (refined?.foundGap ? 0.08 : 0)).toFixed(4)),
+    });
+  }
+
+  const captionSets: CaptionSetPlan[] = [];
+  for (const timing of verseTimings) {
+    const verseWords = canonicalPassage.filter((word) => word.verseKey === timing.verseKey);
+    const visibleStart = timing.firstCanonicalWordIndex;
+    const visibleEnd = timing.lastCanonicalWordIndex;
+    const visibleCount = visibleEnd - visibleStart + 1;
+    const boundaries: Array<{ after: number; reason: CaptionSetPlan["cutReason"] }> = [];
+    let from = visibleStart;
+    while (visibleEnd - from + 1 > 10) {
+      const desired = Math.min(visibleEnd - 3, from + 8);
+      const pause = pauseCandidates.filter((item) => item.afterVerseKey === timing.verseKey && item.afterWordIndex >= Math.max(from + 3, desired - 3) && item.afterWordIndex <= desired + 3)
+        .sort((left, right) => right.score - left.score)[0];
+      const after = pause?.afterWordIndex ?? desired;
+      boundaries.push({ after, reason: pause ? "acoustic-pause" : "visual-length" });
+      from = after + 1;
+    }
+    if (!boundaries.length) boundaries.push({ after: visibleEnd, reason: visibleCount === verseWords.length ? "short-ayah" : "partial-ayah" });
+    else boundaries.push({ after: visibleEnd, reason: timing.partialEnd ? "partial-ayah" : "visual-length" });
+    let startWord = visibleStart;
+    for (const boundary of boundaries) {
+      const inSet = occurrences.filter((word) => word.verseKey === timing.verseKey && word.canonicalWordIndex >= startWord && word.canonicalWordIndex <= boundary.after);
+      const previousSetOccurrences = occurrences.filter((word) => word.verseKey === timing.verseKey && word.canonicalWordIndex < startWord);
+      const rawStart = inSet.length ? Math.min(...inSet.map((word) => word.startMs)) : timing.startMs;
+      // Hysteresis: a backward repeat that crosses this boundary keeps the old
+      // set visible until that repeat completes instead of flashing ahead.
+      const startMs = Math.max(rawStart, previousSetOccurrences.length ? Math.max(...previousSetOccurrences.map((word) => word.endMs)) : rawStart);
+      const endMs = inSet.length ? Math.max(...inSet.map((word) => word.endMs)) : timing.endMs;
+      captionSets.push({
+        id: `${timing.verseKey}#${startWord}-${boundary.after}`,
+        verseKey: timing.verseKey,
+        canonicalStartWordIndex: startWord,
+        canonicalEndWordIndex: boundary.after,
+        startMs,
+        endMs: Math.max(startMs + 1, endMs),
+        cutReason: boundary.reason,
+      });
+      startWord = boundary.after + 1;
+    }
+  }
+  // A set remains visible through a pause and switches only when the next
+  // canonical set begins. Its own end remains the final audible word only for
+  // the final set.
+  for (let index = 0; index < captionSets.length - 1; index += 1) {
+    captionSets[index].endMs = Math.max(captionSets[index].startMs + 1, captionSets[index + 1].startMs);
+  }
+  return { canonicalPassage, wordOccurrences: occurrences, verseTimings, pauseCandidates, captionSets };
+}
+
 type LocalCandidate = {
   start: number;
   end: number;
@@ -1009,7 +1230,7 @@ export function analyzeTranscript(
     canonicalSpan: null, mappingQuality: null, transcriptCoverage: null, canonicalSpanCoverage: null, uniquenessMargin: null,
     firstBoundaryConfidence: null, lastBoundaryConfidence: null, boundaryCompletion: { extendedBackward: false, extendedForward: false },
   };
-  if (!fullTranscript || orderedChunks.some((chunk) => chunk.endMs < chunk.startMs)) return { matches: [], diagnostics, passage: emptyPassage, timingTrace: null };
+  if (!fullTranscript || orderedChunks.some((chunk) => chunk.endMs < chunk.startMs)) return { matches: [], diagnostics, passage: emptyPassage, timingTrace: null, forcedAlignment: null };
 
   const priorityStarts = diagnostics.flatMap((diagnostic) => {
     const key = diagnostic.topCandidate?.startVerseKey;
@@ -1075,13 +1296,14 @@ export function analyzeTranscript(
       extendedForward: selectedEndIndex >= 0 && anchorEndIndex >= 0 && selectedEndIndex > anchorEndIndex,
     },
   };
-  if (state === "no-reliable-match" || !best) return { matches: [], diagnostics, passage, timingTrace: null };
+  if (state === "no-reliable-match" || !best) return { matches: [], diagnostics, passage, timingTrace: null, forcedAlignment: null };
   const reconstructed = reconstructPassage(best, orderedChunks, verses, options.audioAnalysis);
   return {
     matches: reconstructed.matches,
     diagnostics,
     passage,
     timingTrace: reconstructed.timingTrace,
+    forcedAlignment: forceAlignPassage(best, orderedChunks, verses, reconstructed.matches, options.audioAnalysis),
   };
 }
 

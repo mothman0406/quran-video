@@ -19,6 +19,7 @@ import {
 import {
   clampCaptionPositioning,
   createCaptionSegments,
+  createCaptionSegmentsFromForcedAlignment,
   DEFAULT_CAPTION_BACKGROUND,
   DEFAULT_CAPTION_PRESENTATION,
   DEFAULT_TRANSITION_SETTINGS,
@@ -125,6 +126,12 @@ const busyStages: Stage[] = [
   "matching",
   "captions",
 ];
+
+function publishAlignmentDebug(value: unknown) {
+  if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+    Object.defineProperty(window, "__QURAN_ALIGNMENT_DEBUG__", { value, configurable: true });
+  }
+}
 export default function Home() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -206,6 +213,7 @@ export default function Home() {
   const savedSignature = useRef<string | null>(null);
   const cloudBaselineUpdatedAt = useRef<string | null>(null);
   const generation = useRef(0);
+  const alignmentDebug = useRef<unknown>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -736,18 +744,25 @@ export default function Home() {
       const next = recognitionToVerseAlignments(analysis.matches);
       const first = next[0];
       const last = next.at(-1)!;
+      const verseContent = Object.fromEntries(
+        getVerses(next[0].verseKey, next.at(-1)!.verseKey).map((verse) => [verse.verseKey, verse]),
+      );
       setAlignments(next);
       setSegments(
-        createCaptionSegments(
-          next,
-          Object.fromEntries(
-            getVerses(next[0].verseKey, next.at(-1)!.verseKey).map((verse) => [
-              verse.verseKey,
-              verse,
-            ]),
-          ),
-        ),
+        analysis.forcedAlignment
+          ? createCaptionSegmentsFromForcedAlignment(analysis.forcedAlignment, verseContent)
+          : createCaptionSegments(next, verseContent),
       );
+      alignmentDebug.current = {
+        source: { durationMs: result.audioAnalysis.durationMs, sampleRate: result.audioAnalysis.sampleRate },
+        transcriber: { model: "onnx-community/whisper-base_timestamped", backend: result.backend, timestampMode: result.timestampMode, runtimes: { modelLoadMs: result.modelLoadMs, transcriptionMs: result.transcriptionMs, totalMs: result.durationMs } },
+        passage: analysis.passage,
+        wordAlignment: analysis.forcedAlignment?.wordOccurrences ?? [],
+        verseTiming: analysis.forcedAlignment?.verseTimings ?? [],
+        pauses: analysis.forcedAlignment?.pauseCandidates ?? [],
+        displaySets: analysis.forcedAlignment?.captionSets ?? [],
+      };
+      publishAlignmentDebug(alignmentDebug.current);
       setSurah(first.surahNumber);
       setStartAyah(first.ayahNumber);
       setEndAyah(last.ayahNumber);
@@ -766,6 +781,10 @@ export default function Home() {
         );
       }
     }
+  }
+  async function copyAlignmentDebug() {
+    if (!alignmentDebug.current || typeof navigator === "undefined") return;
+    await navigator.clipboard.writeText(JSON.stringify(alignmentDebug.current, null, 2));
   }
   function clearVideo() {
     exportAbort.current?.abort();
@@ -1271,6 +1290,7 @@ export default function Home() {
         onEdgeUp={handleEdgeUp}
         onChangeFormat={changeFormat}
         onDetect={() => void detect()}
+        onCopyAlignmentDebug={() => { void copyAlignmentDebug(); }}
         onCorrectDetection={() => void correctDetection()}
         onToggleCorrection={() => setShowCorrection((value) => !value)}
         onClearVideo={clearVideo}

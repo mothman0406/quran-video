@@ -89,6 +89,7 @@ type EditorWorkspaceProps = {
   onEdgeUp: () => void;
   onChangeFormat: (preset: ProjectFormatPreset) => void;
   onDetect: () => void;
+  onCopyAlignmentDebug: () => void;
   onCorrectDetection: () => void;
   onToggleCorrection: () => void;
   onClearVideo: () => void;
@@ -149,7 +150,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     showCorrection, surah, startAyah, endAyah, entitlements, selectedFormatDefinition, timelineTooltip,
     onProjectNameChange, onVideoSelect, onLoadedMetadata, onVideoTimeUpdate, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown,
-    onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onChangeFormat, onDetect,
+    onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onChangeFormat, onDetect, onCopyAlignmentDebug,
     onCorrectDetection, onToggleCorrection, onClearVideo, onSaveProject, onSaveToAccount, onOpenProjects,
     onOpenCloudProjects, onSessionChange, onPlanChange, onDiscard, onNewProject, onExportOpen, onExport, onCancelExport, onDownloadExport,
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange,
@@ -182,6 +183,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
             <p className="editor-muted editor-truncate" title={videoFile.name}>{videoFile.name}</p>
             {videoMetadata && <p className="editor-meta-line">{formatDuration(videoMetadata.durationSeconds)} · {videoMetadata.width} × {videoMetadata.height}</p>}
             <button className="editor-button editor-button-primary editor-full-button" disabled={busy || !support?.supported} type="button" onClick={onDetect}>{stage === "complete" ? "Detect again" : "Detect Quran"}</button>
+            {process.env.NODE_ENV !== "production" && stage === "complete" && <button className="editor-text-button" type="button" onClick={onCopyAlignmentDebug}>Copy Alignment Debug</button>}
             {stage === "complete" && alignments.length > 0 && <button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onToggleCorrection}>Correct detection</button>}
             <button className="editor-text-button" type="button" onClick={onClearVideo}>Choose a different video</button>
           </> : <label className="editor-upload-mini"><span>↑</span><strong>Choose a video</strong><small>MP4, WebM, or browser-supported video</small><input accept="video/*" type="file" onChange={onVideoSelect} /></label>}

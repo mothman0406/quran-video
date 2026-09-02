@@ -335,3 +335,36 @@ test("bounds approximate candidate retrieval for the live-sized noisy transcript
   assert.deepEqual(result.map((item) => item.verseKey), ["93:1", "93:2", "93:3", "93:4", "93:5"]);
   assert.ok(elapsedMs < 1_500, `expected bounded search under 1500ms, received ${elapsedMs.toFixed(1)}ms`);
 });
+
+test("forced alignment preserves repeated local word occurrences and only makes local backward jumps", () => {
+  const corpus = [{ verseKey: "1:1", text: "الف باء جيم دال هاء واو زاي حاء طاء ياء كاف لام" }];
+  const sequence = ["الف", "باء", "جيم", "دال", "باء", "جيم", "دال", "هاء", "واو", "زاي", "حاء", "طاء", "ياء", "كاف", "لام"];
+  const words = sequence.map((text, index) => ({ text, startMs: index * 300, endMs: index * 300 + 220 }));
+  const analysis = analyzeTranscript([{ startMs: 0, endMs: 4_500, text: sequence.join(" "), words }], { corpus, minConfidence: 0.55 });
+  const forced = analysis.forcedAlignment;
+  assert.ok(forced);
+  assert.equal(forced!.wordOccurrences.filter((item) => item.canonicalWordIndex === 2).length, 2);
+  assert.ok(forced!.wordOccurrences.some((item) => item.canonicalWordIndex === 2 && item.occurrenceIndex === 2));
+  assert.ok(forced!.wordOccurrences.every((item, index, all) => index === 0 || item.globalWordIndex >= all[index - 1].globalWordIndex - 5));
+  assert.equal(forced!.verseTimings[0]?.firstCanonicalWordIndex, 1);
+  assert.equal(forced!.verseTimings[0]?.lastCanonicalWordIndex, 12);
+  assert.ok(forced!.captionSets.length >= 2, "long ayat are broken only on canonical word boundaries");
+});
+
+test("forced alignment keeps partial-ayah timing truthful and scores a text-associated pause", () => {
+  const corpus = [{ verseKey: "1:1", text: "الف باء جيم دال هاء واو" }];
+  const pcm = new Float32Array(3_000);
+  for (let index = 200; index < 780; index += 1) pcm[index] = 0.2;
+  for (let index = 1_120; index < 1_750; index += 1) pcm[index] = 0.2;
+  const analysis = analyzeTranscript([{
+    startMs: 200,
+    endMs: 1_750,
+    text: "باء جيم دال",
+    words: [{ text: "باء", startMs: 200, endMs: 450 }, { text: "جيم", startMs: 500, endMs: 780 }, { text: "دال", startMs: 1_120, endMs: 1_500 }],
+  }], { corpus, minConfidence: 0.55, audioAnalysis: analyzeMonoPcm(pcm, 1_000) });
+  const forced = analysis.forcedAlignment;
+  assert.ok(forced);
+  assert.equal(forced!.verseTimings[0]?.partialStart, true);
+  assert.equal(forced!.verseTimings[0]?.partialEnd, true);
+  assert.ok(forced!.pauseCandidates.some((item) => item.afterWordIndex === 3 && item.durationMs >= 80));
+});

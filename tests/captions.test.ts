@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, createCaptionSegmentsFromForcedAlignment, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -45,6 +45,21 @@ test("automatic display never splits long ayat; line wrapping is visual only", (
   const nineWords = "وَالضُّحَى وَاللَّيْلِ إِذَا سَجَى وَمَا وَدَّعَكَ رَبُّكَ وَمَا قَلَى";
   const balanced = createCaptionSegments([alignment], { "93:1": { ...content["93:1"], arabic: { ...content["93:1"].arabic, uthmani: nineWords } } }, 8);
   assert.deepEqual(balanced.map((segment) => segment.arabic.split(" ").length), [9]);
+});
+
+test("forced-alignment display sets retain canonical partial-word boundaries and pause display timing", () => {
+  const forced = {
+    canonicalPassage: [], wordOccurrences: [], verseTimings: [], pauseCandidates: [],
+    captionSets: [
+      { id: "93:1#1-3", verseKey: "93:1", canonicalStartWordIndex: 1, canonicalEndWordIndex: 3, startMs: 100, endMs: 850, cutReason: "acoustic-pause" },
+      { id: "93:1#4-7", verseKey: "93:1", canonicalStartWordIndex: 4, canonicalEndWordIndex: 7, startMs: 1_100, endMs: 1_700, cutReason: "visual-length" },
+    ],
+  } as const;
+  const segments = createCaptionSegmentsFromForcedAlignment(forced, content);
+  assert.deepEqual(segments.map((segment) => segment.arabic), ["وَالضُّحَى وَاللَّيْلِ إِذَا", "سَجَى وَمَا وَدَّعَكَ رَبُّكَ"]);
+  assert.equal(segments[0]?.startMs, 100);
+  assert.equal(segments[0]?.endMs, 1_100, "old text stays through the known pause");
+  assert.equal(segments[1]?.timingEvidence.start.source, "forced-alignment");
 });
 
 test("translation survives editor conversion and long-ayah splitting through the parent verse key", () => {
