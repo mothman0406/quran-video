@@ -1,7 +1,7 @@
 "use client";
 
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
-import { analyzeTranscript, createPrimaryTranscript, type RecognitionAnalysis, type RecognitionResult } from "@/lib/recognition/core";
+import { analyzeTranscript, createPrimaryTranscript, hafsVerses, type RecognitionAnalysis, type RecognitionResult } from "@/lib/recognition/core";
 import { createCaptionSegments, createCaptionSegmentsFromForcedAlignment, getActiveCaptionSegment, type CaptionSegment } from "@/lib/editor/captions";
 import { recognitionToVerseAlignments, type VerseAlignment } from "@/lib/editor/recognition";
 import { getVerses } from "@/lib/quran/local";
@@ -12,6 +12,7 @@ import {
   localWhisperTranscriber,
 } from "@/lib/recognition/local-whisper";
 import type { LocalTranscriptionResult, TranscriptionProgress } from "@/lib/recognition/transcriber";
+import { QURAN_CTC_SHADOW_MODEL, QURAN_CTC_SHADOW_MODEL_LICENSE, QURAN_CTC_SHADOW_REPOSITORY_MB, QURAN_CTC_SHADOW_RUNTIME } from "@/lib/recognition/local-ctc";
 
 function formatMilliseconds(value: number) {
   return `${(value / 1_000).toFixed(1)}s`;
@@ -103,6 +104,11 @@ export default function RecognitionSpikePage() {
           timingRecoveryAttempted: true,
         });
       }
+      if (nextAnalysis.matches.length && output.runCtcShadow) {
+        const keys = new Set(nextAnalysis.matches.map((match) => match.verseKey));
+        const ctcShadow = await output.runCtcShadow(hafsVerses.filter((verse) => keys.has(verse.verseKey)), nextAnalysis.matches);
+        nextAnalysis = { ...nextAnalysis, ctcShadow };
+      }
       setAnalysis(nextAnalysis);
       setMatches(nextAnalysis.matches);
       const nextAlignments = recognitionToVerseAlignments(nextAnalysis.matches);
@@ -143,6 +149,7 @@ export default function RecognitionSpikePage() {
         verseTiming: nextAnalysis.forcedAlignment?.verseTimings ?? [],
         pauses: nextAnalysis.forcedAlignment?.pauseCandidates ?? [],
         displaySets: nextAnalysis.forcedAlignment?.captionSets ?? [],
+        forcedAlignmentShadow: nextAnalysis.ctcShadow,
       };
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Local transcription failed.");
@@ -215,6 +222,7 @@ export default function RecognitionSpikePage() {
       actualPreviewActivations: previewActivations,
       rawAsr: result ? { chunks: result.chunks, timestampValidation: result.timestampValidation } : null,
       forcedAlignment: analysis?.forcedAlignment ?? null,
+      forcedAlignmentShadow: analysis?.ctcShadow ?? null,
     };
   }
   function timingReportText() {
@@ -231,6 +239,10 @@ export default function RecognitionSpikePage() {
       ...debug.verses.flatMap((verse) => ["", `VERSE ${verse.verseKey}`, `first aligned ASR evidence: ${value(verse.firstAlignedAsrEvidenceMs)}`, `alignment timestamp: ${value(verse.firstStrongAlignmentAnchorMs)}`, `PCM-refined start: ${value(verse.pcmLocalOnsetCandidateMs)}`, `VerseAlignment start: ${value(verse.verseAlignmentStartMs)}`, `CaptionSegment start: ${value(verse.captionSegmentStartMs)}`, `manual start: ${value(verse.manualStartMs)}`, `signed error: ${value(verse.signedErrorMs)}`]),
       "", "MANUAL MARKS", ...debug.manualGroundTruthMarks.map((mark) => `${mark.kind}: ${value(mark.timeMs)}`),
       "", "ACTIVE DISPLAY TRACE", ...debug.actualPreviewActivations.map((entry) => `${entry.verseKeys.join(", ")} activated at ${value(entry.timeMs)}`),
+      "", "FORCED ALIGNMENT SHADOW", `status: ${debug.forcedAlignmentShadow?.status ?? "not run"}`, `model: ${QURAN_CTC_SHADOW_MODEL}`, `license: ${QURAN_CTC_SHADOW_MODEL_LICENSE}`, `model size: repository ${QURAN_CTC_SHADOW_REPOSITORY_MB} MB; exact artifact recorded by download telemetry`, `runtime: ${QURAN_CTC_SHADOW_RUNTIME}`,
+      "", "WORD ALIGNMENT", ...(debug.forcedAlignmentShadow?.words.map((word) => `${word.verseKey} | ${word.canonicalWordIndex} | ${word.canonicalArabic} | ${value(word.startMs)} | ${value(word.endMs)} | ${word.confidence}`) ?? []),
+      "", "VERSE COMPARISON", ...matches.map((match) => { const ctc = debug.forcedAlignmentShadow?.verses.find((verse) => verse.verseKey === match.verseKey); return `${match.verseKey} | ${value(match.startMs)} | ${value(ctc?.startMs)} | ${ctc ? `${ctc.startMs - match.startMs} ms` : "—"} | ${value(match.endMs)} | ${value(ctc?.endMs)} | ${ctc ? `${ctc.endMs - match.endMs} ms` : "—"}`; }),
+      "", "CTC PAUSES", ...(debug.forcedAlignmentShadow?.pauses.map((pause) => `${value(pause.startMs)}–${value(pause.endMs)} | before ${pause.canonicalWordBefore} | after ${pause.canonicalWordAfter} | ayah boundary: ${pause.isAyahBoundary ? "yes" : "no"}`) ?? []),
     ].join("\n");
   }
   async function copyTimingReport() {

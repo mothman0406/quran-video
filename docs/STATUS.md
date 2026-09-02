@@ -1,5 +1,31 @@
 # Status
 
+## Current milestone: CTC forced-alignment shadow prototype
+
+Complete:
+
+- Added a browser-local, lazy Quran CTC shadow runner after Whisper passage
+  identification and VAD. It uses the complete canonical ayah range as the
+  only alignment target; no CTC output changes captions, timeline intervals,
+  or manual timing.
+- Added deterministic CTC Viterbi alignment with explicit tie breaking,
+  canonical word timing, exact non-final ayah handoffs, VAD-constrained final
+  completion, pause-to-known-word association, and bounded repeat arcs that
+  keep repeats separate from canonical display content.
+- Added development Copy Alignment Debug fields for the model/license/runtime,
+  every CTC word, verse deltas against current timing, pauses, and runtime
+  timings; the editor shows a development-only completion indication.
+- Documented commercial-license model research and protected behavior in
+  `docs/CTC_MODEL_RESEARCH.md` and `docs/REGRESSION_INVARIANTS.md`.
+- Added deterministic CTC alignment regressions and a Node-only Viterbi
+  benchmark. Browser artifact download/load/inference remains unmeasured here
+  because the selected model artifact returned a Hub resolver 401.
+
+Verification pending in a browser with an accessible model artifact: compare
+the real 6:76 → 6:77 recording, including the last CTC word of 6:76, first
+CTC word of 6:77, their pause, and delta versus the preserved production
+caption timing.
+
 ## Current milestone: Refine Quran ayah boundaries
 
 Complete:

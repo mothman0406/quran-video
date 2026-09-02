@@ -63,6 +63,7 @@ type EditorWorkspaceProps = {
   exportDiagnostics: LocalExportDiagnostics | null;
   errorMessage: string | null;
   timingWarning: string | null;
+  ctcShadowCompleted: boolean;
   timelineTooltip: string | null;
   showCorrection: boolean;
   surah: number;
@@ -146,7 +147,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
     selectedObject, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, showVerseNumber, showSafeArea, projectName, dirty, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
-    exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage, timingWarning,
+    exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage, timingWarning, ctcShadowCompleted,
     showCorrection, surah, startAyah, endAyah, entitlements, selectedFormatDefinition, timelineTooltip,
     onProjectNameChange, onVideoSelect, onLoadedMetadata, onVideoTimeUpdate, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown,
@@ -226,6 +227,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           {busy && <div className="editor-notice"><strong>{stage === "detecting-speech" ? "Checking local speech" : stage === "loading-model" ? "Loading recognition model" : stage === "transcribing" ? "Transcribing locally" : stage === "matching" ? "Matching Quran" : "Preparing captions"}</strong><span>Audio stays in this browser{progress?.total ? ` · ${progress.completed ?? 0}/${progress.total} chunks` : ""}.</span></div>}
           {stage === "complete" && alignments.length > 0 && <div className="editor-notice editor-notice-success"><strong>Detected Surah {alignments[0].surahNumber} · ayat {alignments[0].ayahNumber}–{alignments.at(-1)?.ayahNumber}</strong><span>{Math.round((alignments.reduce((sum, item) => sum + item.confidence, 0) / alignments.length) * 100)}% overall confidence</span></div>}
           {timingWarning && <div className="editor-notice">{timingWarning}</div>}
+          {process.env.NODE_ENV !== "production" && ctcShadowCompleted && <div className="editor-notice editor-notice-success"><strong>CTC forced-alignment shadow completed</strong><span>Debug comparison is available; caption timing remains unchanged.</span></div>}
           {showCorrection && <div className="editor-correction"><SectionLabel>Correct detection</SectionLabel><div><select aria-label="Surah" className="editor-select" value={surah}><option value={surah}>Surah {surah}</option></select><input aria-label="First ayah" type="number" value={startAyah} readOnly /><input aria-label="Last ayah" type="number" value={endAyah} readOnly /><button className="editor-button editor-button-primary" type="button" onClick={onCorrectDetection}>Use range</button></div></div>}
           {errorMessage && <div className="editor-notice editor-notice-error">{errorMessage}</div>}
           {exportState && <div className="editor-notice"><strong>{exportState === "complete" ? "Export complete" : exportState === "error" ? "Export stopped" : `Exporting · ${exportState.phase}`}</strong><span>{exportError ?? "Source media is processed locally."}</span></div>}

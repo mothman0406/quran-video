@@ -3,6 +3,7 @@ import { normalizeQuranRecitation, quranRecognitionUnits, type QuranRecognitionU
 import type { AudioAnalysis } from "./audio-analysis.ts";
 import { refineFirstAyahOnsetWithEnergy, refineTransitionWithEnergy, refineWordEdgeWithEnergy } from "./audio-analysis.ts";
 import { speechRegionContaining, type VadSpeechRegion } from "./speech-regions.ts";
+import type { CtcForcedAlignmentResult } from "./ctc-forced-alignment.ts";
 
 export type TranscriptChunk = {
   startMs: number;
@@ -169,6 +170,8 @@ export type RecognitionAnalysis = {
   /** Detailed, canonical-first alignment. This deliberately remains separate
    * from the legacy VerseAlignment-shaped matches used by saved projects. */
   forcedAlignment: ForcedAlignment | null;
+  /** Browser-local acoustic CTC proposal. It is debug-only in this milestone. */
+  ctcShadow: CtcForcedAlignmentResult | null;
   /** A known-passage local ASR pass is required before a fallback timing
    * result may be presented as recovered timing. */
   timingRecoveryPlan: TimingRecoveryPlan | null;
@@ -1807,7 +1810,7 @@ export function analyzeTranscript(
     ? input
     : createPrimaryTranscript(input, options.timestampMode ?? (input.some((chunk) => chunk.words?.length) ? "word" : "chunk-fallback"));
   const { diagnostics, passage, best } = identifyPrimaryTranscript(primary, options);
-  if (!best) return { matches: [], diagnostics, passage, timingTrace: null, forcedAlignment: null, timingRecoveryPlan: null };
+  if (!best) return { matches: [], diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, timingRecoveryPlan: null };
   const verses = options.corpus ?? hafsVerses;
   const timingChunks = [...primary.chunks, ...(options.timingEvidenceChunks ?? [])]
     .sort((left, right) => left.startMs - right.startMs);
@@ -1820,6 +1823,7 @@ export function analyzeTranscript(
     passage,
     timingTrace: reconstructed.timingTrace,
     forcedAlignment,
+    ctcShadow: null,
     timingRecoveryPlan: timingRecoveryPlan(forcedAlignment, reconstructed.matches, options.audioAnalysis, options.speechRegions, primary.timestampMode),
   };
 }

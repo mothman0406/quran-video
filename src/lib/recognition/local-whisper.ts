@@ -6,6 +6,7 @@ import type {
 } from "./transcriber";
 import { analyzeMonoPcm } from "./audio-analysis.ts";
 import { detectLocalSpeechRegions } from "./vad.ts";
+import { createCtcShadowRunner } from "./local-ctc.ts";
 import type { TranscriptChunk } from "./core";
 import type { TimestampValidationDiagnostics } from "./transcriber";
 
@@ -353,6 +354,7 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       audioAnalysis,
       speechRegions,
       recoverTiming,
+      runCtcShadow: createCtcShadowRunner(audio, speechRegions),
     };
   },
 };

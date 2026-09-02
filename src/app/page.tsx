@@ -10,7 +10,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { analyzeTranscript, createPrimaryTranscript, hafsSurahs } from "@/lib/recognition/core";
+import { analyzeTranscript, createPrimaryTranscript, hafsSurahs, hafsVerses } from "@/lib/recognition/core";
+import { QURAN_CTC_SHADOW_MODEL, QURAN_CTC_SHADOW_MODEL_LICENSE, QURAN_CTC_SHADOW_REPOSITORY_MB, QURAN_CTC_SHADOW_RUNTIME } from "@/lib/recognition/local-ctc";
 import type { TranscriptionProgress } from "@/lib/recognition/transcriber";
 import {
   recognitionToVerseAlignments,
@@ -144,6 +145,7 @@ export default function Home() {
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [timingWarning, setTimingWarning] = useState<string | null>(null);
+  const [ctcShadowCompleted, setCtcShadowCompleted] = useState(false);
   const [support, setSupport] = useState<{
     supported: boolean;
     reason: string;
@@ -419,6 +421,7 @@ export default function Home() {
     setVideoUrl(null);
     setVideoMetadata(null);
     setAlignments([]);
+    setCtcShadowCompleted(false);
     setSegments([]);
     setContent({});
     setCurrentTimeMs(0);
@@ -719,6 +722,7 @@ export default function Home() {
     setErrorMessage(null);
     setProgress(null);
     setAlignments([]);
+    setCtcShadowCompleted(false);
     setSegments([]);
     setContent({});
     setStage("preparing");
@@ -755,6 +759,12 @@ export default function Home() {
           timingEvidenceChunks: recovery.chunks,
           timingRecoveryAttempted: true,
         });
+      }
+      if (analysis.matches.length && result.runCtcShadow) {
+        const keys = new Set(analysis.matches.map((match) => match.verseKey));
+        const ctcShadow = await result.runCtcShadow(hafsVerses.filter((verse) => keys.has(verse.verseKey)), analysis.matches);
+        analysis = { ...analysis, ctcShadow };
+        setCtcShadowCompleted(ctcShadow.status === "complete");
       }
       if (result.timestampMode === "chunk-fallback") {
         setTimingWarning("Whisper word timestamps were unavailable. Caption timing was recovered with bounded local ASR windows and remains evidence-graded for timeline adjustment.");
@@ -824,6 +834,27 @@ export default function Home() {
         finalAyahEnd: analysis.timingTrace?.finalAyahEnd ?? null,
         pauses: analysis.forcedAlignment?.pauseCandidates ?? [],
         displaySets: analysis.forcedAlignment?.captionSets ?? [],
+        forcedAlignmentShadow: {
+          model: QURAN_CTC_SHADOW_MODEL,
+          license: QURAN_CTC_SHADOW_MODEL_LICENSE,
+          modelSize: `repository ${QURAN_CTC_SHADOW_REPOSITORY_MB} MB; exact int8 artifact size is captured from browser download telemetry`,
+          runtime: QURAN_CTC_SHADOW_RUNTIME,
+          result: analysis.ctcShadow,
+          wordAlignment: analysis.ctcShadow?.words ?? [],
+          verseComparison: next.map((current) => {
+            const ctc = analysis.ctcShadow?.verses.find((verse) => verse.verseKey === current.verseKey);
+            return {
+              verse: current.verseKey,
+              currentStartMs: current.startMs,
+              ctcStartMs: ctc?.startMs ?? null,
+              startDeltaMs: ctc ? ctc.startMs - current.startMs : null,
+              currentEndMs: current.endMs,
+              ctcEndMs: ctc?.endMs ?? null,
+              endDeltaMs: ctc ? ctc.endMs - current.endMs : null,
+            };
+          }),
+          pauses: analysis.ctcShadow?.pauses ?? [],
+        },
       };
       publishAlignmentDebug(alignmentDebug.current);
       setSurah(first.surahNumber);
@@ -857,6 +888,7 @@ export default function Home() {
     setVideoUrl(null);
     setVideoMetadata(null);
     setAlignments([]);
+    setCtcShadowCompleted(false);
     setSegments([]);
     setContent({});
     setProgress(null);
@@ -1327,6 +1359,7 @@ export default function Home() {
         exportDiagnostics={exportDiagnostics}
         errorMessage={errorMessage}
         timingWarning={timingWarning}
+        ctcShadowCompleted={ctcShadowCompleted}
         timelineTooltip={timelineTooltip}
         showCorrection={showCorrection}
         surah={surah}

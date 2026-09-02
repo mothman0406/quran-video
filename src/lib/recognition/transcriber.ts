@@ -1,6 +1,7 @@
 import type { TimingRecoveryPlan, TranscriptChunk } from "./core";
 import type { AudioAnalysis } from "./audio-analysis.ts";
 import type { VadSpeechRegion } from "./speech-regions.ts";
+import type { CtcShadowRunner } from "./local-ctc.ts";
 
 /** The boundary used by recognition clients; implementations never receive a server URL. */
 export type RecognitionTranscriber = {
@@ -39,6 +40,8 @@ export type LocalTranscriptionResult = {
     plan: TimingRecoveryPlan,
     onProgress?: (progress: TranscriptionProgress) => void,
   ) => Promise<LocalTimingRecoveryResult>;
+  /** Shadow-only known-passage CTC timing. It never mutates caption timing. */
+  runCtcShadow?: CtcShadowRunner;
 };
 
 export type LocalTimingRecoveryResult = {
