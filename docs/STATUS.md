@@ -1,5 +1,15 @@
 # Status
 
+## Current milestone: Preserve complete ayah captions
+
+Complete:
+
+- Automatic forced-alignment display now emits one complete canonical ayah caption per detected ayah; future intra-ayah split plans remain available but dormant.
+- Caption timing continues to use detected verse onset, so leading silence has no active caption and the first caption activates exactly at its detected `startMs`.
+- Added regressions for leading silence, complete first/last/internal canonical words, and ASR alignment gaps.
+
+Verification: `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check`.
+
 ## Current milestone: Recover complete Quran verse timing
 
 Complete:

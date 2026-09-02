@@ -405,30 +405,35 @@ export function createCaptionSegmentsFromForcedAlignment(
   alignment: ForcedAlignment,
   content: Readonly<Record<string, QuranVerseContent | undefined>>,
 ): CaptionSegment[] {
-  const generated = alignment.captionSets.flatMap((set) => {
-    const verse = content[set.verseKey];
+  // Keep future word-boundary split evidence in the plan, but keep automatic
+  // display verse-level for now. ASR support and planned ranges must never
+  // decide which canonical Quran words are visible.
+  const verseSets = new Map<string, Array<ForcedAlignment["captionSets"][number]>>();
+  alignment.captionSets.forEach((set) => {
+    const sets = verseSets.get(set.verseKey) ?? [];
+    sets.push(set);
+    verseSets.set(set.verseKey, sets);
+  });
+  const generated = [...verseSets].flatMap(([verseKey, sets]) => {
+    const verse = content[verseKey];
     const verseWords = words(verse ? quranDisplayText(verse) : "");
-    const selectedWords = verseWords.slice(set.canonicalStartWordIndex - 1, set.canonicalEndWordIndex);
-    if (!selectedWords.length) return [];
-    // Caption text is always an inclusive canonical range. This makes a gap
-    // such as words 1, 2, 4, 7 impossible even if ASR skipped those words.
-    if (selectedWords.length !== set.canonicalEndWordIndex - set.canonicalStartWordIndex + 1) {
-      throw new Error(`Caption set ${set.id} has a non-contiguous canonical word range.`);
-    }
+    if (!verseWords.length || !sets.length) return [];
+    const firstSet = sets[0];
+    const lastSet = sets.at(-1)!;
     return [{
-      id: set.id,
-      verseKeys: [set.verseKey],
-      startMs: set.startMs,
-      endMs: set.endMs,
-      arabic: selectedWords.join(" "),
+      id: `${verseKey}#1`,
+      verseKeys: [verseKey],
+      startMs: firstSet.startMs,
+      endMs: lastSet.endMs,
+      arabic: verseWords.join(" "),
       translation: verse?.translation ?? null,
       transliteration: verse?.transliteration ?? null,
-      wordStart: set.canonicalStartWordIndex - 1,
-      wordEnd: set.canonicalEndWordIndex,
-      wordCount: selectedWords.length,
+      wordStart: 0,
+      wordEnd: verseWords.length,
+      wordCount: verseWords.length,
       timingEvidence: {
-        start: { timestampMs: set.startMs, source: "forced-alignment" as const },
-        end: { timestampMs: set.endMs, source: "forced-alignment" as const },
+        start: { timestampMs: firstSet.startMs, source: "forced-alignment" as const },
+        end: { timestampMs: lastSet.endMs, source: "forced-alignment" as const },
         derived: false,
       },
     }];

@@ -47,7 +47,7 @@ test("automatic display never splits long ayat; line wrapping is visual only", (
   assert.deepEqual(balanced.map((segment) => segment.arabic.split(" ").length), [9]);
 });
 
-test("forced-alignment display sets retain canonical partial-word boundaries and pause display timing", () => {
+test("forced-alignment display collapses planned intra-ayah ranges into one complete canonical ayah", () => {
   const forced = {
     canonicalPassage: [], wordOccurrences: [], verseTimings: [], pauseCandidates: [],
     captionSets: [
@@ -56,10 +56,39 @@ test("forced-alignment display sets retain canonical partial-word boundaries and
     ],
   } as const;
   const segments = createCaptionSegmentsFromForcedAlignment(forced, content);
-  assert.deepEqual(segments.map((segment) => segment.arabic), ["وَالضُّحَى وَاللَّيْلِ إِذَا", "سَجَى وَمَا وَدَّعَكَ رَبُّكَ"]);
+  assert.equal(segments.length, 1);
+  assert.equal(segments[0]?.arabic, content["93:1"].arabic.uthmani);
   assert.equal(segments[0]?.startMs, 100);
-  assert.equal(segments[0]?.endMs, 1_100, "old text stays through the known pause");
-  assert.equal(segments[1]?.timingEvidence.start.source, "forced-alignment");
+  assert.equal(segments[0]?.endMs, 1_700, "the verse remains active through all planned ranges");
+  assert.equal(segments[0]?.timingEvidence.start.source, "forced-alignment");
+});
+
+test("first caption is inactive during leading silence and activates exactly at detected onset", () => {
+  const detectedStartMs = 9_500;
+  const detected = { ...alignment, startMs: detectedStartMs, endMs: 12_000, timingEvidence: {
+    ...alignment.timingEvidence,
+    start: { timestampMs: detectedStartMs, source: "word-timestamp" as const },
+    end: { timestampMs: 12_000, source: "word-timestamp" as const },
+  } };
+  const segments = createCaptionSegments([detected], content);
+  assert.equal(segments[0]?.startMs, detectedStartMs);
+  assert.equal(getActiveCaptionSegment(segments, detectedStartMs - 1), null);
+  assert.equal(captionVisualStatesAtTime(segments, detectedStartMs - 1).length, 0);
+  assert.equal(getActiveCaptionSegment(segments, detectedStartMs)?.id, segments[0]?.id);
+  assert.equal(captionVisualStatesAtTime(segments, detectedStartMs)[0]?.segment.id, segments[0]?.id);
+});
+
+test("ASR alignment gaps never remove canonical words from an ayah caption", () => {
+  const forced = {
+    canonicalPassage: [], wordOccurrences: [], verseTimings: [], pauseCandidates: [],
+    captionSets: [{ id: "93:1#2-6", verseKey: "93:1", canonicalStartWordIndex: 2, canonicalEndWordIndex: 6, startMs: 100, endMs: 1_100, cutReason: "partial-ayah" }],
+  } as const;
+  const [segment] = createCaptionSegmentsFromForcedAlignment(forced, content);
+  const canonicalWords = content["93:1"].arabic.uthmani.split(/\s+/);
+  assert.equal(segment?.arabic, canonicalWords.join(" "));
+  assert.equal(segment?.arabic.split(/\s+/)[0], canonicalWords[0]);
+  assert.equal(segment?.arabic.split(/\s+/).at(-1), canonicalWords.at(-1));
+  assert.equal(segment?.wordCount, canonicalWords.length);
 });
 
 test("translation survives editor conversion and long-ayah splitting through the parent verse key", () => {
