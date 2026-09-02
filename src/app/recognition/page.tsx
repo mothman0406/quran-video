@@ -88,7 +88,18 @@ export default function RecognitionSpikePage() {
     try {
       const output = await localWhisperTranscriber.transcribe(file, setProgress);
       setResult(output);
-      const nextAnalysis = analyzeTranscript(output.chunks, { audioAnalysis: output.audioAnalysis });
+      let nextAnalysis = analyzeTranscript(output.chunks, {
+        audioAnalysis: output.audioAnalysis,
+        timestampMode: output.timestampMode,
+      });
+      if (nextAnalysis.timingRecoveryPlan?.required && output.recoverTiming) {
+        const recovery = await output.recoverTiming(nextAnalysis.timingRecoveryPlan, setProgress);
+        nextAnalysis = analyzeTranscript([...output.chunks, ...recovery.chunks], {
+          audioAnalysis: output.audioAnalysis,
+          timestampMode: output.timestampMode,
+          timingRecoveryAttempted: true,
+        });
+      }
       setAnalysis(nextAnalysis);
       setMatches(nextAnalysis.matches);
       const nextAlignments = recognitionToVerseAlignments(nextAnalysis.matches);
@@ -99,6 +110,14 @@ export default function RecognitionSpikePage() {
         source: { durationMs: output.audioAnalysis.durationMs, sampleRate: output.audioAnalysis.sampleRate },
         transcriber: { model: LOCAL_WHISPER_MODEL, backend: output.backend, timestampMode: output.timestampMode, runtimes: { modelLoadMs: output.modelLoadMs, transcriptionMs: output.transcriptionMs, totalMs: output.durationMs } },
         passage: nextAnalysis.passage,
+        timestampQuality: {
+          wordTimestampsAvailable: output.timestampMode === "word",
+          microAsrFallbackUsed: Boolean(nextAnalysis.forcedAlignment?.verseTimings.some((item) => item.recoveryAttempted)),
+          recoveryPlan: nextAnalysis.timingRecoveryPlan,
+        },
+        directWordCoverageByVerse: nextAnalysis.forcedAlignment?.verseTimings.map((item) => ({ verseKey: item.verseKey, direct: item.directWordCount, recovered: item.recoveredWordCount, total: item.lastCanonicalWordIndex })) ?? [],
+        firstOnsetTrace: nextAnalysis.timingTrace,
+        canonicalWordAlignment: nextAnalysis.forcedAlignment?.canonicalWordAlignments ?? [],
         wordAlignment: nextAnalysis.forcedAlignment?.wordOccurrences ?? [],
         verseTiming: nextAnalysis.forcedAlignment?.verseTimings ?? [],
         pauses: nextAnalysis.forcedAlignment?.pauseCandidates ?? [],
@@ -150,7 +169,13 @@ export default function RecognitionSpikePage() {
     return {
       source: { durationMs: result?.durationMs ?? durationMs },
       transcriber: result ? { model: LOCAL_WHISPER_MODEL, backend: result.backend, timestampMode: result.timestampMode } : null,
+      timestampQuality: {
+        wordTimestampsAvailable: result?.timestampMode === "word",
+        microAsrFallbackUsed: Boolean(analysis?.forcedAlignment?.verseTimings.some((item) => item.recoveryAttempted)),
+      },
       detectedPassage: { canonicalSpan: analysis?.passage.canonicalSpan, verseRange: matches.map((match) => match.verseKey) },
+      directWordCoverageByVerse: analysis?.forcedAlignment?.verseTimings.map((item) => ({ verseKey: item.verseKey, direct: item.directWordCount, recovered: item.recoveredWordCount, total: item.lastCanonicalWordIndex, recoveryAttempted: item.recoveryAttempted })) ?? [],
+      recoveryPlan: analysis?.timingRecoveryPlan ?? null,
       firstStartTrace: analysis?.timingTrace,
       verses: matches.map((match) => {
         const segment = segmentByVerse.get(match.verseKey);
@@ -178,6 +203,8 @@ export default function RecognitionSpikePage() {
     return [
       "SOURCE", `duration: ${value(debug.source.durationMs)}`,
       "", "TRANSCRIBER", `model: ${debug.transcriber?.model ?? "—"}`, `backend: ${debug.transcriber?.backend ?? "—"}`, `timestamp mode: ${debug.transcriber?.timestampMode ?? "—"}`,
+      "", "TIMESTAMP QUALITY", `word timestamps available: ${debug.timestampQuality.wordTimestampsAvailable ? "yes" : "no"}`, `micro-ASR fallback used: ${debug.timestampQuality.microAsrFallbackUsed ? "yes" : "no"}`,
+      "", "DIRECT WORD COVERAGE BY VERSE", ...debug.directWordCoverageByVerse.map((item) => `${item.verseKey}: ${item.direct}/${item.total} direct; ${item.recovered}/${item.total} recovered; recovery attempted: ${item.recoveryAttempted ? "yes" : "no"}`),
       "", "DETECTED PASSAGE", `verse range: ${debug.detectedPassage.verseRange.join("–") || "—"}`, `canonical word span: ${debug.detectedPassage.canonicalSpan ? `${debug.detectedPassage.canonicalSpan.firstVerseKey} word ${debug.detectedPassage.canonicalSpan.firstWordIndex} → ${debug.detectedPassage.canonicalSpan.lastVerseKey} word ${debug.detectedPassage.canonicalSpan.lastWordIndex}` : "—"}`,
       "", "FIRST START TRACE", `earliest audio activity candidate: ${value(first?.earliestAudioActivityCandidateMs)}`, `first ASR chunk start: ${value(first?.firstAsrChunkStartMs)}`, `first ASR timestamped word: ${value(first?.firstAsrTimestampedWordMs)}`, `first ASR word aligned to detected Quran: ${value(first?.firstAsrWordAlignedToDetectedQuranMs)}`, `first canonical Quran word supported: ${first?.firstCanonicalQuranWordSupported ?? "—"}`, `first strong alignment anchor: ${value(first?.firstStrongAlignmentAnchorMs)}`, `PCM local onset candidate: ${value(first?.pcmLocalOnsetCandidateMs)}`, `raw VerseAlignment start: ${value(first?.rawVerseAlignmentStartMs)}`, `generated CaptionSegment start: ${value(debug.verses[0]?.captionSegmentStartMs)}`,
       ...debug.verses.flatMap((verse) => ["", `VERSE ${verse.verseKey}`, `first aligned ASR evidence: ${value(verse.firstAlignedAsrEvidenceMs)}`, `alignment timestamp: ${value(verse.firstStrongAlignmentAnchorMs)}`, `PCM-refined start: ${value(verse.pcmLocalOnsetCandidateMs)}`, `VerseAlignment start: ${value(verse.verseAlignmentStartMs)}`, `CaptionSegment start: ${value(verse.captionSegmentStartMs)}`, `manual start: ${value(verse.manualStartMs)}`, `signed error: ${value(verse.signedErrorMs)}`]),

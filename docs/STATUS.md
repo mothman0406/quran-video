@@ -1,5 +1,19 @@
 # Status
 
+## Current milestone: Recover complete Quran verse timing
+
+Complete:
+
+- Corrected the fallback architecture so canonical ayat and their words are retained independently of Whisper observations. `CanonicalWordAlignment` now represents every word in the selected full-ayah range; direct ASR, bounded micro-ASR recovery, PCM refinement, interpolation, coarse chunk timing, and unknown timing are explicit evidence classes.
+- Stopped distributing a coarse Whisper chunk across individual words. `chunk-fallback` text remains useful for passage identity, but cannot create direct word anchors or precise-looking word timing.
+- Added a second local timing pass after passage selection. It uses detected speech regions and bounded overlapping 8-second PCM windows, scores the known passage again, targets ayat with no direct anchors, and preserves absolute source timestamps. A 6:75-style ayah between anchored neighbours is searched before interpolation.
+- Made first/last ayah boundaries conservative: missing ASR words alone never create a partial ayah. Partial status requires direct timing plus an acoustically insufficient speech edge for the omitted canonical words.
+- Automatic output now creates one full canonical `CaptionSegment` per ayah. The internal pause/splitting evidence remains available, while direct display generation checks that every canonical range is contiguous and segment midpoint activation is regression-tested.
+- Updated Copy Alignment Debug and the development timing report with timestamp quality, micro-ASR/recovery state, direct and recovered coverage by ayah, verse evidence, canonical alignments, and first-onset trace.
+- Added a structural regression for the observed fallback failure: early coarse text/noise, missed first two words, internal holes, zero first-pass 6:75 anchors, later strong evidence, local 6:75 recovery, full canonical display, and verified later onset.
+
+Verification: targeted recognition/caption/local-Whisper tests, full `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. Browser validation remains required with the real 6:74–77 recording, especially to calibrate micro-ASR windows on noisy audio.
+
 ## Current milestone: Accuracy-first Quran forced word alignment
 
 Complete:

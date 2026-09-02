@@ -732,11 +732,27 @@ export default function Home() {
         },
       );
       if (job !== generation.current) return;
-      if (result.timestampMode === "chunk-fallback") {
-        setTimingWarning("Word timing was unavailable for this recording, so caption timing is approximate. You can adjust it in the timeline.");
-      }
       setStage("matching");
-      const analysis = analyzeTranscript(result.chunks, { audioAnalysis: result.audioAnalysis });
+      let analysis = analyzeTranscript(result.chunks, {
+        audioAnalysis: result.audioAnalysis,
+        timestampMode: result.timestampMode,
+      });
+      if (analysis.timingRecoveryPlan?.required && result.recoverTiming) {
+        setStage("transcribing");
+        const recovery = await result.recoverTiming(analysis.timingRecoveryPlan, (next) => {
+          if (job !== generation.current) return;
+          setProgress(next);
+        });
+        if (job !== generation.current) return;
+        analysis = analyzeTranscript([...result.chunks, ...recovery.chunks], {
+          audioAnalysis: result.audioAnalysis,
+          timestampMode: result.timestampMode,
+          timingRecoveryAttempted: true,
+        });
+      }
+      if (result.timestampMode === "chunk-fallback") {
+        setTimingWarning("Whisper word timestamps were unavailable. Caption timing was recovered with bounded local ASR windows and remains evidence-graded for timeline adjustment.");
+      }
       if (analysis.matches.length === 0)
         throw new Error(
           "No confident Quran passage was detected. You can try again or correct it manually.",
@@ -757,6 +773,14 @@ export default function Home() {
         source: { durationMs: result.audioAnalysis.durationMs, sampleRate: result.audioAnalysis.sampleRate },
         transcriber: { model: "onnx-community/whisper-base_timestamped", backend: result.backend, timestampMode: result.timestampMode, runtimes: { modelLoadMs: result.modelLoadMs, transcriptionMs: result.transcriptionMs, totalMs: result.durationMs } },
         passage: analysis.passage,
+        timestampQuality: {
+          wordTimestampsAvailable: result.timestampMode === "word",
+          microAsrFallbackUsed: Boolean(analysis.forcedAlignment?.verseTimings.some((item) => item.recoveryAttempted)),
+          recoveryPlan: analysis.timingRecoveryPlan,
+        },
+        directWordCoverageByVerse: analysis.forcedAlignment?.verseTimings.map((item) => ({ verseKey: item.verseKey, direct: item.directWordCount, recovered: item.recoveredWordCount, total: item.lastCanonicalWordIndex })) ?? [],
+        firstOnsetTrace: analysis.timingTrace,
+        canonicalWordAlignment: analysis.forcedAlignment?.canonicalWordAlignments ?? [],
         wordAlignment: analysis.forcedAlignment?.wordOccurrences ?? [],
         verseTiming: analysis.forcedAlignment?.verseTimings ?? [],
         pauses: analysis.forcedAlignment?.pauseCandidates ?? [],

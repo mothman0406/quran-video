@@ -126,7 +126,7 @@ test("reconstructs a contiguous passage and aligns ayah timing across mid-ayah b
   assert.ok(v76.startMs <= 33_000 && v76.endMs >= 43_000, "the 0:38 breath remains inside 6:76");
   assert.ok(v74.endMs <= v75.startMs && v75.endMs <= v76.startMs && v76.endMs <= v77.startMs);
   assert.ok(v74.endMs - v74.startMs !== v77.endMs - v77.startMs, "ayah timing must not be evenly distributed");
-  assert.equal(v74.timing.start.source, "chunk-interpolated");
+  assert.equal(v74.timing.start.source, "chunk-coarse");
   assert.ok(v75.timing.matchedText.length > 0, "weak interior text should contribute to timing");
 });
 
@@ -163,8 +163,8 @@ test("reports exact partial canonical boundaries without claiming unrecorded aya
   assert.equal(analysis.passage.canonicalSpan?.lastWordIndex, 10);
   assert.equal(analysis.passage.canonicalSpan?.firstBoundary, "mid-verse");
   assert.equal(analysis.passage.canonicalSpan?.lastBoundary, "mid-verse");
-  assert.equal(analysis.matches[0]?.wordSupport.canonicalStartWordIndex, 4);
-  assert.equal(analysis.matches.at(-1)?.wordSupport.canonicalEndWordIndex, 10);
+  assert.equal(analysis.matches[0]?.wordSupport.canonicalStartWordIndex, 1);
+  assert.equal(analysis.matches.at(-1)?.wordSupport.canonicalEndWordIndex, canonicalWords("6:77").length);
 });
 
 test("does not force genuine unrelated speech into the preceding Quran boundary", () => {
@@ -270,8 +270,8 @@ test("refines only the expected text boundary with a local PCM energy gap", () =
   const [first, second] = analysis.matches;
   assert.equal(first?.endMs, 750);
   assert.equal(second?.startMs, 1_050);
-  assert.equal(first?.timing.end.source, "word-audio-refined");
-  assert.equal(second?.timing.start.source, "word-audio-refined");
+  assert.equal(first?.timing.end.source, "pcm-refined");
+  assert.equal(second?.timing.start.source, "pcm-refined");
   assert.ok(first!.endMs < second!.startMs, "a real ayah pause remains a caption gap");
 });
 
@@ -348,7 +348,8 @@ test("forced alignment preserves repeated local word occurrences and only makes 
   assert.ok(forced!.wordOccurrences.every((item, index, all) => index === 0 || item.globalWordIndex >= all[index - 1].globalWordIndex - 5));
   assert.equal(forced!.verseTimings[0]?.firstCanonicalWordIndex, 1);
   assert.equal(forced!.verseTimings[0]?.lastCanonicalWordIndex, 12);
-  assert.ok(forced!.captionSets.length >= 2, "long ayat are broken only on canonical word boundaries");
+  assert.equal(forced!.captionSets.length, 1, "automatic output remains one complete ayah");
+  assert.deepEqual(forced!.captionSets[0] && [forced!.captionSets[0].canonicalStartWordIndex, forced!.captionSets[0].canonicalEndWordIndex], [1, 12]);
 });
 
 test("forced alignment keeps partial-ayah timing truthful and scores a text-associated pause", () => {
@@ -367,4 +368,63 @@ test("forced alignment keeps partial-ayah timing truthful and scores a text-asso
   assert.equal(forced!.verseTimings[0]?.partialStart, true);
   assert.equal(forced!.verseTimings[0]?.partialEnd, true);
   assert.ok(forced!.pauseCandidates.some((item) => item.afterWordIndex === 3 && item.durationMs >= 80));
+});
+
+test("chunk fallback retains complete canonical ayat and recovers a missing middle verse locally", () => {
+  const corpus = [
+    { verseKey: "6:74", text: "الف باء جيم دال هاء واو زاي حاء طاء ياء كاف لام ميم نون" },
+    { verseKey: "6:75", text: "سين عين فاء صاد قاف راء شين تاء ثاء" },
+    { verseKey: "6:76", text: "خاء ذال ضاد ظاء غين ياء الف" },
+  ];
+  const pcm = new Float32Array(22_000);
+  for (let index = 2_630; index < 2_880; index += 1) pcm[index] = 0.2;
+  for (let index = 9_500; index < 20_000; index += 1) pcm[index] = 0.2;
+  const coarse = [{
+    startMs: 2_630,
+    endMs: 20_000,
+    text: "جيم دال واو زاي حاء طاء خاء ذال ضاد ظاء غين ياء الف",
+  }];
+  const initial = analyzeTranscript(coarse, {
+    corpus,
+    minConfidence: 0.55,
+    audioAnalysis: analyzeMonoPcm(pcm, 1_000),
+    timestampMode: "chunk-fallback",
+  });
+  assert.equal(initial.forcedAlignment?.captionSets.length, 3);
+  assert.deepEqual(initial.forcedAlignment?.captionSets.map((set) => [set.verseKey, set.canonicalStartWordIndex, set.canonicalEndWordIndex]), [["6:74", 1, 14], ["6:75", 1, 9], ["6:76", 1, 7]]);
+  assert.ok(initial.timingRecoveryPlan?.required);
+  assert.ok(initial.timingRecoveryPlan?.missingVerseKeys.includes("6:75"));
+
+  const recovered = analyzeTranscript([...coarse, {
+    startMs: 9_500,
+    endMs: 12_000,
+    timingSource: "micro-asr" as const,
+    text: "جيم دال واو زاي حاء طاء",
+  }, {
+    startMs: 12_100,
+    endMs: 14_700,
+    timingSource: "micro-asr" as const,
+    text: corpus[1].text,
+  }, {
+    startMs: 14_800,
+    endMs: 18_000,
+    timingSource: "micro-asr" as const,
+    text: corpus[2].text,
+  }], {
+    corpus,
+    minConfidence: 0.55,
+    audioAnalysis: analyzeMonoPcm(pcm, 1_000),
+    timestampMode: "chunk-fallback",
+  });
+  const forced = recovered.forcedAlignment!;
+  assert.ok(recovered.matches[0]!.startMs >= 9_500, "coarse 2.63s text cannot become Quran onset after micro recovery");
+  assert.equal(forced.verseTimings.find((item) => item.verseKey === "6:75")?.directWordCount, 0);
+  assert.ok((forced.verseTimings.find((item) => item.verseKey === "6:75")?.recoveredWordCount ?? 0) > 0);
+  assert.equal(forced.verseTimings.find((item) => item.verseKey === "6:75")?.recoveryAttempted, true);
+  assert.equal(recovered.timingRecoveryPlan?.required, false, "a recovery run prevents a confident synthetic retry loop");
+  const firstVerseWords = forced.canonicalWordAlignments!.filter((item) => item.verseKey === "6:74");
+  assert.deepEqual(firstVerseWords.map((item) => item.canonicalWordIndex), Array.from({ length: 14 }, (_, index) => index + 1));
+  assert.ok(firstVerseWords.every((item) => !item.directMatch), "chunk fallback exposes no fake direct word timestamps");
+  assert.equal(forced.captionSets.length, 3);
+  assert.ok(forced.captionSets.every((set) => set.cutReason === "whole-ayah"));
 });

@@ -44,6 +44,50 @@ export type LocalEnergyBoundary = {
   foundGap: boolean;
 };
 
+export type SpeechRegion = {
+  startMs: number;
+  endMs: number;
+  durationMs: number;
+};
+
+/**
+ * A deliberately coarse VAD-like view used to bound local recovery ASR.  It
+ * does not create Quran boundaries: it only rejects leading/trailing quiet
+ * audio and identifies sensible windows to inspect with known Quran text.
+ */
+export function detectSpeechRegions(analysis: AudioAnalysis, minimumDurationMs = 180): SpeechRegion[] {
+  if (!analysis.rms.length) return [];
+  const values = [...analysis.rms].sort((left, right) => left - right);
+  const floor = values[Math.floor((values.length - 1) * 0.2)] ?? 0;
+  const peak = values.at(-1) ?? floor;
+  const threshold = floor + (peak - floor) * 0.16;
+  const regions: SpeechRegion[] = [];
+  let start = -1;
+  for (let index = 0; index <= analysis.rms.length; index += 1) {
+    const active = index < analysis.rms.length && (analysis.rms[index] ?? 0) > threshold;
+    if (active && start < 0) start = index;
+    if ((!active || index === analysis.rms.length) && start >= 0) {
+      const end = index;
+      const startMs = start * analysis.windowMs;
+      const endMs = Math.min(analysis.durationMs, end * analysis.windowMs);
+      if (endMs - startMs >= minimumDurationMs) {
+        const previous = regions.at(-1);
+        // Normal recitation contains short intra-phrase dips. Keep a recovery
+        // search region continuous across those dips without treating them as
+        // ayah transitions.
+        if (previous && startMs - previous.endMs <= 140) {
+          previous.endMs = endMs;
+          previous.durationMs = previous.endMs - previous.startMs;
+        } else {
+          regions.push({ startMs, endMs, durationMs: endMs - startMs });
+        }
+      }
+      start = -1;
+    }
+  }
+  return regions;
+}
+
 /**
  * Looks only inside the text-derived corridor.  It deliberately has no API
  * for globally segmenting silence, so a breath within an ayah cannot become a

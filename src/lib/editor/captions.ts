@@ -263,7 +263,7 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
 
 // Legacy values remain readable for saved projects; new recognition writes the
 // more specific two-stage evidence values.
-export type CaptionTimingSource = "word-audio-refined" | "word-timestamp" | "token-interpolated" | "chunk-interpolated" | "low-confidence-fallback" | "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "low-confidence" | "forced-alignment" | "derived";
+export type CaptionTimingSource = "word-audio-refined" | "word-timestamp" | "token-interpolated" | "chunk-interpolated" | "low-confidence-fallback" | "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "interpolated" | "low-confidence" | "micro-asr" | "pcm-refined" | "chunk-coarse" | "unknown" | "forced-alignment" | "derived";
 
 export type CaptionSegment = {
   id: string;
@@ -410,6 +410,11 @@ export function createCaptionSegmentsFromForcedAlignment(
     const verseWords = words(verse ? quranDisplayText(verse) : "");
     const selectedWords = verseWords.slice(set.canonicalStartWordIndex - 1, set.canonicalEndWordIndex);
     if (!selectedWords.length) return [];
+    // Caption text is always an inclusive canonical range. This makes a gap
+    // such as words 1, 2, 4, 7 impossible even if ASR skipped those words.
+    if (selectedWords.length !== set.canonicalEndWordIndex - set.canonicalStartWordIndex + 1) {
+      throw new Error(`Caption set ${set.id} has a non-contiguous canonical word range.`);
+    }
     return [{
       id: set.id,
       verseKeys: [set.verseKey],

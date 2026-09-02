@@ -1,4 +1,4 @@
-import type { TranscriptChunk } from "./core";
+import type { TimingRecoveryPlan, TranscriptChunk } from "./core";
 import type { AudioAnalysis } from "./audio-analysis.ts";
 
 /** The boundary used by recognition clients; implementations never receive a server URL. */
@@ -31,6 +31,17 @@ export type LocalTranscriptionResult = {
   durationMs: number;
   /** Local 10 ms PCM energy envelope, retained only for this recognition job. */
   audioAnalysis: AudioAnalysis;
+  /** Runs bounded ASR windows after canonical passage identity is known. */
+  recoverTiming?: (
+    plan: TimingRecoveryPlan,
+    onProgress?: (progress: TranscriptionProgress) => void,
+  ) => Promise<LocalTimingRecoveryResult>;
+};
+
+export type LocalTimingRecoveryResult = {
+  chunks: TranscriptChunk[];
+  windowsRun: number;
+  transcriptionMs: number;
 };
 
 export type TimestampValidationDiagnostics = {

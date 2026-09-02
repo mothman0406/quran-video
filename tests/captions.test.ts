@@ -139,6 +139,22 @@ test("three detected ayat produce exactly three whole-ayah display sets despite 
   assert.equal(segments[1].endMs, segments[2].startMs);
 });
 
+test("every generated caption segment is active at its own midpoint", () => {
+  const second = { ...alignment, verseKey: "93:2", ayahNumber: 2, startMs: 1_100, endMs: 2_100, timingEvidence: { ...alignment.timingEvidence, start: { timestampMs: 1_100, source: "word-timestamp" as const }, end: { timestampMs: 2_100, source: "word-timestamp" as const } } };
+  const third = { ...second, verseKey: "93:3", ayahNumber: 3, startMs: 2_100, endMs: 3_100, timingEvidence: { ...second.timingEvidence, start: { timestampMs: 2_100, source: "word-timestamp" as const }, end: { timestampMs: 3_100, source: "word-timestamp" as const } } };
+  const verses = {
+    ...content,
+    "93:2": { ...content["93:1"], verseKey: "93:2", arabic: { uthmani: "وَاللَّيْلِ إِذَا سَجَى" } },
+    "93:3": { ...content["93:1"], verseKey: "93:3", arabic: { uthmani: "مَا وَدَّعَكَ رَبُّكَ" } },
+  } as unknown as Record<string, QuranVerseContent>;
+  const segments = createCaptionSegments([alignment, second, third], verses);
+  for (const segment of segments) {
+    const midpoint = (segment.startMs + segment.endMs) / 2;
+    assert.equal(getActiveCaptionSegment(segments, midpoint)?.id, segment.id);
+    assert.equal(segment.wordCount, segment.wordEnd - segment.wordStart);
+  }
+});
+
 test("typography defaults are neutral and independently configurable", () => {
   assert.equal(DEFAULT_TYPOGRAPHY.arabicOutlineEnabled, false);
   assert.equal(DEFAULT_TYPOGRAPHY.translationVisible, true);
