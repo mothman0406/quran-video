@@ -1,14 +1,17 @@
 # Status
 
-## Current milestone: Preserve complete ayah captions
+## Current milestone: VAD-constrained local Quran timing recovery
 
 Complete:
 
-- Automatic forced-alignment display now emits one complete canonical ayah caption per detected ayah; future intra-ayah split plans remain available but dormant.
-- Caption timing continues to use detected verse onset, so leading silence has no active caption and the first caption activates exactly at its detected `startMs`.
-- Added regressions for leading silence, complete first/last/internal canonical words, and ASR alignment gaps.
+- Replaced the RMS-derived pseudo-VAD with browser-local Silero VAD (`@ricky0123/vad-web`), run once over the decoded 16 kHz mono source before Whisper. Its regions contain integer absolute video timestamps and a model-probability confidence; short recitation/breath interruptions are smoothed while meaningful gaps remain separate.
+- Speech detection fails closed: background audio is never treated as spoken recitation merely because it has energy. PCM/RMS remains only for refining a boundary inside an already selected Silero speech corridor.
+- Preserved whole-recording ASR → immutable `PrimaryTranscript` → text-only Quran passage identification. VAD is timing-only evidence and cannot change the canonical passage.
+- Made the first Quran caption hard-constrained to the earliest Silero speech region with aligned known-passage text. A timestamp outside every VAD region is excluded as a timing anchor; a VAD/text corridor with no evidence yields no caption rather than a caption in background audio.
+- Bounded fallback micro-ASR windows exclusively to VAD speech regions, with 4.8-second overlapping local windows. Missing-verse and transition work is intersected with speech regions, so confirmed non-speech never consumes a recovery pass.
+- Added regression coverage for the 2.63s false-anchor / 9.5s real-speech shape, VAD-only recovery windows, and tiny VAD interruption smoothing.
 
-Verification: `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check`.
+Verification: targeted recognition/VAD tests, `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. Browser validation remains required with the real 6:74–77 recording, including first-run model download/caching and a no-caption check through the initial background audio.
 
 ## Current milestone: Recover complete Quran verse timing
 

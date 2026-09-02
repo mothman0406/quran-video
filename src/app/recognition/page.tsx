@@ -92,11 +92,13 @@ export default function RecognitionSpikePage() {
       let recovery: Awaited<ReturnType<NonNullable<typeof output.recoverTiming>>> | null = null;
       let nextAnalysis = analyzeTranscript(primaryTranscript, {
         audioAnalysis: output.audioAnalysis,
+        speechRegions: output.speechRegions,
       });
       if (nextAnalysis.timingRecoveryPlan?.required && output.recoverTiming) {
         recovery = await output.recoverTiming(nextAnalysis.timingRecoveryPlan, setProgress);
         nextAnalysis = analyzeTranscript(primaryTranscript, {
           audioAnalysis: output.audioAnalysis,
+          speechRegions: output.speechRegions,
           timingEvidenceChunks: recovery.chunks,
           timingRecoveryAttempted: true,
         });
@@ -109,6 +111,7 @@ export default function RecognitionSpikePage() {
       setSegments(nextAnalysis.forcedAlignment ? createCaptionSegmentsFromForcedAlignment(nextAnalysis.forcedAlignment, verseContent, nextAlignments) : createCaptionSegments(nextAlignments, verseContent));
       (window as Window & { __QURAN_ALIGNMENT_DEBUG__?: unknown }).__QURAN_ALIGNMENT_DEBUG__ = {
         source: { durationMs: output.audioAnalysis.durationMs, sampleRate: output.audioAnalysis.sampleRate },
+        speechRegions: output.speechRegions,
         transcriber: { model: LOCAL_WHISPER_MODEL, backend: output.backend, timestampMode: output.timestampMode, runtimes: { modelLoadMs: output.modelLoadMs, transcriptionMs: output.transcriptionMs, totalMs: output.durationMs } },
         passage: nextAnalysis.passage,
         primaryTranscript: {
@@ -224,7 +227,7 @@ export default function RecognitionSpikePage() {
       "", "TIMESTAMP QUALITY", `word timestamps available: ${debug.timestampQuality.wordTimestampsAvailable ? "yes" : "no"}`, `micro-ASR fallback used: ${debug.timestampQuality.microAsrFallbackUsed ? "yes" : "no"}`,
       "", "DIRECT WORD COVERAGE BY VERSE", ...debug.directWordCoverageByVerse.map((item) => `${item.verseKey}: ${item.direct}/${item.total} direct; ${item.recovered}/${item.total} recovered; recovery attempted: ${item.recoveryAttempted ? "yes" : "no"}`),
       "", "DETECTED PASSAGE", `verse range: ${debug.detectedPassage.verseRange.join("–") || "—"}`, `canonical word span: ${debug.detectedPassage.canonicalSpan ? `${debug.detectedPassage.canonicalSpan.firstVerseKey} word ${debug.detectedPassage.canonicalSpan.firstWordIndex} → ${debug.detectedPassage.canonicalSpan.lastVerseKey} word ${debug.detectedPassage.canonicalSpan.lastWordIndex}` : "—"}`,
-      "", "FIRST START TRACE", `earliest audio activity candidate: ${value(first?.earliestAudioActivityCandidateMs)}`, `first ASR chunk start: ${value(first?.firstAsrChunkStartMs)}`, `first ASR timestamped word: ${value(first?.firstAsrTimestampedWordMs)}`, `first ASR word aligned to detected Quran: ${value(first?.firstAsrWordAlignedToDetectedQuranMs)}`, `first canonical Quran word supported: ${first?.firstCanonicalQuranWordSupported ?? "—"}`, `first strong alignment anchor: ${value(first?.firstStrongAlignmentAnchorMs)}`, `PCM local onset candidate: ${value(first?.pcmLocalOnsetCandidateMs)}`, `raw VerseAlignment start: ${value(first?.rawVerseAlignmentStartMs)}`, `generated CaptionSegment start: ${value(debug.verses[0]?.captionSegmentStartMs)}`,
+      "", "FIRST START TRACE", `first VAD speech region: ${value(first?.firstVadSpeechRegionMs)}`, `Quran VAD speech region: ${first?.firstQuranVadSpeechRegion ? `${value(first.firstQuranVadSpeechRegion.startMs)}–${value(first.firstQuranVadSpeechRegion.endMs)} (confidence ${first.firstQuranVadSpeechRegion.confidence})` : "—"}`, `first ASR chunk start: ${value(first?.firstAsrChunkStartMs)}`, `first ASR timestamped word: ${value(first?.firstAsrTimestampedWordMs)}`, `first ASR word aligned to detected Quran: ${value(first?.firstAsrWordAlignedToDetectedQuranMs)}`, `first canonical Quran word supported: ${first?.firstCanonicalQuranWordSupported ?? "—"}`, `first strong alignment anchor: ${value(first?.firstStrongAlignmentAnchorMs)}`, `PCM local onset candidate: ${value(first?.pcmLocalOnsetCandidateMs)}`, `raw VerseAlignment start: ${value(first?.rawVerseAlignmentStartMs)}`, `generated CaptionSegment start: ${value(debug.verses[0]?.captionSegmentStartMs)}`,
       ...debug.verses.flatMap((verse) => ["", `VERSE ${verse.verseKey}`, `first aligned ASR evidence: ${value(verse.firstAlignedAsrEvidenceMs)}`, `alignment timestamp: ${value(verse.firstStrongAlignmentAnchorMs)}`, `PCM-refined start: ${value(verse.pcmLocalOnsetCandidateMs)}`, `VerseAlignment start: ${value(verse.verseAlignmentStartMs)}`, `CaptionSegment start: ${value(verse.captionSegmentStartMs)}`, `manual start: ${value(verse.manualStartMs)}`, `signed error: ${value(verse.signedErrorMs)}`]),
       "", "MANUAL MARKS", ...debug.manualGroundTruthMarks.map((mark) => `${mark.kind}: ${value(mark.timeMs)}`),
       "", "ACTIVE DISPLAY TRACE", ...debug.actualPreviewActivations.map((entry) => `${entry.verseKeys.join(", ")} activated at ${value(entry.timeMs)}`),

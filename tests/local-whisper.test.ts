@@ -9,6 +9,7 @@ import {
   validateWordTimestamps,
   withTimestampFallback,
 } from "../src/lib/recognition/local-whisper.ts";
+import { smoothVadSpeechRegions } from "../src/lib/recognition/speech-regions.ts";
 
 test("uses a multilingual Whisper model and bounded overlapping audio chunks", () => {
   assert.equal(LOCAL_WHISPER_MODEL, "onnx-community/whisper-base_timestamped");
@@ -65,4 +66,17 @@ test("keeps absolute word times when stitching overlapping windows", () => {
     ["والضحى", 28_000, 28_300],
     ["والليل", 30_100, 30_400],
   ]);
+});
+
+test("smooths only tiny Silero VAD interruptions while retaining meaningful gaps", () => {
+  const regions = smoothVadSpeechRegions([
+    { startMs: 9_500, endMs: 10_300, durationMs: 800, confidence: 0.91 },
+    { startMs: 10_520, endMs: 11_200, durationMs: 680, confidence: 0.83 },
+    { startMs: 12_100, endMs: 12_700, durationMs: 600, confidence: 0.88 },
+  ], 15_000);
+  assert.deepEqual(regions.map((region) => [region.startMs, region.endMs]), [
+    [9_500, 11_200],
+    [12_100, 12_700],
+  ]);
+  assert.ok(regions[0]!.confidence > 0.87 && regions[0]!.confidence < 0.92);
 });

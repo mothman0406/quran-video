@@ -349,13 +349,19 @@ test("first Quran onset ignores early audio and a lone Whisper-like aligned toke
       { text: "حاء", startMs: 12_200, endMs: 12_400 },
       { text: "طاء", startMs: 12_400, endMs: 12_600 },
     ],
-  }], { corpus, minConfidence: 0.6, audioAnalysis: analyzeMonoPcm(pcm, 1_000) });
+  }], {
+    corpus,
+    minConfidence: 0.6,
+    audioAnalysis: analyzeMonoPcm(pcm, 1_000),
+    speechRegions: [{ startMs: 9_500, endMs: 14_000, durationMs: 4_500, confidence: 0.94 }],
+  });
   assert.deepEqual(analysis.matches.map((match) => match.verseKey), ["6:75", "6:76", "6:77"]);
   assert.ok((analysis.matches[0]?.startMs ?? 0) >= 9_400, "caption must not begin at generic early activity");
   assert.ok((analysis.matches[0]?.startMs ?? Infinity) <= 9_700, "local PCM may only refine the late text anchor");
   assert.ok((analysis.timingTrace?.firstAsrWordAlignedToDetectedQuranMs ?? 0) >= 9_700, "only accepted Quran alignment is timing evidence");
   assert.ok((analysis.timingTrace?.firstStrongAlignmentAnchorMs ?? 0) >= 9_700);
-  assert.equal(analysis.timingTrace?.pcmLocalOnsetCandidateMs, 9_500);
+  assert.equal(analysis.timingTrace?.firstQuranVadSpeechRegion?.startMs, 9_500);
+  assert.ok((analysis.timingTrace?.verseAlignmentStartMs ?? 0) >= 9_500);
 });
 
 test("rejects unrelated Arabic prose even when approximate retrieval runs", () => {
@@ -410,7 +416,15 @@ test("forced alignment keeps partial-ayah timing truthful and scores a text-asso
     endMs: 1_750,
     text: "باء جيم دال",
     words: [{ text: "باء", startMs: 200, endMs: 450 }, { text: "جيم", startMs: 500, endMs: 780 }, { text: "دال", startMs: 1_120, endMs: 1_500 }],
-  }], { corpus, minConfidence: 0.55, audioAnalysis: analyzeMonoPcm(pcm, 1_000) });
+  }], {
+    corpus,
+    minConfidence: 0.55,
+    audioAnalysis: analyzeMonoPcm(pcm, 1_000),
+    speechRegions: [
+      { startMs: 200, endMs: 780, durationMs: 580, confidence: 0.93 },
+      { startMs: 1_120, endMs: 1_750, durationMs: 630, confidence: 0.9 },
+    ],
+  });
   const forced = analysis.forcedAlignment;
   assert.ok(forced);
   assert.equal(forced!.verseTimings[0]?.partialStart, true);
@@ -437,12 +451,14 @@ test("chunk fallback retains complete canonical ayat and recovers a missing midd
     corpus,
     minConfidence: 0.55,
     audioAnalysis: analyzeMonoPcm(pcm, 1_000),
+    speechRegions: [{ startMs: 9_500, endMs: 20_000, durationMs: 10_500, confidence: 0.94 }],
     timestampMode: "chunk-fallback",
   });
   assert.equal(initial.forcedAlignment?.captionSets.length, 3);
   assert.deepEqual(initial.forcedAlignment?.captionSets.map((set) => [set.verseKey, set.canonicalStartWordIndex, set.canonicalEndWordIndex]), [["6:74", 1, 14], ["6:75", 1, 9], ["6:76", 1, 7]]);
   assert.ok(initial.timingRecoveryPlan?.required);
   assert.ok(initial.timingRecoveryPlan?.missingVerseKeys.includes("6:75"));
+  assert.ok(initial.timingRecoveryPlan?.windows.every((window) => window.startMs >= 9_500 && window.endMs <= 20_000));
 
   const recovered = analyzeTranscript(primary, {
     timingEvidenceChunks: [{
@@ -464,6 +480,7 @@ test("chunk fallback retains complete canonical ayat and recovers a missing midd
     corpus,
     minConfidence: 0.55,
     audioAnalysis: analyzeMonoPcm(pcm, 1_000),
+    speechRegions: [{ startMs: 9_500, endMs: 20_000, durationMs: 10_500, confidence: 0.94 }],
     timestampMode: "chunk-fallback",
   });
   const forced = recovered.forcedAlignment!;

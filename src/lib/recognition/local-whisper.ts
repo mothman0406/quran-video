@@ -5,6 +5,7 @@ import type {
   TranscriptionProgress,
 } from "./transcriber";
 import { analyzeMonoPcm } from "./audio-analysis.ts";
+import { detectLocalSpeechRegions } from "./vad.ts";
 import type { TranscriptChunk } from "./core";
 import type { TimestampValidationDiagnostics } from "./transcriber";
 
@@ -213,6 +214,16 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
     const startedAt = performance.now();
     const audio = await decodeAudio(source, onProgress);
     const audioAnalysis = analyzeMonoPcm(audio, TARGET_SAMPLE_RATE);
+    onProgress?.({ phase: "detecting-speech", message: "Checking for local human speech with Silero VAD…" });
+    let speechRegions;
+    try {
+      speechRegions = await detectLocalSpeechRegions(audio, TARGET_SAMPLE_RATE);
+    } catch (error) {
+      throw new Error(`Local speech activity detection could not run: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (!speechRegions.length) {
+      throw new Error("No credible human speech was detected in this recording, so Quran captions were not timed from background audio.");
+    }
     const loadingStartedAt = performance.now();
     const { transcriber, backend } = await createPipeline(supportsWebGpu(), onProgress);
     const modelLoadMs = Math.round(performance.now() - loadingStartedAt);
@@ -340,6 +351,7 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       transcriptionMs: Math.round(performance.now() - transcriptionStartedAt),
       durationMs: Math.round(performance.now() - startedAt),
       audioAnalysis,
+      speechRegions,
       recoverTiming,
     };
   },

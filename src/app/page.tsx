@@ -103,6 +103,7 @@ type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
   | "idle"
   | "preparing"
+  | "detecting-speech"
   | "loading-model"
   | "transcribing"
   | "matching"
@@ -121,6 +122,7 @@ type ExportState =
   | null;
 const busyStages: Stage[] = [
   "preparing",
+  "detecting-speech",
   "loading-model",
   "transcribing",
   "matching",
@@ -737,6 +739,7 @@ export default function Home() {
       let recovery: Awaited<ReturnType<NonNullable<typeof result.recoverTiming>>> | null = null;
       let analysis = analyzeTranscript(primaryTranscript, {
         audioAnalysis: result.audioAnalysis,
+        speechRegions: result.speechRegions,
       });
       if (analysis.timingRecoveryPlan?.required && result.recoverTiming) {
         setStage("transcribing");
@@ -747,6 +750,7 @@ export default function Home() {
         if (job !== generation.current) return;
         analysis = analyzeTranscript(primaryTranscript, {
           audioAnalysis: result.audioAnalysis,
+          speechRegions: result.speechRegions,
           timingEvidenceChunks: recovery.chunks,
           timingRecoveryAttempted: true,
         });
@@ -772,6 +776,7 @@ export default function Home() {
       );
       alignmentDebug.current = {
         source: { durationMs: result.audioAnalysis.durationMs, sampleRate: result.audioAnalysis.sampleRate },
+        speechRegions: result.speechRegions,
         transcriber: { model: "onnx-community/whisper-base_timestamped", backend: result.backend, timestampMode: result.timestampMode, runtimes: { modelLoadMs: result.modelLoadMs, transcriptionMs: result.transcriptionMs, totalMs: result.durationMs } },
         passage: analysis.passage,
         primaryTranscript: {

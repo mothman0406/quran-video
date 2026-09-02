@@ -1,7 +1,8 @@
 import hafsCorpus from "../quran/hafs-corpus.json" with { type: "json" };
 import { normalizeQuranRecitation, quranRecognitionUnits, type QuranRecognitionUnits } from "./quran-recitation.ts";
 import type { AudioAnalysis } from "./audio-analysis.ts";
-import { detectSpeechRegions, refineFirstAyahOnsetWithEnergy, refineTransitionWithEnergy, refineWordEdgeWithEnergy } from "./audio-analysis.ts";
+import { refineFirstAyahOnsetWithEnergy, refineTransitionWithEnergy, refineWordEdgeWithEnergy } from "./audio-analysis.ts";
+import { speechRegionContaining, type VadSpeechRegion } from "./speech-regions.ts";
 
 export type TranscriptChunk = {
   startMs: number;
@@ -279,7 +280,9 @@ export type VerseTimingTrace = {
 };
 
 export type RecognitionTimingTrace = {
-  earliestAudioActivityCandidateMs: number | null;
+  /** Silero—not energy—defines whether a voice is actually present. */
+  firstVadSpeechRegionMs: number | null;
+  firstQuranVadSpeechRegion: VadSpeechRegion | null;
   firstAsrChunkStartMs: number | null;
   firstAsrTimestampedWordMs: number | null;
   firstAsrWordAlignedToDetectedQuranMs: number | null;
@@ -725,14 +728,24 @@ function selectFirstAyahOnsetAnchor(evidence: readonly AlignedAyahEvidence[]): A
   return best[0] ?? null;
 }
 
-function earliestAudioActivityCandidate(audioAnalysis: AudioAnalysis | undefined): number | null {
-  if (!audioAnalysis?.rms.length) return null;
-  const values = [...audioAnalysis.rms].sort((left, right) => left - right);
-  const floor = values[Math.floor((values.length - 1) * 0.2)] ?? 0;
-  const peak = values.at(-1) ?? floor;
-  const threshold = floor + (peak - floor) * 0.16;
-  const index = audioAnalysis.rms.findIndex((value) => value > threshold);
-  return index < 0 ? null : index * audioAnalysis.windowMs;
+function selectFirstQuranSpeechRegion(
+  evidence: readonly AlignedAyahEvidence[],
+  speechRegions: readonly VadSpeechRegion[] | undefined,
+): VadSpeechRegion | null {
+  if (!speechRegions?.length) return null;
+  // Text still chooses the passage, while Silero rejects non-speech. A clip
+  // may start mid-ayah, so even one strongly aligned canonical word inside a
+  // credible VAD region is valid onset evidence.
+  const requiredWords = 1;
+  for (const region of speechRegions) {
+    const supportedWords = new Set(evidence
+      .filter((item) => item.similarity >= 0.62
+        && item.token.startMs < region.endMs
+        && item.token.endMs >= region.startMs)
+      .map((item) => item.canonicalWordIndex));
+    if (supportedWords.size >= requiredWords) return region;
+  }
+  return null;
 }
 
 function reconstructPassage(
@@ -740,6 +753,7 @@ function reconstructPassage(
   chunks: readonly TranscriptChunk[],
   verses: readonly QuranCorpusVerse[],
   audioAnalysis?: AudioAnalysis,
+  speechRegions?: readonly VadSpeechRegion[],
 ): { matches: RecognitionMatch[]; timingTrace: RecognitionTimingTrace } {
   const passage = verses.slice(selected.start, selected.end + 1);
   const canonical = canonicalPassageTokens(passage);
@@ -752,7 +766,8 @@ function reconstructPassage(
   const aligned = selected.alignment;
   if (aligned.firstCanonicalIndex === null || aligned.lastCanonicalIndex === null) {
     return { matches: [], timingTrace: {
-      earliestAudioActivityCandidateMs: earliestAudioActivityCandidate(audioAnalysis),
+      firstVadSpeechRegionMs: speechRegions?.[0]?.startMs ?? null,
+      firstQuranVadSpeechRegion: null,
       firstAsrChunkStartMs: chunks.length ? Math.min(...chunks.map((chunk) => chunk.startMs)) : null,
       firstAsrTimestampedWordMs: null,
       firstAsrWordAlignedToDetectedQuranMs: null,
@@ -791,7 +806,13 @@ function reconstructPassage(
   // coarse chunk must not pull a verse back into its leading silence.
   const temporalTokensByAyah = byAyah.map((tokens) => {
     const temporal = tokens.filter((token) => token.source !== "chunk-coarse");
-    return temporal.length ? temporal : tokens;
+    const candidates = temporal.length ? temporal : tokens;
+    // A word timestamp outside every Silero speech region is temporally
+    // impossible. It may still have helped the immutable text-only passage
+    // lookup, but cannot anchor a displayed Quran boundary.
+    return speechRegions === undefined
+      ? candidates
+      : candidates.filter((token) => Boolean(speechRegionContaining(speechRegions, token.startMs, token.endMs)));
   });
   const rawStarts = temporalTokensByAyah.map((tokens) => tokens.length ? Math.min(...tokens.map((token) => token.startMs)) : null);
   const rawEnds = temporalTokensByAyah.map((tokens) => tokens.length ? Math.max(...tokens.map((token) => token.endMs)) : null);
@@ -847,22 +868,38 @@ function reconstructPassage(
   }
   const lastTokens = temporalTokensByAyah[activeEnd];
   const rawFirstStartMs = starts[activeStart] ?? null;
-  const firstAnchor = selectFirstAyahOnsetAnchor(alignedEvidenceByAyah[activeStart]
-    .filter((item) => item.token.source !== "chunk-coarse"));
+  const directFirstAyahEvidence = alignedEvidenceByAyah[activeStart]
+    .filter((item) => item.token.source !== "chunk-coarse");
+  // During the pre-recovery chunk fallback, a coarse interval is enough to
+  // choose VAD-constrained micro-ASR work, but never enough to claim a word
+  // boundary. Recovered output replaces it before captions are presented.
+  const firstAyahEvidence = directFirstAyahEvidence.length
+    ? directFirstAyahEvidence
+    : alignedEvidenceByAyah[activeStart];
+  const firstQuranSpeechRegion = selectFirstQuranSpeechRegion(
+    firstAyahEvidence,
+    speechRegions,
+  );
+  const firstAnchor = selectFirstAyahOnsetAnchor(firstAyahEvidence
+    .filter((item) => !speechRegions || !speechRegions.length || Boolean(speechRegionContaining(speechRegions, item.token.startMs, item.token.endMs))));
   const firstCanonicalWordSupported = firstAnchor ? firstAnchor.canonicalWordIndex + 1 : null;
   const onsetLookbackMs = firstAnchor
     ? Math.min(1_600, Math.max(360, 280 + firstAnchor.canonicalWordIndex * 160))
     : 0;
-  const onsetCorridorStartMs = firstAnchor ? Math.max(0, firstAnchor.token.startMs - onsetLookbackMs) : null;
-  const onsetCorridorEndMs = firstAnchor ? Math.min(sourceDuration, firstAnchor.token.startMs + 180) : null;
+  const onsetAnchorMs = firstAnchor ? Math.max(firstAnchor.token.startMs, firstQuranSpeechRegion?.startMs ?? 0) : null;
+  const boundedLookbackMs = onsetAnchorMs === null ? 0 : Math.min(onsetLookbackMs, onsetAnchorMs - (firstQuranSpeechRegion?.startMs ?? 0));
+  const onsetCorridorStartMs = onsetAnchorMs === null ? null : Math.max(firstQuranSpeechRegion?.startMs ?? 0, onsetAnchorMs - boundedLookbackMs);
+  const onsetCorridorEndMs = onsetAnchorMs === null ? null : Math.min(firstQuranSpeechRegion?.endMs ?? sourceDuration, onsetAnchorMs + 180);
   const pcmLocalOnsetCandidateMs = audioAnalysis && firstAnchor
-    ? refineFirstAyahOnsetWithEnergy(audioAnalysis, firstAnchor.token.startMs, onsetLookbackMs)
+    ? refineFirstAyahOnsetWithEnergy(audioAnalysis, onsetAnchorMs!, boundedLookbackMs, 180, firstQuranSpeechRegion?.startMs)
     : null;
   // Never use generic audio activity here. The anchor is Quran identity; PCM
   // only sharpens it within the bounded local corridor.
   if (firstAnchor) {
-    const refinedStart = pcmLocalOnsetCandidateMs ?? firstAnchor.token.startMs;
-    starts[activeStart] = Math.max(0, Math.min(refinedStart, ends[activeStart]! - 1));
+    const refinedStart = pcmLocalOnsetCandidateMs ?? onsetAnchorMs!;
+    // This is the hard constraint: no Quran caption can be pulled into
+    // background audio by a Whisper token or a coarse timestamp.
+    starts[activeStart] = Math.max(firstQuranSpeechRegion?.startMs ?? 0, Math.min(refinedStart, ends[activeStart]! - 1));
     if (pcmLocalOnsetCandidateMs !== null) startSources[activeStart] = "pcm-refined";
   }
   if (audioAnalysis && lastTokens.length) {
@@ -898,7 +935,8 @@ function reconstructPassage(
       },
     };
   });
-  const verseTrace = matches.map((match, offset) => {
+  const constrainedMatches = speechRegions !== undefined && !firstQuranSpeechRegion ? [] : matches;
+  const verseTrace = constrainedMatches.map((match, offset) => {
     const index = activeStart + offset;
     const evidenceForVerse = alignedEvidenceByAyah[index];
     const anchor = index === activeStart ? firstAnchor : selectFirstAyahOnsetAnchor(evidenceForVerse);
@@ -916,8 +954,9 @@ function reconstructPassage(
     };
   });
   const firstAlignedWord = verseTrace[0]?.firstAlignedAsrEvidenceMs ?? null;
-  return { matches, timingTrace: {
-    earliestAudioActivityCandidateMs: earliestAudioActivityCandidate(audioAnalysis),
+  return { matches: constrainedMatches, timingTrace: {
+    firstVadSpeechRegionMs: speechRegions?.[0]?.startMs ?? null,
+    firstQuranVadSpeechRegion: firstQuranSpeechRegion ?? null,
     firstAsrChunkStartMs: chunks.length ? Math.min(...chunks.map((chunk) => chunk.startMs)) : null,
     firstAsrTimestampedWordMs: evidence.length ? Math.min(...evidence.map((token) => token.startMs)) : null,
     firstAsrWordAlignedToDetectedQuranMs: firstAlignedWord,
@@ -925,7 +964,7 @@ function reconstructPassage(
     firstStrongAlignmentAnchorMs: firstAnchor?.token.startMs ?? null,
     pcmLocalOnsetCandidateMs,
     rawVerseAlignmentStartMs: rawFirstStartMs,
-    verseAlignmentStartMs: matches[0]?.startMs ?? null,
+    verseAlignmentStartMs: constrainedMatches[0]?.startMs ?? null,
     verses: verseTrace,
   } };
 }
@@ -955,17 +994,14 @@ function positivePartialBoundary(
   heard: readonly WordOccurrence[],
   wordCount: number,
   edge: "start" | "end",
-  audioAnalysis?: AudioAnalysis,
+  speechRegions?: readonly VadSpeechRegion[],
 ): boolean {
   const direct = heard.filter((word) => word.evidence === "direct-word-alignment");
   const edgeWord = edge === "start" ? direct[0] : direct.at(-1);
   if (!edgeWord) return false;
   if (edge === "start" && edgeWord.canonicalWordIndex <= 1) return false;
   if (edge === "end" && edgeWord.canonicalWordIndex >= wordCount) return false;
-  const regions = audioAnalysis ? detectSpeechRegions(audioAnalysis) : [];
-  const region = regions.find((item) => edge === "start"
-    ? edgeWord.startMs >= item.startMs && edgeWord.startMs <= item.endMs
-    : edgeWord.endMs >= item.startMs && edgeWord.endMs <= item.endMs);
+  const region = speechRegionContaining(speechRegions, edgeWord.startMs, edgeWord.endMs);
   if (!region) return false;
   const missingWords = edge === "start"
     ? edgeWord.canonicalWordIndex - 1
@@ -984,6 +1020,7 @@ function forceAlignPassage(
   verses: readonly QuranCorpusVerse[],
   matches: readonly RecognitionMatch[],
   audioAnalysis?: AudioAnalysis,
+  speechRegions?: readonly VadSpeechRegion[],
   timingRecoveryAttempted = false,
 ): ForcedAlignment | null {
   const canonical = canonicalPassageTokens(verses.slice(selected.start, selected.end + 1));
@@ -1057,8 +1094,8 @@ function forceAlignPassage(
       endMs: Math.max(Math.round((fallback?.endMs ?? heard.at(-1)?.endMs ?? 1)), Math.round((fallback?.startMs ?? 0) + 1)),
       firstCanonicalWordIndex: 1,
       lastCanonicalWordIndex: verseWords.length,
-      partialStart: positivePartialBoundary(heard, verseWords.length, "start", audioAnalysis),
-      partialEnd: positivePartialBoundary(heard, verseWords.length, "end", audioAnalysis),
+      partialStart: positivePartialBoundary(heard, verseWords.length, "start", speechRegions),
+      partialEnd: positivePartialBoundary(heard, verseWords.length, "end", speechRegions),
       confidence: Number(confidence.toFixed(4)),
       startEvidence: fallback?.timing.start.source ?? "unknown",
       endEvidence: fallback?.timing.end.source ?? "unknown",
@@ -1131,6 +1168,7 @@ function timingRecoveryPlan(
   forcedAlignment: ForcedAlignment | null,
   matches: readonly RecognitionMatch[],
   audioAnalysis: AudioAnalysis | undefined,
+  speechRegions: readonly VadSpeechRegion[] | undefined,
   timestampMode: "word" | "chunk-fallback",
 ): TimingRecoveryPlan | null {
   if (!forcedAlignment?.verseTimings.length) return null;
@@ -1151,20 +1189,27 @@ function timingRecoveryPlan(
 
   const windows: TimingRecoveryWindow[] = [];
   const addWindow = (startMs: number, endMs: number, verseKeys: string[], reason: TimingRecoveryWindow["reason"]) => {
-    const start = Math.max(0, Math.round(startMs));
-    const end = Math.max(start + 1, Math.round(endMs));
-    if (windows.some((item) => item.reason === reason && Math.abs(item.startMs - start) < 500 && Math.abs(item.endMs - end) < 500)) return;
-    windows.push({ startMs: start, endMs: end, verseKeys, reason });
+    const candidates = speechRegions === undefined
+      ? [{ startMs, endMs }]
+      : speechRegions
+        .map((region) => ({ startMs: Math.max(startMs, region.startMs), endMs: Math.min(endMs, region.endMs) }))
+        .filter((region) => region.endMs > region.startMs);
+    for (const candidate of candidates) {
+      const start = Math.max(0, Math.round(candidate.startMs));
+      const end = Math.max(start + 1, Math.round(candidate.endMs));
+      if (windows.some((item) => item.reason === reason && Math.abs(item.startMs - start) < 500 && Math.abs(item.endMs - end) < 500)) continue;
+      windows.push({ startMs: start, endMs: end, verseKeys, reason });
+    }
   };
   const allVerseKeys = forcedAlignment.verseTimings.map((item) => item.verseKey);
-  const regions = audioAnalysis ? detectSpeechRegions(audioAnalysis, 450) : [];
+  const regions = speechRegions ?? [];
   if (timestampMode === "chunk-fallback" && regions.length) {
     // The original 30-second chunk can place Quran text anywhere in its
     // interval. Re-read only meaningful speech regions in small overlapping
     // windows, preserving absolute source time and skipping leading quiet.
     for (const region of regions) {
-      const windowMs = 8_000;
-      const stepMs = 6_000;
+      const windowMs = 4_800;
+      const stepMs = 3_600;
       for (let start = region.startMs; start < region.endMs; start += stepMs) {
         addWindow(start, Math.min(region.endMs, start + windowMs), allVerseKeys, start === region.startMs ? "first-onset" : "transition");
       }
@@ -1183,7 +1228,7 @@ function timingRecoveryPlan(
     const firstMatch = matches[0];
     addWindow(Math.max(0, (firstMatch?.startMs ?? 0) - 1_000), Math.min(audioAnalysis?.durationMs ?? firstMatch?.endMs ?? 8_000, (firstMatch?.startMs ?? 0) + 7_000), [first.verseKey], "first-onset");
   }
-  return { required, timestampMode, windows: windows.slice(0, 16), missingVerseKeys, firstOnsetRequired };
+  return { required, timestampMode, windows: windows.slice(0, 24), missingVerseKeys, firstOnsetRequired };
 }
 
 type LocalCandidate = {
@@ -1413,6 +1458,10 @@ export type RecognitionOptions = {
   ambiguityMargin?: number;
   /** Local decoded PCM envelope from the same recording, never uploaded. */
   audioAnalysis?: AudioAnalysis;
+  /** Browser-local Silero VAD regions from the same recording. Undefined is
+   * retained for historical saved/test data; a live recognition run supplies
+   * this and therefore enforces the speech-onset hard constraint. */
+  speechRegions?: readonly VadSpeechRegion[];
   /** Chunk fallback is useful lexical evidence but cannot be treated as word
    * timing. The browser passes this directly from its transcriber result. */
   timestampMode?: "word" | "chunk-fallback";
@@ -1618,15 +1667,15 @@ export function analyzeTranscript(
   const timingChunks = [...primary.chunks, ...(options.timingEvidenceChunks ?? [])]
     .sort((left, right) => left.startMs - right.startMs);
   const timingCandidate = withTimingEvidence(best, timingChunks, verses);
-  const reconstructed = reconstructPassage(timingCandidate, timingChunks, verses, options.audioAnalysis);
-  const forcedAlignment = forceAlignPassage(timingCandidate, timingChunks, verses, reconstructed.matches, options.audioAnalysis, options.timingRecoveryAttempted);
+  const reconstructed = reconstructPassage(timingCandidate, timingChunks, verses, options.audioAnalysis, options.speechRegions);
+  const forcedAlignment = forceAlignPassage(timingCandidate, timingChunks, verses, reconstructed.matches, options.audioAnalysis, options.speechRegions, options.timingRecoveryAttempted);
   return {
     matches: reconstructed.matches,
     diagnostics,
     passage,
     timingTrace: reconstructed.timingTrace,
     forcedAlignment,
-    timingRecoveryPlan: timingRecoveryPlan(forcedAlignment, reconstructed.matches, options.audioAnalysis, primary.timestampMode),
+    timingRecoveryPlan: timingRecoveryPlan(forcedAlignment, reconstructed.matches, options.audioAnalysis, options.speechRegions, primary.timestampMode),
   };
 }
 

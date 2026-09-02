@@ -1,5 +1,6 @@
 import type { TimingRecoveryPlan, TranscriptChunk } from "./core";
 import type { AudioAnalysis } from "./audio-analysis.ts";
+import type { VadSpeechRegion } from "./speech-regions.ts";
 
 /** The boundary used by recognition clients; implementations never receive a server URL. */
 export type RecognitionTranscriber = {
@@ -10,7 +11,7 @@ export type RecognitionTranscriber = {
 };
 
 export type TranscriptionProgress = {
-  phase: "decoding" | "loading-model" | "transcribing";
+  phase: "decoding" | "detecting-speech" | "loading-model" | "transcribing";
   message: string;
   completed?: number;
   total?: number;
@@ -31,6 +32,8 @@ export type LocalTranscriptionResult = {
   durationMs: number;
   /** Local 10 ms PCM energy envelope, retained only for this recognition job. */
   audioAnalysis: AudioAnalysis;
+  /** Silero VAD regions in absolute source-video time. */
+  speechRegions: VadSpeechRegion[];
   /** Runs bounded ASR windows after canonical passage identity is known. */
   recoverTiming?: (
     plan: TimingRecoveryPlan,

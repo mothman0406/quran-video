@@ -18,7 +18,7 @@ import { BUILT_IN_STYLES, type BuiltInStyleName, type CaptionStyle } from "@/lib
 import { quranFontDefinitions } from "@/lib/quran/content";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
-type Stage = "idle" | "preparing" | "loading-model" | "transcribing" | "matching" | "captions" | "complete" | "error";
+type Stage = "idle" | "preparing" | "detecting-speech" | "loading-model" | "transcribing" | "matching" | "captions" | "complete" | "error";
 type ExportState = { phase: ExportPhase; fraction: number; elapsedSeconds: number; estimatedRemainingSeconds?: number } | "complete" | "error" | null;
 
 type EditorWorkspaceProps = {
@@ -223,7 +223,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           {timelineTooltip && <div className="editor-timeline-tooltip" role="status">{timelineTooltip}</div>}
         </div></div>}
         {(busy || (stage === "complete" && alignments.length > 0) || showCorrection || errorMessage || timingWarning || exportState) && <div className="editor-notices">
-          {busy && <div className="editor-notice"><strong>{stage === "loading-model" ? "Loading recognition model" : stage === "transcribing" ? "Transcribing locally" : stage === "matching" ? "Matching Quran" : "Preparing captions"}</strong><span>Audio stays in this browser{progress?.total ? ` · ${progress.completed ?? 0}/${progress.total} chunks` : ""}.</span></div>}
+          {busy && <div className="editor-notice"><strong>{stage === "detecting-speech" ? "Checking local speech" : stage === "loading-model" ? "Loading recognition model" : stage === "transcribing" ? "Transcribing locally" : stage === "matching" ? "Matching Quran" : "Preparing captions"}</strong><span>Audio stays in this browser{progress?.total ? ` · ${progress.completed ?? 0}/${progress.total} chunks` : ""}.</span></div>}
           {stage === "complete" && alignments.length > 0 && <div className="editor-notice editor-notice-success"><strong>Detected Surah {alignments[0].surahNumber} · ayat {alignments[0].ayahNumber}–{alignments.at(-1)?.ayahNumber}</strong><span>{Math.round((alignments.reduce((sum, item) => sum + item.confidence, 0) / alignments.length) * 100)}% overall confidence</span></div>}
           {timingWarning && <div className="editor-notice">{timingWarning}</div>}
           {showCorrection && <div className="editor-correction"><SectionLabel>Correct detection</SectionLabel><div><select aria-label="Surah" className="editor-select" value={surah}><option value={surah}>Surah {surah}</option></select><input aria-label="First ayah" type="number" value={startAyah} readOnly /><input aria-label="Last ayah" type="number" value={endAyah} readOnly /><button className="editor-button editor-button-primary" type="button" onClick={onCorrectDetection}>Use range</button></div></div>}
