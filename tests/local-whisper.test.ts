@@ -10,6 +10,20 @@ import {
   withTimestampFallback,
 } from "../src/lib/recognition/local-whisper.ts";
 import { smoothVadSpeechRegions } from "../src/lib/recognition/speech-regions.ts";
+import {
+  configureVadRuntime,
+  SILERO_MODEL_URL,
+  VAD_WASM_MODULE_URL,
+  VAD_WASM_URL,
+} from "../src/lib/recognition/vad.ts";
+
+test("configures the browser VAD with stable local assets", () => {
+  const ort = { env: { wasm: {} as { wasmPaths?: string | { wasm?: string | URL; mjs?: string | URL }; numThreads?: number } } };
+  configureVadRuntime(ort);
+  assert.deepEqual(ort.env.wasm.wasmPaths, { wasm: VAD_WASM_URL, mjs: VAD_WASM_MODULE_URL });
+  assert.equal(ort.env.wasm.numThreads, 1);
+  assert.equal(SILERO_MODEL_URL, "/ort/silero_vad_legacy.onnx");
+});
 
 test("uses a multilingual Whisper model and bounded overlapping audio chunks", () => {
   assert.equal(LOCAL_WHISPER_MODEL, "onnx-community/whisper-base_timestamped");

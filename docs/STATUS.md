@@ -1,5 +1,15 @@
 # Status
 
+## Current milestone: Fix browser-local VAD runtime assets
+
+Complete:
+
+- Configured the installed `onnxruntime-web@1.29.0` runtime through `vad-web`'s supported `ortConfig` hook before model/session initialization.
+- Served the required JSEP WASM/MJS runtime pair and legacy Silero model from stable `/ort/` paths; the build now checks all three assets exist.
+- Cached successful VAD initialization, cleared failed initialization for a clean retry, and added concise development diagnostics without changing VAD thresholds or recognition logic.
+
+Verification: `npm test`, `npx tsc --noEmit`, `npm run lint`, `npm run build`, `npm run check:vad-assets`, and `git diff --check` pass. `npm start` reaches ready on an alternate local port; real-browser dev/production validation remains required.
+
 ## Current milestone: VAD-constrained local Quran timing recovery
 
 Complete:
