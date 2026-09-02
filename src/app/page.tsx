@@ -767,7 +767,7 @@ export default function Home() {
       setAlignments(next);
       setSegments(
         analysis.forcedAlignment
-          ? createCaptionSegmentsFromForcedAlignment(analysis.forcedAlignment, verseContent)
+          ? createCaptionSegmentsFromForcedAlignment(analysis.forcedAlignment, verseContent, next)
           : createCaptionSegments(next, verseContent),
       );
       alignmentDebug.current = {

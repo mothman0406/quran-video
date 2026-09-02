@@ -404,6 +404,7 @@ export function createCaptionSegments(
 export function createCaptionSegmentsFromForcedAlignment(
   alignment: ForcedAlignment,
   content: Readonly<Record<string, QuranVerseContent | undefined>>,
+  verseAlignments: readonly VerseAlignment[] = [],
 ): CaptionSegment[] {
   // Keep future word-boundary split evidence in the plan, but keep automatic
   // display verse-level for now. ASR support and planned ranges must never
@@ -414,17 +415,21 @@ export function createCaptionSegmentsFromForcedAlignment(
     sets.push(set);
     verseSets.set(set.verseKey, sets);
   });
+  const recognizedTiming = new Map(verseAlignments.map((item) => [item.verseKey, item]));
   const generated = [...verseSets].flatMap(([verseKey, sets]) => {
     const verse = content[verseKey];
     const verseWords = words(verse ? quranDisplayText(verse) : "");
     if (!verseWords.length || !sets.length) return [];
     const firstSet = sets[0];
     const lastSet = sets.at(-1)!;
+    const verseAlignment = recognizedTiming.get(verseKey);
+    const startMs = verseAlignment?.startMs ?? firstSet.startMs;
+    const endMs = verseAlignment?.endMs ?? lastSet.endMs;
     return [{
       id: `${verseKey}#1`,
       verseKeys: [verseKey],
-      startMs: firstSet.startMs,
-      endMs: lastSet.endMs,
+      startMs,
+      endMs,
       arabic: verseWords.join(" "),
       translation: verse?.translation ?? null,
       transliteration: verse?.transliteration ?? null,
@@ -432,8 +437,8 @@ export function createCaptionSegmentsFromForcedAlignment(
       wordEnd: verseWords.length,
       wordCount: verseWords.length,
       timingEvidence: {
-        start: { timestampMs: firstSet.startMs, source: "forced-alignment" as const },
-        end: { timestampMs: lastSet.endMs, source: "forced-alignment" as const },
+        start: { timestampMs: startMs, source: verseAlignment?.timingEvidence.start.source ?? "forced-alignment" as const },
+        end: { timestampMs: endMs, source: verseAlignment?.timingEvidence.end.source ?? "forced-alignment" as const },
         derived: false,
       },
     }];

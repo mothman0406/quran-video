@@ -349,3 +349,10 @@ Complete:
 - Added environment variable examples only; no Supabase secrets are committed.
 
 Verification: targeted M8 tests pass; full test, typecheck, lint, build, and diff checks run at milestone handoff.
+
+M5A first-caption onset regression fix:
+
+- Root cause: when forced alignment was available, editor caption generation used `ForcedAlignment.captionSets` timing instead of the recognized `VerseAlignment` timing. A zero-valued forced set could therefore replace a detected non-zero Quran onset before preview lookup.
+- Fix: pass recognized verse alignments into forced-alignment caption generation and preserve their exact millisecond start/end values; forced-set timing remains the fallback for callers without recognized alignments.
+
+Verification: focused caption regression, full test, typecheck, lint, build, and diff checks pass.

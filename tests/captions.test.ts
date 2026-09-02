@@ -168,6 +168,29 @@ test("three detected ayat produce exactly three whole-ayah display sets despite 
   assert.equal(segments[1].endMs, segments[2].startMs);
 });
 
+test("recognized onset survives forced-alignment caption generation and direct seeking", () => {
+  const alignments = [
+    { ...alignment, verseKey: "6:74", surahNumber: 6, ayahNumber: 74, startMs: 9_500, endMs: 21_000, timingEvidence: { ...alignment.timingEvidence, start: { timestampMs: 9_500, source: "word-timestamp" as const }, end: { timestampMs: 21_000, source: "word-timestamp" as const } } },
+    { ...alignment, verseKey: "6:75", surahNumber: 6, ayahNumber: 75, startMs: 21_000, endMs: 32_000, timingEvidence: { ...alignment.timingEvidence, start: { timestampMs: 21_000, source: "word-timestamp" as const }, end: { timestampMs: 32_000, source: "word-timestamp" as const } } },
+    { ...alignment, verseKey: "6:76", surahNumber: 6, ayahNumber: 76, startMs: 32_000, endMs: 60_000, timingEvidence: { ...alignment.timingEvidence, start: { timestampMs: 32_000, source: "word-timestamp" as const }, end: { timestampMs: 60_000, source: "word-timestamp" as const } } },
+  ];
+  const forced = {
+    canonicalPassage: [], wordOccurrences: [], verseTimings: [], pauseCandidates: [],
+    captionSets: alignments.map((item) => ({ id: `${item.verseKey}#1`, verseKey: item.verseKey, canonicalStartWordIndex: 1, canonicalEndWordIndex: 7, startMs: 0, endMs: 60_000, cutReason: "whole-ayah" as const })),
+  } as const;
+  const verses = Object.fromEntries(alignments.map((item) => [item.verseKey, { ...content["93:1"], verseKey: item.verseKey }])) as Record<string, QuranVerseContent>;
+  const segments = createCaptionSegmentsFromForcedAlignment(forced, verses, alignments);
+  assert.deepEqual(segments.map((segment) => [segment.verseKeys[0], segment.startMs, segment.endMs]), [["6:74", 9_500, 21_000], ["6:75", 21_000, 32_000], ["6:76", 32_000, 60_000]]);
+  assert.equal(getActiveCaptionSegment(segments, 0), null);
+  assert.equal(getActiveCaptionSegment(segments, 5_000), null);
+  assert.equal(getActiveCaptionSegment(segments, 9_499), null);
+  assert.equal(getActiveCaptionSegment(segments, 9_500)?.verseKeys[0], "6:74");
+  let seekTimeMs = 0;
+  assert.equal(getActiveCaptionSegment(segments, seekTimeMs), null);
+  seekTimeMs = 9_500;
+  assert.equal(getActiveCaptionSegment(segments, seekTimeMs)?.verseKeys[0], "6:74");
+});
+
 test("every generated caption segment is active at its own midpoint", () => {
   const second = { ...alignment, verseKey: "93:2", ayahNumber: 2, startMs: 1_100, endMs: 2_100, timingEvidence: { ...alignment.timingEvidence, start: { timestampMs: 1_100, source: "word-timestamp" as const }, end: { timestampMs: 2_100, source: "word-timestamp" as const } } };
   const third = { ...second, verseKey: "93:3", ayahNumber: 3, startMs: 2_100, endMs: 3_100, timingEvidence: { ...second.timingEvidence, start: { timestampMs: 2_100, source: "word-timestamp" as const }, end: { timestampMs: 3_100, source: "word-timestamp" as const } } };
