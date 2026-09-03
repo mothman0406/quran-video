@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import { viterbiCtcPath, type CtcFrameLogits, type CtcTargetToken } from "../src/lib/recognition/ctc-forced-alignment.ts";
 
 const vocabularySize = 40;
-const tokens: CtcTargetToken[] = Array.from({ length: 96 }, (_, index) => ({ tokenId: (index % (vocabularySize - 1)) + 1, globalWordIndex: Math.floor(index / 3) + 1 }));
+const tokens: CtcTargetToken[] = Array.from({ length: 96 }, (_, index) => ({ tokenId: (index % (vocabularySize - 1)) + 1, token: String(index), globalWordIndex: Math.floor(index / 3) + 1 }));
 
 for (const seconds of [20, 60, 180]) {
   const frames = seconds * 50;

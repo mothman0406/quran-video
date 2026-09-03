@@ -2,29 +2,34 @@
 
 ## Current milestone: CTC forced-alignment shadow prototype
 
-Complete:
+Implementation complete; real-recording acceptance validation pending:
 
-- Added a browser-local, lazy Quran CTC shadow runner after Whisper passage
-  identification and VAD. It uses the complete canonical ayah range as the
-  only alignment target; no CTC output changes captions, timeline intervals,
-  or manual timing.
-- Added deterministic CTC Viterbi alignment with explicit tie breaking,
-  canonical word timing, exact non-final ayah handoffs, VAD-constrained final
-  completion, pause-to-known-word association, and bounded repeat arcs that
-  keep repeats separate from canonical display content.
-- Added development Copy Alignment Debug fields for the model/license/runtime,
-  every CTC word, verse deltas against current timing, pauses, and runtime
-  timings; the editor shows a development-only completion indication.
-- Documented commercial-license model research and protected behavior in
-  `docs/CTC_MODEL_RESEARCH.md` and `docs/REGRESSION_INVARIANTS.md`.
-- Added deterministic CTC alignment regressions and a Node-only Viterbi
-  benchmark. Browser artifact download/load/inference remains unmeasured here
-  because the selected model artifact returned a Hub resolver 401.
+- Replaced the inaccessible 2.93 GB model with the public Apache-2.0
+  `Tidzo/darten-quran-asr` `model.int8.onnx`, pinned to an immutable revision.
+  The exact artifact is 355,026,417 bytes, uses raw 16 kHz Wav2Vec2 PCM, and
+  produces the verified 51-class character CTC output matching its public
+  vocabulary. The smaller 63-class `hamza` artifact and the no-profit
+  FastConformer mirror are intentionally rejected.
+- Browser loading is client-only and lazy after passage identification/VAD. It
+  uses Cache API storage and ONNX Runtime Web with WebGPU then WASM fallback;
+  a real ONNX Runtime Web WASM session has loaded the selected artifact and
+  produced logits in this environment.
+- CTC target construction now records canonical Uthmani word -> target-only
+  normalized character text -> exact CTC tokens -> aligned frames. Canonical
+  display text is never altered; weak forced paths are explicitly marked low
+  confidence.
+- Expanded development Copy Alignment Debug with artifact/cache/backend and
+  runtime timings, target tokenization, low-confidence words, verse deltas,
+  and named pause boundaries. CTC remains shadow-only and cannot change
+  `CaptionSegment` timing or manual edits.
+- Added targeted normalization/tokenization/artifact regressions and updated
+  commercial model research.
 
-Verification pending in a browser with an accessible model artifact: compare
-the real 6:76 → 6:77 recording, including the last CTC word of 6:76, first
-CTC word of 6:77, their pause, and delta versus the preserved production
-caption timing.
+Verification: `npm test` (149 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. The workspace has no real
+6:74–6:77 recording and no browser performance trace, so the required
+production-versus-CTC transition comparison and cold/warm browser metrics
+remain the final acceptance blocker.
 
 ## Current milestone: Refine Quran ayah boundaries
 

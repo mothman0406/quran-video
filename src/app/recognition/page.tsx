@@ -12,7 +12,7 @@ import {
   localWhisperTranscriber,
 } from "@/lib/recognition/local-whisper";
 import type { LocalTranscriptionResult, TranscriptionProgress } from "@/lib/recognition/transcriber";
-import { QURAN_CTC_SHADOW_MODEL, QURAN_CTC_SHADOW_MODEL_LICENSE, QURAN_CTC_SHADOW_REPOSITORY_MB, QURAN_CTC_SHADOW_RUNTIME } from "@/lib/recognition/local-ctc";
+import { QURAN_CTC_SHADOW_MODEL, QURAN_CTC_SHADOW_MODEL_ARTIFACT, QURAN_CTC_SHADOW_MODEL_BYTES, QURAN_CTC_SHADOW_MODEL_LICENSE, QURAN_CTC_SHADOW_RUNTIME } from "@/lib/recognition/local-ctc";
 
 function formatMilliseconds(value: number) {
   return `${(value / 1_000).toFixed(1)}s`;
@@ -228,6 +228,8 @@ export default function RecognitionSpikePage() {
   function timingReportText() {
     const debug = timingDebugPayload();
     const first = debug.firstStartTrace;
+    const ctc = debug.forcedAlignmentShadow;
+    const ctcPerformance = ctc?.performance;
     const value = (item: number | null | undefined) => item === null || item === undefined ? "—" : `${item} ms`;
     return [
       "SOURCE", `duration: ${value(debug.source.durationMs)}`,
@@ -239,10 +241,12 @@ export default function RecognitionSpikePage() {
       ...debug.verses.flatMap((verse) => ["", `VERSE ${verse.verseKey}`, `first aligned ASR evidence: ${value(verse.firstAlignedAsrEvidenceMs)}`, `alignment timestamp: ${value(verse.firstStrongAlignmentAnchorMs)}`, `PCM-refined start: ${value(verse.pcmLocalOnsetCandidateMs)}`, `VerseAlignment start: ${value(verse.verseAlignmentStartMs)}`, `CaptionSegment start: ${value(verse.captionSegmentStartMs)}`, `manual start: ${value(verse.manualStartMs)}`, `signed error: ${value(verse.signedErrorMs)}`]),
       "", "MANUAL MARKS", ...debug.manualGroundTruthMarks.map((mark) => `${mark.kind}: ${value(mark.timeMs)}`),
       "", "ACTIVE DISPLAY TRACE", ...debug.actualPreviewActivations.map((entry) => `${entry.verseKeys.join(", ")} activated at ${value(entry.timeMs)}`),
-      "", "FORCED ALIGNMENT SHADOW", `status: ${debug.forcedAlignmentShadow?.status ?? "not run"}`, `model: ${QURAN_CTC_SHADOW_MODEL}`, `license: ${QURAN_CTC_SHADOW_MODEL_LICENSE}`, `model size: repository ${QURAN_CTC_SHADOW_REPOSITORY_MB} MB; exact artifact recorded by download telemetry`, `runtime: ${QURAN_CTC_SHADOW_RUNTIME}`,
-      "", "WORD ALIGNMENT", ...(debug.forcedAlignmentShadow?.words.map((word) => `${word.verseKey} | ${word.canonicalWordIndex} | ${word.canonicalArabic} | ${value(word.startMs)} | ${value(word.endMs)} | ${word.confidence}`) ?? []),
-      "", "VERSE COMPARISON", ...matches.map((match) => { const ctc = debug.forcedAlignmentShadow?.verses.find((verse) => verse.verseKey === match.verseKey); return `${match.verseKey} | ${value(match.startMs)} | ${value(ctc?.startMs)} | ${ctc ? `${ctc.startMs - match.startMs} ms` : "—"} | ${value(match.endMs)} | ${value(ctc?.endMs)} | ${ctc ? `${ctc.endMs - match.endMs} ms` : "—"}`; }),
-      "", "CTC PAUSES", ...(debug.forcedAlignmentShadow?.pauses.map((pause) => `${value(pause.startMs)}–${value(pause.endMs)} | before ${pause.canonicalWordBefore} | after ${pause.canonicalWordAfter} | ayah boundary: ${pause.isAyahBoundary ? "yes" : "no"}`) ?? []),
+      "", "FORCED ALIGNMENT SHADOW", `status: ${ctc?.status ?? "not run"}`, `model: ${QURAN_CTC_SHADOW_MODEL}`, `artifact: ${QURAN_CTC_SHADOW_MODEL_ARTIFACT}`, `license: ${QURAN_CTC_SHADOW_MODEL_LICENSE}`, `model size: ${QURAN_CTC_SHADOW_MODEL_BYTES} bytes`, `runtime: ${QURAN_CTC_SHADOW_RUNTIME}`,
+      "", "CTC PERFORMANCE", `artifact bytes: ${ctcPerformance?.modelArtifactBytes ?? "—"}`, `transferred bytes: ${ctcPerformance?.modelDownloadBytes ?? "—"}`, `cache: ${ctcPerformance?.cacheStatus ?? "—"}`, `backend: ${ctcPerformance?.backend ?? "—"}`, `cold load: ${value(ctcPerformance?.coldModelLoadMs)}`, `warm load: ${value(ctcPerformance?.warmModelLoadMs)}`, `preprocessing: ${value(ctcPerformance?.preprocessingMs)}`, `inference: ${value(ctcPerformance?.inferenceMs)}`, `Viterbi: ${value(ctcPerformance?.viterbiMs)}`, `total: ${value(ctcPerformance?.totalMs)}`,
+      "", "CTC TOKENIZATION", ...(ctc?.canonicalWords.map((word) => `${word.verseKey} | ${word.canonicalWordIndex} | ${word.canonicalArabic} | ${word.alignmentText} | ${(ctc.targetTokens.filter((token) => token.globalWordIndex === word.globalWordIndex).map((token) => `${token.token}:${token.tokenId}`).join(" "))}`) ?? []),
+      "", "WORD ALIGNMENT", ...(ctc?.words.map((word) => `${word.verseKey} | ${word.canonicalWordIndex} | ${word.canonicalArabic} | ${value(word.startMs)} | ${value(word.endMs)} | ${word.confidence} | low confidence: ${word.lowConfidence ? "yes" : "no"}`) ?? []),
+      "", "VERSE COMPARISON", ...matches.map((match) => { const ctcVerse = ctc?.verses.find((verse) => verse.verseKey === match.verseKey); return `${match.verseKey} | ${value(match.startMs)} | ${value(ctcVerse?.startMs)} | ${ctcVerse ? `${ctcVerse.startMs - match.startMs} ms` : "—"} | ${value(match.endMs)} | ${value(ctcVerse?.endMs)} | ${ctcVerse ? `${ctcVerse.endMs - match.endMs} ms` : "—"}`; }),
+      "", "CTC PAUSES", ...(ctc?.pauses.map((pause) => `${value(pause.startMs)}–${value(pause.endMs)} | before ${ctc.words.find((word) => word.globalWordIndex === pause.canonicalWordBefore)?.canonicalArabic ?? pause.canonicalWordBefore} | after ${ctc.words.find((word) => word.globalWordIndex === pause.canonicalWordAfter)?.canonicalArabic ?? pause.canonicalWordAfter} | ayah boundary: ${pause.isAyahBoundary ? "yes" : "no"}`) ?? []),
     ].join("\n");
   }
   async function copyTimingReport() {

@@ -12,14 +12,14 @@ import {
 } from "../src/lib/recognition/ctc-forced-alignment.ts";
 
 const words: CtcCanonicalWord[] = [
-  { verseKey: "6:76", canonicalWordIndex: 1, globalWordIndex: 1, canonicalArabic: "قال" },
-  { verseKey: "6:76", canonicalWordIndex: 2, globalWordIndex: 2, canonicalArabic: "هذا" },
-  { verseKey: "6:77", canonicalWordIndex: 1, globalWordIndex: 3, canonicalArabic: "ربي" },
+  { verseKey: "6:76", canonicalWordIndex: 1, globalWordIndex: 1, canonicalArabic: "قال", alignmentText: "قال" },
+  { verseKey: "6:76", canonicalWordIndex: 2, globalWordIndex: 2, canonicalArabic: "هذا", alignmentText: "هذا" },
+  { verseKey: "6:77", canonicalWordIndex: 1, globalWordIndex: 3, canonicalArabic: "ربي", alignmentText: "ربي" },
 ];
 const tokens: CtcTargetToken[] = [
-  { tokenId: 1, globalWordIndex: 1 }, { tokenId: 2, globalWordIndex: 1 },
-  { tokenId: 3, globalWordIndex: 2 }, { tokenId: 4, globalWordIndex: 2 },
-  { tokenId: 5, globalWordIndex: 3 }, { tokenId: 6, globalWordIndex: 3 },
+  { tokenId: 1, token: "a", globalWordIndex: 1 }, { tokenId: 2, token: "b", globalWordIndex: 1 },
+  { tokenId: 3, token: "c", globalWordIndex: 2 }, { tokenId: 4, token: "d", globalWordIndex: 2 },
+  { tokenId: 5, token: "e", globalWordIndex: 3 }, { tokenId: 6, token: "f", globalWordIndex: 3 },
 ];
 
 function logitsFor(ids: number[], vocabularySize = 7): CtcFrameLogits {

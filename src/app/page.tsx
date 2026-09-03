@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import { analyzeTranscript, createPrimaryTranscript, hafsSurahs, hafsVerses } from "@/lib/recognition/core";
-import { QURAN_CTC_SHADOW_MODEL, QURAN_CTC_SHADOW_MODEL_LICENSE, QURAN_CTC_SHADOW_REPOSITORY_MB, QURAN_CTC_SHADOW_RUNTIME } from "@/lib/recognition/local-ctc";
+import { QURAN_CTC_SHADOW_MODEL, QURAN_CTC_SHADOW_MODEL_ARTIFACT, QURAN_CTC_SHADOW_MODEL_BYTES, QURAN_CTC_SHADOW_MODEL_LICENSE, QURAN_CTC_SHADOW_RUNTIME } from "@/lib/recognition/local-ctc";
 import type { TranscriptionProgress } from "@/lib/recognition/transcriber";
 import {
   recognitionToVerseAlignments,
@@ -837,9 +837,17 @@ export default function Home() {
         forcedAlignmentShadow: {
           model: QURAN_CTC_SHADOW_MODEL,
           license: QURAN_CTC_SHADOW_MODEL_LICENSE,
-          modelSize: `repository ${QURAN_CTC_SHADOW_REPOSITORY_MB} MB; exact int8 artifact size is captured from browser download telemetry`,
+          modelSize: `${QURAN_CTC_SHADOW_MODEL_ARTIFACT}: ${QURAN_CTC_SHADOW_MODEL_BYTES} bytes`,
           runtime: QURAN_CTC_SHADOW_RUNTIME,
           result: analysis.ctcShadow,
+          performance: analysis.ctcShadow?.performance ?? null,
+          tokenization: (analysis.ctcShadow?.canonicalWords ?? []).map((word) => ({
+            canonicalWord: word.canonicalArabic,
+            normalizedAlignmentText: word.alignmentText,
+            targetCtcTokens: (analysis.ctcShadow?.targetTokens ?? [])
+              .filter((token) => token.globalWordIndex === word.globalWordIndex)
+              .map((token) => ({ token: token.token, tokenId: token.tokenId })),
+          })),
           wordAlignment: analysis.ctcShadow?.words ?? [],
           verseComparison: next.map((current) => {
             const ctc = analysis.ctcShadow?.verses.find((verse) => verse.verseKey === current.verseKey);
@@ -853,7 +861,11 @@ export default function Home() {
               endDeltaMs: ctc ? ctc.endMs - current.endMs : null,
             };
           }),
-          pauses: analysis.ctcShadow?.pauses ?? [],
+          pauses: (analysis.ctcShadow?.pauses ?? []).map((pause) => ({
+            ...pause,
+            wordBefore: analysis.ctcShadow?.words.find((word) => word.globalWordIndex === pause.canonicalWordBefore)?.canonicalArabic ?? null,
+            wordAfter: analysis.ctcShadow?.words.find((word) => word.globalWordIndex === pause.canonicalWordAfter)?.canonicalArabic ?? null,
+          })),
         },
       };
       publishAlignmentDebug(alignmentDebug.current);

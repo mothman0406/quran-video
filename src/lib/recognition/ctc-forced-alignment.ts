@@ -8,11 +8,15 @@ export type CtcCanonicalWord = {
   verseKey: string;
   canonicalWordIndex: number;
   globalWordIndex: number;
+  /** Display text. This is never normalized or replaced by acoustic tokens. */
   canonicalArabic: string;
+  /** Model-only text used to derive the target CTC tokens. */
+  alignmentText: string;
 };
 
 export type CtcTargetToken = {
   tokenId: number;
+  token: string;
   globalWordIndex: number;
 };
 
@@ -35,6 +39,8 @@ export type CtcWordTiming = CtcCanonicalWord & {
   endMs: number;
   confidence: number;
   alignmentScore: number;
+  /** CTC was able to emit a path, but its local posterior is too weak to trust as a precise boundary. */
+  lowConfidence: boolean;
 };
 
 export type CtcAudibleRepetition = CtcRepeat & {
@@ -63,6 +69,8 @@ export type CtcForcedAlignmentResult = {
   status: "complete" | "unavailable" | "failed";
   reason?: string;
   canonicalWords: readonly CtcCanonicalWord[];
+  /** Exact model-token targets, grouped by their original canonical word. */
+  targetTokens: readonly CtcTargetToken[];
   words: readonly CtcWordTiming[];
   verses: readonly CtcVerseTiming[];
   pauses: readonly CtcPause[];
@@ -71,8 +79,12 @@ export type CtcForcedAlignmentResult = {
   frameDurationMs: number;
   performance?: {
     modelDownloadBytes?: number;
+    modelArtifactBytes?: number;
+    cacheStatus?: "cold-download" | "browser-cache" | "memory" | "unavailable";
+    backend?: "webgpu" | "wasm";
     coldModelLoadMs?: number;
     warmModelLoadMs?: number;
+    preprocessingMs?: number;
     inferenceMs?: number;
     viterbiMs?: number;
     totalMs?: number;
@@ -222,7 +234,7 @@ export function forceAlignCtc(
   const startedAt = performance.now();
   const expanded = expandCtcTargetWithRepeats(tokens, options.repeats ?? []);
   const path = viterbiCtcPath(logits, expanded.tokens, options.blankTokenId);
-  if (!path) return { status: "failed", reason: "CTC trellis could not reach the complete canonical target.", canonicalWords, words: [], verses: [], pauses: [], audibleRepetitions: [], frameCount: logits.frames, frameDurationMs: 0 };
+  if (!path) return { status: "failed", reason: "CTC trellis could not reach the complete canonical target.", canonicalWords, targetTokens: tokens, words: [], verses: [], pauses: [], audibleRepetitions: [], frameCount: logits.frames, frameDurationMs: 0 };
   const { sourceTokenIndexes } = expandTarget(expanded.tokens, options.blankTokenId);
   const occurrenceFrames = new Map<number, number[]>();
   for (const [frame, state] of path.states.entries()) {
@@ -232,7 +244,7 @@ export function forceAlignCtc(
     frames.push(frame);
     occurrenceFrames.set(tokenIndex, frames);
   }
-  if (occurrenceFrames.size !== expanded.tokens.length) return { status: "failed", reason: "At least one canonical CTC token received no acoustic frame.", canonicalWords, words: [], verses: [], pauses: [], audibleRepetitions: [], frameCount: logits.frames, frameDurationMs: 0 };
+  if (occurrenceFrames.size !== expanded.tokens.length) return { status: "failed", reason: "At least one canonical CTC token received no acoustic frame.", canonicalWords, targetTokens: tokens, words: [], verses: [], pauses: [], audibleRepetitions: [], frameCount: logits.frames, frameDurationMs: 0 };
   const byWord = new Map<number, Array<{ frame: number; score: number; repeated: boolean }>>();
   for (const [tokenIndex, frames] of occurrenceFrames) {
     const token = expanded.tokens[tokenIndex]!;
@@ -246,7 +258,8 @@ export function forceAlignCtc(
     const first = Math.min(...frames.map((item) => item.frame));
     const last = Math.max(...frames.map((item) => item.frame));
     const score = frames.reduce((sum, item) => sum + item.score, 0) / frames.length;
-    return { ...word, startMs: msAtFrame(first, logits.frames, options.startMs, options.endMs), endMs: Math.max(msAtFrame(last + 1, logits.frames, options.startMs, options.endMs), msAtFrame(first, logits.frames, options.startMs, options.endMs) + 1), confidence: Number(Math.exp(Math.max(-20, score)).toFixed(4)), alignmentScore: Number(score.toFixed(4)) };
+    const confidence = Number(Math.exp(Math.max(-20, score)).toFixed(4));
+    return { ...word, startMs: msAtFrame(first, logits.frames, options.startMs, options.endMs), endMs: Math.max(msAtFrame(last + 1, logits.frames, options.startMs, options.endMs), msAtFrame(first, logits.frames, options.startMs, options.endMs) + 1), confidence, alignmentScore: Number(score.toFixed(4)), lowConfidence: confidence < 0.08 };
   });
   const audibleRepetitions = (options.repeats ?? []).map((repeat) => {
     const frames = [...byWord.entries()].filter(([word]) => word >= repeat.startWordIndex && word <= repeat.endWordIndex).flatMap(([, items]) => items.filter((item) => item.repeated));
@@ -267,7 +280,7 @@ export function forceAlignCtc(
     if (after.startMs - before.endMs < 80) continue;
     pauses.push({ startMs: before.endMs, endMs: after.startMs, durationMs: after.startMs - before.endMs, canonicalWordBefore: before.globalWordIndex, canonicalWordAfter: after.globalWordIndex, verseKey: before.verseKey, isAyahBoundary: before.verseKey !== after.verseKey });
   }
-  return { status: "complete", canonicalWords, words, verses, pauses, audibleRepetitions, frameCount: logits.frames, frameDurationMs: Number(((options.endMs - options.startMs) / Math.max(1, logits.frames)).toFixed(4)), performance: { viterbiMs: Math.round(performance.now() - startedAt) } };
+  return { status: "complete", canonicalWords, targetTokens: tokens, words, verses, pauses, audibleRepetitions, frameCount: logits.frames, frameDurationMs: Number(((options.endMs - options.startMs) / Math.max(1, logits.frames)).toFixed(4)), performance: { viterbiMs: Math.round(performance.now() - startedAt) } };
 }
 
 /** Builds complete display words from the fixed identified verse range. */
@@ -278,5 +291,6 @@ export function canonicalCtcWords(verses: readonly { verseKey: string; text: str
     canonicalWordIndex: index + 1,
     globalWordIndex: ++globalWordIndex,
     canonicalArabic,
+    alignmentText: canonicalArabic,
   })));
 }
