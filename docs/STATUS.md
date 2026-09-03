@@ -1,6 +1,16 @@
 # Status
 
-## Current milestone: Fix earliest ayah transition selection and CTC structural targets
+## Current milestone: Trace the real editor timing flow
+
+Complete:
+
+- Removed `forcedAlignment.captionSets` as an authority for newly generated editor display timing. Automatic captions now always flow from the final `RecognitionMatch` / `VerseAlignment` values into `CaptionSegment`; forced-alignment remains available only as diagnostic metadata.
+- Added a development-only build marker to **Copy Alignment Debug**, post-React-state editor/timeline timing traces for every ayah transition, exact preview decisions at `boundary - 1` and `boundary`, and generated-caption timing values. The trace includes the earliest candidate and selected recognition boundary already emitted by the timing analysis.
+- Added a loud development invariant that every generated non-final `CaptionSegment` endpoint equals the final adjacent `VerseAlignment` boundary. A 6:76 → 6:77 regression now covers recognition alignment → automatic editor captions → half-open active-caption selection at 44,831/44,832 ms.
+
+Verification: `npm test` (153 passing), `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. The production build retains the existing non-fatal `vad-web` critical-dependency warning. Real-browser Copy Alignment Debug with the affected recording remains the final empirical check; it explicitly reports the CTC shadow result (`complete` is the successful status), target-token count, word-alignment count, and verse starts without making CTC authoritative.
+
+## Previous milestone: Fix earliest ayah transition selection and CTC structural targets
 
 Complete:
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, createCaptionSegmentsFromForcedAlignment, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { captionForPlaybackTime, recognitionToVerseAlignments } from "../src/lib/editor/recognition.ts";
+import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createAutomaticCaptionSegments, createCaptionSegments, createCaptionSegmentsFromForcedAlignment, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -76,6 +76,25 @@ test("first caption is inactive during leading silence and activates exactly at 
   assert.equal(captionVisualStatesAtTime(segments, detectedStartMs - 1).length, 0);
   assert.equal(getActiveCaptionSegment(segments, detectedStartMs)?.id, segments[0]?.id);
   assert.equal(captionVisualStatesAtTime(segments, detectedStartMs)[0]?.segment.id, segments[0]?.id);
+});
+
+test("automatic editor integration retains the selected 6:76 -> 6:77 boundary through active-caption selection", () => {
+  const boundaryMs = 44_832;
+  const alignments = recognitionToVerseAlignments([
+    { verseKey: "6:76", startMs: 32_000, endMs: boundaryMs, confidence: 0.9, timing: { start: { timestampMs: 32_000, source: "word-timestamp" as const }, end: { timestampMs: boundaryMs, source: "word-timestamp" as const }, matchedText: "" }, wordSupport: { canonicalStartWordIndex: 1, canonicalEndWordIndex: 1, matchedCanonicalWordCount: 1, canonicalWordCount: 1, coverage: 1, evidenceQuality: 1 } },
+    { verseKey: "6:77", startMs: boundaryMs, endMs: 66_000, confidence: 0.9, timing: { start: { timestampMs: boundaryMs, source: "word-timestamp" as const }, end: { timestampMs: 66_000, source: "word-timestamp" as const }, matchedText: "" }, wordSupport: { canonicalStartWordIndex: 1, canonicalEndWordIndex: 1, matchedCanonicalWordCount: 1, canonicalWordCount: 1, coverage: 1, evidenceQuality: 1 } },
+  ]);
+  const verses = {
+    "6:76": { ...content["93:1"], verseKey: "6:76" },
+    "6:77": { ...content["93:1"], verseKey: "6:77" },
+  } as Record<string, QuranVerseContent>;
+
+  // This is the production automatic path: recognition alignment -> editor
+  // CaptionSegments -> the same half-open selector used by timeline/preview.
+  const editorSegments = createAutomaticCaptionSegments(alignments, verses);
+  assert.deepEqual(editorSegments.map((segment) => [segment.verseKeys[0], segment.startMs, segment.endMs]), [["6:76", 32_000, boundaryMs], ["6:77", boundaryMs, 66_000]]);
+  assert.equal(getActiveCaptionSegment(editorSegments, boundaryMs - 1)?.verseKeys[0], "6:76");
+  assert.equal(getActiveCaptionSegment(editorSegments, boundaryMs)?.verseKeys[0], "6:77");
 });
 
 test("ASR alignment gaps never remove canonical words from an ayah caption", () => {

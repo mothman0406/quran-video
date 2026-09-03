@@ -2,7 +2,7 @@
 
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { analyzeTranscript, createPrimaryTranscript, hafsVerses, type RecognitionAnalysis, type RecognitionResult } from "@/lib/recognition/core";
-import { createCaptionSegments, createCaptionSegmentsFromForcedAlignment, getActiveCaptionSegment, type CaptionSegment } from "@/lib/editor/captions";
+import { createAutomaticCaptionSegments, getActiveCaptionSegment, type CaptionSegment } from "@/lib/editor/captions";
 import { recognitionToVerseAlignments, type VerseAlignment } from "@/lib/editor/recognition";
 import { getVerses } from "@/lib/quran/local";
 import {
@@ -114,7 +114,7 @@ export default function RecognitionSpikePage() {
       const nextAlignments = recognitionToVerseAlignments(nextAnalysis.matches);
       setAlignments(nextAlignments);
       const verseContent = nextAlignments.length ? Object.fromEntries(getVerses(nextAlignments[0].verseKey, nextAlignments.at(-1)!.verseKey).map((verse) => [verse.verseKey, verse])) : {};
-      setSegments(nextAnalysis.forcedAlignment ? createCaptionSegmentsFromForcedAlignment(nextAnalysis.forcedAlignment, verseContent, nextAlignments) : createCaptionSegments(nextAlignments, verseContent));
+      setSegments(createAutomaticCaptionSegments(nextAlignments, verseContent));
       (window as Window & { __QURAN_ALIGNMENT_DEBUG__?: unknown }).__QURAN_ALIGNMENT_DEBUG__ = {
         source: { durationMs: output.audioAnalysis.durationMs, sampleRate: output.audioAnalysis.sampleRate },
         speechRegions: output.speechRegions,

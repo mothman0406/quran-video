@@ -19,12 +19,14 @@ import {
 } from "@/lib/editor/recognition";
 import {
   clampCaptionPositioning,
+  createAutomaticCaptionSegments,
   createCaptionSegments,
-  createCaptionSegmentsFromForcedAlignment,
+  generatedCaptionBoundaryTrace,
   DEFAULT_CAPTION_BACKGROUND,
   DEFAULT_CAPTION_PRESENTATION,
   DEFAULT_TRANSITION_SETTINGS,
   DEFAULT_TYPOGRAPHY,
+  getActiveCaptionSegment,
   mergeCaptionWithNext,
   mergeCaptionWithPrevious,
   resetCaptionPositioning,
@@ -99,6 +101,7 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import { recordAuthenticatedUsage } from "@/lib/usage/client";
 import { getCloudProjectLimit, getCustomStyleLimit, getPlanEntitlements, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
+import { DEV_BUILD_VERSION } from "@/lib/build-info";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -135,6 +138,17 @@ function publishAlignmentDebug(value: unknown) {
     Object.defineProperty(window, "__QURAN_ALIGNMENT_DEBUG__", { value, configurable: true });
   }
 }
+
+type AlignmentDebug = {
+  transitions?: Array<{
+    previousVerseKey: string;
+    nextVerseKey: string;
+    selectedTransitionMs: number;
+    candidateNextAyahEvidence: Array<{ timestampMs: number }>;
+  }>;
+  [key: string]: unknown;
+};
+
 export default function Home() {
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -217,7 +231,7 @@ export default function Home() {
   const savedSignature = useRef<string | null>(null);
   const cloudBaselineUpdatedAt = useRef<string | null>(null);
   const generation = useRef(0);
-  const alignmentDebug = useRef<unknown>(null);
+  const alignmentDebug = useRef<AlignmentDebug | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -779,13 +793,14 @@ export default function Home() {
       const verseContent = Object.fromEntries(
         getVerses(next[0].verseKey, next.at(-1)!.verseKey).map((verse) => [verse.verseKey, verse]),
       );
+      // `forcedAlignment` remains diagnostic evidence only. A generated editor
+      // caption always receives its interval from the final VerseAlignment.
+      const nextSegments = createAutomaticCaptionSegments(next, verseContent);
       setAlignments(next);
-      setSegments(
-        analysis.forcedAlignment
-          ? createCaptionSegmentsFromForcedAlignment(analysis.forcedAlignment, verseContent, next)
-          : createCaptionSegments(next, verseContent),
-      );
+      setSegments(nextSegments);
       alignmentDebug.current = {
+        appCommit: DEV_BUILD_VERSION,
+        buildVersion: DEV_BUILD_VERSION,
         source: { durationMs: result.audioAnalysis.durationMs, sampleRate: result.audioAnalysis.sampleRate },
         speechRegions: result.speechRegions,
         transcriber: { model: "onnx-community/whisper-base_timestamped", backend: result.backend, timestampMode: result.timestampMode, runtimes: { modelLoadMs: result.modelLoadMs, transcriptionMs: result.transcriptionMs, totalMs: result.durationMs } },
@@ -825,6 +840,12 @@ export default function Home() {
           startEvidence: item.timingEvidence.start,
           endEvidence: item.timingEvidence.end,
         })),
+        generatedCaptionSegments: nextSegments.map((segment) => ({
+          id: segment.id,
+          verseKeys: segment.verseKeys,
+          startMs: segment.startMs,
+          endMs: segment.endMs,
+        })),
         transitions: (analysis.timingTrace?.transitions ?? []).map((transition) => ({
           ...transition,
           localAsrWindows: (initialTimingRecoveryPlan?.windows ?? []).filter((window) => window.reason === "transition"
@@ -834,6 +855,14 @@ export default function Home() {
         finalAyahEnd: analysis.timingTrace?.finalAyahEnd ?? null,
         pauses: analysis.forcedAlignment?.pauseCandidates ?? [],
         displaySets: analysis.forcedAlignment?.captionSets ?? [],
+        ctcShadowStatus: {
+          // `complete` is the successful CTC status in this codebase.
+          status: analysis.ctcShadow?.status ?? "not-run",
+          reason: analysis.ctcShadow?.reason ?? null,
+          targetTokenCount: analysis.ctcShadow?.targetTokens.length ?? 0,
+          wordAlignmentCount: analysis.ctcShadow?.words.length ?? 0,
+          firstCtcStartMs: analysis.ctcShadow?.verses[0]?.startMs ?? null,
+        },
         forcedAlignmentShadow: {
           model: QURAN_CTC_SHADOW_MODEL,
           license: QURAN_CTC_SHADOW_MODEL_LICENSE,
@@ -888,6 +917,37 @@ export default function Home() {
       }
     }
   }
+  useEffect(() => {
+    const debug = alignmentDebug.current;
+    if (!debug?.transitions?.length) return;
+    const boundaries = generatedCaptionBoundaryTrace(alignments, segments);
+    const boundaryByPair = new Map(boundaries.map((trace) => [`${trace.previousVerseKey}->${trace.nextVerseKey}`, trace]));
+    debug.runtimeCaptionTiming = debug.transitions.map((transition) => {
+      const boundary = boundaryByPair.get(`${transition.previousVerseKey}->${transition.nextVerseKey}`);
+      const selectedTransitionMs = transition.selectedTransitionMs;
+      const activeBefore = getActiveCaptionSegment(segments, selectedTransitionMs - 1);
+      const activeAt = getActiveCaptionSegment(segments, selectedTransitionMs);
+      return {
+        previousVerseKey: transition.previousVerseKey,
+        nextVerseKey: transition.nextVerseKey,
+        earliestCandidateNextAyahEvidence: transition.candidateNextAyahEvidence[0] ?? null,
+        chosenTransitionCandidate: selectedTransitionMs,
+        selectedTransitionMs,
+        verseAlignment: boundary?.verseAlignment ?? null,
+        generatedCaptionSegment: boundary?.captionSegment ?? null,
+        // These are captured only after React committed `setSegments`; the
+        // timeline receives this same `segments` state as a prop.
+        editorStateCaptionSegment: boundary?.captionSegment ?? null,
+        timelineSegment: boundary?.captionSegment ?? null,
+        previewActiveSegment: {
+          atSelectedTransitionMinusOneMs: activeBefore?.verseKeys ?? null,
+          atSelectedTransitionMs: activeAt?.verseKeys ?? null,
+        },
+      };
+    });
+    publishAlignmentDebug(debug);
+  }, [alignments, segments]);
+
   async function copyAlignmentDebug() {
     if (!alignmentDebug.current || typeof navigator === "undefined") return;
     await navigator.clipboard.writeText(JSON.stringify(alignmentDebug.current, null, 2));

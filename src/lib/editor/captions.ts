@@ -398,6 +398,72 @@ export function createCaptionSegments(
   return continuousDisplayTiming(generated);
 }
 
+export type GeneratedCaptionBoundaryTrace = {
+  previousVerseKey: string;
+  nextVerseKey: string;
+  verseAlignment: { previousEndMs: number; nextStartMs: number };
+  captionSegment: { previousEndMs: number | null; nextStartMs: number | null };
+};
+
+/**
+ * The automatic editor pipeline has exactly one timing authority:
+ * RecognitionMatch -> VerseAlignment -> CaptionSegment. Forced-alignment
+ * plans remain diagnostic metadata and cannot supply a competing display
+ * interval for newly generated captions.
+ */
+export function createAutomaticCaptionSegments(
+  alignments: readonly VerseAlignment[],
+  content: Readonly<Record<string, QuranVerseContent | undefined>>,
+): CaptionSegment[] {
+  const segments = createCaptionSegments(alignments, content);
+  assertGeneratedCaptionTiming(alignments, segments);
+  return segments;
+}
+
+/** Produces the exact boundary values carried through automatic generation. */
+export function generatedCaptionBoundaryTrace(
+  alignments: readonly VerseAlignment[],
+  segments: readonly CaptionSegment[],
+): GeneratedCaptionBoundaryTrace[] {
+  const segmentForVerse = new Map<string, CaptionSegment>();
+  for (const segment of segments) {
+    for (const verseKey of segment.verseKeys) segmentForVerse.set(verseKey, segment);
+  }
+  return alignments.slice(0, -1).map((previous, index) => {
+    const next = alignments[index + 1]!;
+    return {
+      previousVerseKey: previous.verseKey,
+      nextVerseKey: next.verseKey,
+      verseAlignment: { previousEndMs: previous.endMs, nextStartMs: next.startMs },
+      captionSegment: {
+        previousEndMs: segmentForVerse.get(previous.verseKey)?.endMs ?? null,
+        nextStartMs: segmentForVerse.get(next.verseKey)?.startMs ?? null,
+      },
+    };
+  });
+}
+
+/**
+ * Generated timing must retain every selected VerseAlignment boundary exactly.
+ * This is development-only because it is a guard against a second generation
+ * pipeline, not a recovery/clamping rule for manual editor changes.
+ */
+export function assertGeneratedCaptionTiming(
+  alignments: readonly VerseAlignment[],
+  segments: readonly CaptionSegment[],
+): void {
+  if (process.env.NODE_ENV === "production") return;
+  for (const trace of generatedCaptionBoundaryTrace(alignments, segments)) {
+    if (trace.verseAlignment.previousEndMs !== trace.verseAlignment.nextStartMs) {
+      throw new Error(`Generated VerseAlignment boundary diverged for ${trace.previousVerseKey} -> ${trace.nextVerseKey}: ${trace.verseAlignment.previousEndMs} != ${trace.verseAlignment.nextStartMs}.`);
+    }
+    if (trace.captionSegment.previousEndMs !== trace.verseAlignment.previousEndMs
+      || trace.captionSegment.nextStartMs !== trace.verseAlignment.nextStartMs) {
+      throw new Error(`Generated CaptionSegment boundary diverged for ${trace.previousVerseKey} -> ${trace.nextVerseKey}: expected ${trace.verseAlignment.nextStartMs} ms, got ${trace.captionSegment.previousEndMs ?? "missing"} -> ${trace.captionSegment.nextStartMs ?? "missing"}.`);
+    }
+  }
+}
+
 /** Creates editor display blocks from the canonical forced-alignment plan.
  * Recognition data remains separate: manual timing edits still only mutate
  * these user-facing intervals. */
