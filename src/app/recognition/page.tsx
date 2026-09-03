@@ -2,7 +2,7 @@
 
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { analyzeTranscript, createPrimaryTranscript, hafsVerses, type RecognitionAnalysis, type RecognitionResult } from "@/lib/recognition/core";
-import { createAutomaticCaptionSegments, getActiveCaptionSegment, type CaptionSegment } from "@/lib/editor/captions";
+import { assertDerivedTimingMatchesCaptions, createCaptionSegmentsFromVerseBoundaries, getActiveCaptionSegment, type CaptionSegment } from "@/lib/editor/captions";
 import { recognitionToVerseAlignments, type VerseAlignment } from "@/lib/editor/recognition";
 import { getVerses } from "@/lib/quran/local";
 import {
@@ -114,7 +114,9 @@ export default function RecognitionSpikePage() {
       const nextAlignments = recognitionToVerseAlignments(nextAnalysis.matches);
       setAlignments(nextAlignments);
       const verseContent = nextAlignments.length ? Object.fromEntries(getVerses(nextAlignments[0].verseKey, nextAlignments.at(-1)!.verseKey).map((verse) => [verse.verseKey, verse])) : {};
-      setSegments(createAutomaticCaptionSegments(nextAlignments, verseContent));
+      const nextSegments = createCaptionSegmentsFromVerseBoundaries(nextAnalysis.verseBoundaries, verseContent);
+      assertDerivedTimingMatchesCaptions(nextSegments, nextAnalysis.forcedAlignment?.verseTimings ?? []);
+      setSegments(nextSegments);
       (window as Window & { __QURAN_ALIGNMENT_DEBUG__?: unknown }).__QURAN_ALIGNMENT_DEBUG__ = {
         source: { durationMs: output.audioAnalysis.durationMs, sampleRate: output.audioAnalysis.sampleRate },
         speechRegions: output.speechRegions,
@@ -148,7 +150,7 @@ export default function RecognitionSpikePage() {
         wordAlignment: nextAnalysis.forcedAlignment?.wordOccurrences ?? [],
         verseTiming: nextAnalysis.forcedAlignment?.verseTimings ?? [],
         pauses: nextAnalysis.forcedAlignment?.pauseCandidates ?? [],
-        displaySets: nextAnalysis.forcedAlignment?.captionSets ?? [],
+        legacyDiagnosticDisplaySets: nextAnalysis.forcedAlignment?.captionSets ?? [],
         forcedAlignmentShadow: nextAnalysis.ctcShadow,
       };
     } catch (caught) {

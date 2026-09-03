@@ -1,7 +1,7 @@
 import { quranDisplayText } from "../quran/content.ts";
 import type { QuranVerseContent } from "../quran/content.ts";
 import type { VerseAlignment } from "./recognition.ts";
-import type { ForcedAlignment } from "../recognition/core.ts";
+import type { VerseBoundary } from "../recognition/core.ts";
 import type { z } from "zod";
 import type { CaptionBackgroundSchema, CaptionPositioningSchema, TransitionSettingsSchema, TypographySchema } from "../schemas/project.ts";
 import type { ProjectFormat } from "../schemas/project.ts";
@@ -398,121 +398,67 @@ export function createCaptionSegments(
   return continuousDisplayTiming(generated);
 }
 
+/** Builds the editor's single generated display array directly from the pure
+ * resolver output. VerseAlignment-shaped values are diagnostics only. */
+export function createCaptionSegmentsFromVerseBoundaries(
+  boundaries: readonly VerseBoundary[],
+  content: Readonly<Record<string, QuranVerseContent | undefined>>,
+): CaptionSegment[] {
+  return createCaptionSegments(boundaries.map((boundary) => {
+    const [surahNumber, ayahNumber] = boundary.verseKey.split(":").map(Number);
+    return {
+      verseKey: boundary.verseKey,
+      surahNumber,
+      ayahNumber,
+      startMs: boundary.startMs,
+      endMs: boundary.endMs,
+      confidence: boundary.evidence.selectedWord?.confidence ?? 0,
+      timingEvidence: {
+        start: { timestampMs: boundary.startMs, source: boundary.evidence.source },
+        end: { timestampMs: boundary.endMs, source: boundary.evidence.source },
+        matchedText: "",
+      },
+    };
+  }), content);
+}
+
 export type GeneratedCaptionBoundaryTrace = {
   previousVerseKey: string;
   nextVerseKey: string;
-  verseAlignment: { previousEndMs: number; nextStartMs: number };
   captionSegment: { previousEndMs: number | null; nextStartMs: number | null };
 };
 
-/**
- * The automatic editor pipeline has exactly one timing authority:
- * RecognitionMatch -> VerseAlignment -> CaptionSegment. Forced-alignment
- * plans remain diagnostic metadata and cannot supply a competing display
- * interval for newly generated captions.
- */
-export function createAutomaticCaptionSegments(
-  alignments: readonly VerseAlignment[],
-  content: Readonly<Record<string, QuranVerseContent | undefined>>,
-): CaptionSegment[] {
-  const segments = createCaptionSegments(alignments, content);
-  assertGeneratedCaptionTiming(alignments, segments);
-  return segments;
-}
-
-/** Produces the exact boundary values carried through automatic generation. */
+/** Produces boundaries from the actual editable/rendered CaptionSegment array. */
 export function generatedCaptionBoundaryTrace(
-  alignments: readonly VerseAlignment[],
   segments: readonly CaptionSegment[],
 ): GeneratedCaptionBoundaryTrace[] {
-  const segmentForVerse = new Map<string, CaptionSegment>();
-  for (const segment of segments) {
-    for (const verseKey of segment.verseKeys) segmentForVerse.set(verseKey, segment);
-  }
-  return alignments.slice(0, -1).map((previous, index) => {
-    const next = alignments[index + 1]!;
+  return segments.slice(0, -1).map((previous, index) => {
+    const next = segments[index + 1]!;
     return {
-      previousVerseKey: previous.verseKey,
-      nextVerseKey: next.verseKey,
-      verseAlignment: { previousEndMs: previous.endMs, nextStartMs: next.startMs },
+      previousVerseKey: previous.verseKeys.join(","),
+      nextVerseKey: next.verseKeys.join(","),
       captionSegment: {
-        previousEndMs: segmentForVerse.get(previous.verseKey)?.endMs ?? null,
-        nextStartMs: segmentForVerse.get(next.verseKey)?.startMs ?? null,
+        previousEndMs: previous.endMs,
+        nextStartMs: next.startMs,
       },
     };
   });
 }
 
-/**
- * Generated timing must retain every selected VerseAlignment boundary exactly.
- * This is development-only because it is a guard against a second generation
- * pipeline, not a recovery/clamping rule for manual editor changes.
- */
-export function assertGeneratedCaptionTiming(
-  alignments: readonly VerseAlignment[],
+/** Development guard: retained diagnostic timing must be derived from, and
+ * agree with, the CaptionSegment array that actually renders. */
+export function assertDerivedTimingMatchesCaptions(
   segments: readonly CaptionSegment[],
+  diagnostics: readonly { verseKey: string; startMs: number; endMs: number }[],
 ): void {
   if (process.env.NODE_ENV === "production") return;
-  for (const trace of generatedCaptionBoundaryTrace(alignments, segments)) {
-    if (trace.verseAlignment.previousEndMs !== trace.verseAlignment.nextStartMs) {
-      throw new Error(`Generated VerseAlignment boundary diverged for ${trace.previousVerseKey} -> ${trace.nextVerseKey}: ${trace.verseAlignment.previousEndMs} != ${trace.verseAlignment.nextStartMs}.`);
-    }
-    if (trace.captionSegment.previousEndMs !== trace.verseAlignment.previousEndMs
-      || trace.captionSegment.nextStartMs !== trace.verseAlignment.nextStartMs) {
-      throw new Error(`Generated CaptionSegment boundary diverged for ${trace.previousVerseKey} -> ${trace.nextVerseKey}: expected ${trace.verseAlignment.nextStartMs} ms, got ${trace.captionSegment.previousEndMs ?? "missing"} -> ${trace.captionSegment.nextStartMs ?? "missing"}.`);
+  const byVerse = new Map(segments.flatMap((segment) => segment.verseKeys.map((verseKey) => [verseKey, segment] as const)));
+  for (const timing of diagnostics) {
+    const segment = byVerse.get(timing.verseKey);
+    if (segment && (segment.startMs !== timing.startMs || segment.endMs !== timing.endMs)) {
+      throw new Error(`NON-AUTHORITATIVE timing diverged from CaptionSegment for ${timing.verseKey}: ${timing.startMs}-${timing.endMs} vs ${segment.startMs}-${segment.endMs}.`);
     }
   }
-}
-
-/** Creates editor display blocks from the canonical forced-alignment plan.
- * Recognition data remains separate: manual timing edits still only mutate
- * these user-facing intervals. */
-export function createCaptionSegmentsFromForcedAlignment(
-  alignment: ForcedAlignment,
-  content: Readonly<Record<string, QuranVerseContent | undefined>>,
-  verseAlignments: readonly VerseAlignment[] = [],
-): CaptionSegment[] {
-  // Keep future word-boundary split evidence in the plan, but keep automatic
-  // display verse-level for now. ASR support and planned ranges must never
-  // decide which canonical Quran words are visible.
-  const verseSets = new Map<string, Array<ForcedAlignment["captionSets"][number]>>();
-  alignment.captionSets.forEach((set) => {
-    const sets = verseSets.get(set.verseKey) ?? [];
-    sets.push(set);
-    verseSets.set(set.verseKey, sets);
-  });
-  const recognizedTiming = new Map(verseAlignments.map((item) => [item.verseKey, item]));
-  const generated = [...verseSets].flatMap(([verseKey, sets]) => {
-    const verse = content[verseKey];
-    const verseWords = words(verse ? quranDisplayText(verse) : "");
-    if (!verseWords.length || !sets.length) return [];
-    const firstSet = sets[0];
-    const lastSet = sets.at(-1)!;
-    const verseAlignment = recognizedTiming.get(verseKey);
-    const startMs = verseAlignment?.startMs ?? firstSet.startMs;
-    const endMs = verseAlignment?.endMs ?? lastSet.endMs;
-    return [{
-      id: `${verseKey}#1`,
-      verseKeys: [verseKey],
-      startMs,
-      endMs,
-      arabic: verseWords.join(" "),
-      translation: verse?.translation ?? null,
-      transliteration: verse?.transliteration ?? null,
-      wordStart: 0,
-      wordEnd: verseWords.length,
-      wordCount: verseWords.length,
-      timingEvidence: {
-        start: { timestampMs: startMs, source: verseAlignment?.timingEvidence.start.source ?? "forced-alignment" as const },
-        end: { timestampMs: endMs, source: verseAlignment?.timingEvidence.end.source ?? "forced-alignment" as const },
-        derived: false,
-      },
-    }];
-  });
-  return generated.map((segment, index) => ({
-    ...segment,
-    endMs: Math.max(segment.startMs + 1, index < generated.length - 1 ? generated[index + 1].startMs : segment.endMs),
-  }));
 }
 
 export function splitCaptionSegment(segment: CaptionSegment, boundary: number): CaptionSegment[] {

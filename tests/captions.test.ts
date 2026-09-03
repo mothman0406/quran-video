@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { captionForPlaybackTime, recognitionToVerseAlignments } from "../src/lib/editor/recognition.ts";
-import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createAutomaticCaptionSegments, createCaptionSegments, createCaptionSegmentsFromForcedAlignment, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
+import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -47,20 +47,13 @@ test("automatic display never splits long ayat; line wrapping is visual only", (
   assert.deepEqual(balanced.map((segment) => segment.arabic.split(" ").length), [9]);
 });
 
-test("forced-alignment display collapses planned intra-ayah ranges into one complete canonical ayah", () => {
-  const forced = {
-    canonicalPassage: [], wordOccurrences: [], verseTimings: [], pauseCandidates: [],
-    captionSets: [
-      { id: "93:1#1-3", verseKey: "93:1", canonicalStartWordIndex: 1, canonicalEndWordIndex: 3, startMs: 100, endMs: 850, cutReason: "acoustic-pause" },
-      { id: "93:1#4-7", verseKey: "93:1", canonicalStartWordIndex: 4, canonicalEndWordIndex: 7, startMs: 1_100, endMs: 1_700, cutReason: "visual-length" },
-    ],
-  } as const;
-  const segments = createCaptionSegmentsFromForcedAlignment(forced, content);
+test("automatic display uses one complete canonical ayah regardless of diagnostic split metadata", () => {
+  const segments = createCaptionSegments([{ ...alignment, startMs: 100, endMs: 1_700, timingEvidence: { ...alignment.timingEvidence, start: { timestampMs: 100, source: "word-timestamp" as const }, end: { timestampMs: 1_700, source: "word-timestamp" as const } } }], content);
   assert.equal(segments.length, 1);
   assert.equal(segments[0]?.arabic, content["93:1"].arabic.uthmani);
   assert.equal(segments[0]?.startMs, 100);
   assert.equal(segments[0]?.endMs, 1_700, "the verse remains active through all planned ranges");
-  assert.equal(segments[0]?.timingEvidence.start.source, "forced-alignment");
+  assert.equal(segments[0]?.timingEvidence.start.source, "word-timestamp");
 });
 
 test("first caption is inactive during leading silence and activates exactly at detected onset", () => {
@@ -80,29 +73,24 @@ test("first caption is inactive during leading silence and activates exactly at 
 
 test("automatic editor integration retains the selected 6:76 -> 6:77 boundary through active-caption selection", () => {
   const boundaryMs = 44_832;
-  const alignments = recognitionToVerseAlignments([
-    { verseKey: "6:76", startMs: 32_000, endMs: boundaryMs, confidence: 0.9, timing: { start: { timestampMs: 32_000, source: "word-timestamp" as const }, end: { timestampMs: boundaryMs, source: "word-timestamp" as const }, matchedText: "" }, wordSupport: { canonicalStartWordIndex: 1, canonicalEndWordIndex: 1, matchedCanonicalWordCount: 1, canonicalWordCount: 1, coverage: 1, evidenceQuality: 1 } },
-    { verseKey: "6:77", startMs: boundaryMs, endMs: 66_000, confidence: 0.9, timing: { start: { timestampMs: boundaryMs, source: "word-timestamp" as const }, end: { timestampMs: 66_000, source: "word-timestamp" as const }, matchedText: "" }, wordSupport: { canonicalStartWordIndex: 1, canonicalEndWordIndex: 1, matchedCanonicalWordCount: 1, canonicalWordCount: 1, coverage: 1, evidenceQuality: 1 } },
-  ]);
+  const boundaries = [
+    { verseKey: "6:76", startMs: 32_000, endMs: boundaryMs, evidence: { source: "word-timestamp" as const, selectedWord: null, candidates: [] } },
+    { verseKey: "6:77", startMs: boundaryMs, endMs: 66_000, evidence: { source: "word-timestamp" as const, selectedWord: null, candidates: [] } },
+  ];
   const verses = {
     "6:76": { ...content["93:1"], verseKey: "6:76" },
     "6:77": { ...content["93:1"], verseKey: "6:77" },
   } as Record<string, QuranVerseContent>;
 
-  // This is the production automatic path: recognition alignment -> editor
-  // CaptionSegments -> the same half-open selector used by timeline/preview.
-  const editorSegments = createAutomaticCaptionSegments(alignments, verses);
+  // This is the production path: resolver -> CaptionSegments -> shared selector.
+  const editorSegments = createCaptionSegmentsFromVerseBoundaries(boundaries, verses);
   assert.deepEqual(editorSegments.map((segment) => [segment.verseKeys[0], segment.startMs, segment.endMs]), [["6:76", 32_000, boundaryMs], ["6:77", boundaryMs, 66_000]]);
   assert.equal(getActiveCaptionSegment(editorSegments, boundaryMs - 1)?.verseKeys[0], "6:76");
   assert.equal(getActiveCaptionSegment(editorSegments, boundaryMs)?.verseKeys[0], "6:77");
 });
 
 test("ASR alignment gaps never remove canonical words from an ayah caption", () => {
-  const forced = {
-    canonicalPassage: [], wordOccurrences: [], verseTimings: [], pauseCandidates: [],
-    captionSets: [{ id: "93:1#2-6", verseKey: "93:1", canonicalStartWordIndex: 2, canonicalEndWordIndex: 6, startMs: 100, endMs: 1_100, cutReason: "partial-ayah" }],
-  } as const;
-  const [segment] = createCaptionSegmentsFromForcedAlignment(forced, content);
+  const [segment] = createCaptionSegments([alignment], content);
   const canonicalWords = content["93:1"].arabic.uthmani.split(/\s+/);
   assert.equal(segment?.arabic, canonicalWords.join(" "));
   assert.equal(segment?.arabic.split(/\s+/)[0], canonicalWords[0]);
@@ -187,18 +175,14 @@ test("three detected ayat produce exactly three whole-ayah display sets despite 
   assert.equal(segments[1].endMs, segments[2].startMs);
 });
 
-test("recognized onset survives forced-alignment caption generation and direct seeking", () => {
+test("recognized onset survives automatic caption generation and direct seeking", () => {
   const alignments = [
     { ...alignment, verseKey: "6:74", surahNumber: 6, ayahNumber: 74, startMs: 9_500, endMs: 21_000, timingEvidence: { ...alignment.timingEvidence, start: { timestampMs: 9_500, source: "word-timestamp" as const }, end: { timestampMs: 21_000, source: "word-timestamp" as const } } },
     { ...alignment, verseKey: "6:75", surahNumber: 6, ayahNumber: 75, startMs: 21_000, endMs: 32_000, timingEvidence: { ...alignment.timingEvidence, start: { timestampMs: 21_000, source: "word-timestamp" as const }, end: { timestampMs: 32_000, source: "word-timestamp" as const } } },
     { ...alignment, verseKey: "6:76", surahNumber: 6, ayahNumber: 76, startMs: 32_000, endMs: 60_000, timingEvidence: { ...alignment.timingEvidence, start: { timestampMs: 32_000, source: "word-timestamp" as const }, end: { timestampMs: 60_000, source: "word-timestamp" as const } } },
   ];
-  const forced = {
-    canonicalPassage: [], wordOccurrences: [], verseTimings: [], pauseCandidates: [],
-    captionSets: alignments.map((item) => ({ id: `${item.verseKey}#1`, verseKey: item.verseKey, canonicalStartWordIndex: 1, canonicalEndWordIndex: 7, startMs: 0, endMs: 60_000, cutReason: "whole-ayah" as const })),
-  } as const;
   const verses = Object.fromEntries(alignments.map((item) => [item.verseKey, { ...content["93:1"], verseKey: item.verseKey }])) as Record<string, QuranVerseContent>;
-  const segments = createCaptionSegmentsFromForcedAlignment(forced, verses, alignments);
+  const segments = createCaptionSegments(alignments, verses);
   assert.deepEqual(segments.map((segment) => [segment.verseKeys[0], segment.startMs, segment.endMs]), [["6:74", 9_500, 21_000], ["6:75", 21_000, 32_000], ["6:76", 32_000, 60_000]]);
   assert.equal(getActiveCaptionSegment(segments, 0), null);
   assert.equal(getActiveCaptionSegment(segments, 5_000), null);

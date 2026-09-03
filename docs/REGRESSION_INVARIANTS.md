@@ -12,6 +12,10 @@ separate approved milestone intentionally changes the display contract.
   not depend on timestamp quality.
 - VAD stays enabled and constrains acoustic timing work.
 - Timeline and preview use the same editable `CaptionSegment` interval.
+- There is exactly one authoritative automatic `CaptionSegment` timing array:
+  `resolveVerseBoundaries` produces the generated ayah boundaries and caption
+  generation consumes them once. Recognition, forced-alignment, display-set,
+  and CTC timing are evidence or diagnostics only.
 - Manual timeline edits remain authoritative over generated timing.
 - The final caption remains through actual recitation completion.
 - For any proposed CTC timing, each non-final ayah ends exactly at the next

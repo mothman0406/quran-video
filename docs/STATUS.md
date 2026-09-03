@@ -1,5 +1,28 @@
 # Status
 
+## Current milestone: Deterministic single-source Quran verse timing
+
+Complete:
+
+- Added pure `resolveVerseBoundaries`, which uses every `WordOccurrence` for
+  each known next ayah and records accepted/rejected candidates explicitly.
+  A credible 6:77 word one at 44,832 ms now deterministically wins over the
+  later word-16/17/18 events at 55,584 ms.
+- Automatic editor generation now follows `VerseBoundary[] -> CaptionSegment[]`
+  directly. Preview imports the shared half-open `getActiveCaptionSegment`
+  selector; timeline and export already consume the same segment array.
+- Removed forced-alignment-to-caption generation and timing fields from
+  diagnostic display-set plans. CTC remains shadow-only. Development debug now
+  reports `AUTHORITATIVE_CAPTIONS`, `ACTUAL_PREVIEW`, and labelled legacy
+  diagnostics.
+- Added the actual 6:76–77 VAD/word-occurrence regression fixture covering
+  resolver, generated captions, editor state, and the shared selector at
+  44,831/44,832 ms.
+
+Verification: `npm test` (154 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. The production build retains the
+existing non-fatal `vad-web` critical-dependency warning.
+
 ## Current milestone: Trace the real editor timing flow
 
 Complete:

@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, type PointerEvent, type RefObject } from "react";
-import { captionBackgroundStyle, captionVisualStatesAtTime, captionVerseNumberLabel, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
+import { captionBackgroundStyle, captionVisualStatesAtTime, captionVerseNumberLabel, getActiveCaptionSegment, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import { quranFontDefinitions } from "@/lib/quran/content";
 
@@ -51,7 +51,10 @@ function CaptionPreview({
     const video = videoRef.current;
     let frame: number | null = null;
     const applyVisualState = () => {
-      const states = captionVisualStatesAtTime(segments, (video?.currentTime ?? 0) * 1000, transitionSettings);
+      const currentTimeMs = (video?.currentTime ?? 0) * 1000;
+      // This exact selector is the shared preview/timeline/test authority.
+      const active = getActiveCaptionSegment(segments, currentTimeMs);
+      const states = active ? captionVisualStatesAtTime(segments, currentTimeMs, transitionSettings) : [];
       const stateById = new Map(states.map((state) => [state.segment.id, state]));
       layerRefs.current.forEach((layer, id) => {
         const state = stateById.get(id);

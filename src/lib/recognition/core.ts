@@ -164,6 +164,8 @@ export type CanonicalSpan = {
 
 export type RecognitionAnalysis = {
   matches: RecognitionResult;
+  /** The automatic timing authority consumed by editor caption generation. */
+  verseBoundaries: readonly VerseBoundary[];
   diagnostics: RecognitionDiagnostic[];
   passage: PassageInference;
   timingTrace: RecognitionTimingTrace | null;
@@ -193,6 +195,26 @@ export type WordOccurrence = CanonicalPassageWord & {
   evidence: "direct-word-alignment" | "micro-asr" | "chunk-coarse";
   pcmRefined: boolean;
   asrText: string;
+};
+
+/** The sole generated ayah timing result, derived after passage identity is
+ * fixed from the complete canonical WordOccurrence collection. */
+export type VerseBoundary = {
+  verseKey: string;
+  startMs: number;
+  endMs: number;
+  evidence: {
+    source: TimingEvidenceSource;
+    selectedWord: Pick<WordOccurrence, "canonicalWordIndex" | "startMs" | "confidence" | "evidence"> | null;
+    candidates: Array<{
+      timestampMs: number;
+      canonicalWordIndex: number;
+      confidence: number;
+      evidence: WordOccurrence["evidence"];
+      accepted: boolean;
+      reason: string;
+    }>;
+  };
 };
 
 /** Every canonical word in a selected passage has an alignment record.  A
@@ -238,8 +260,6 @@ export type CaptionSetPlan = {
   verseKey: string;
   canonicalStartWordIndex: number;
   canonicalEndWordIndex: number;
-  startMs: number;
-  endMs: number;
   cutReason: "whole-ayah" | "short-ayah" | "acoustic-pause" | "visual-length" | "partial-ayah";
 };
 
@@ -813,6 +833,116 @@ function recoverAyahOnsetFromLocalAnchor(
   };
 }
 
+/**
+ * Resolves the one generated timing interval for each known ayah. This is
+ * deliberately independent from guessed RecognitionMatch/VerseAlignment
+ * boundaries: complete WordOccurrence evidence and VAD are its inputs.
+ */
+export function resolveVerseBoundaries({
+  verseKeys,
+  wordOccurrences,
+  speechRegions,
+  firstOnset,
+  finalSpeechEnd,
+  durationMs,
+}: {
+  verseKeys: readonly string[];
+  wordOccurrences: readonly WordOccurrence[];
+  speechRegions?: readonly VadSpeechRegion[];
+  firstOnset: number;
+  finalSpeechEnd: number;
+  durationMs: number;
+}): VerseBoundary[] {
+  if (!verseKeys.length) return [];
+  const maximum = Math.max(1, Math.round(durationMs));
+  const containsSpeech = (occurrence: WordOccurrence) => !speechRegions?.length
+    || Boolean(speechRegionContaining(speechRegions, occurrence.startMs, occurrence.endMs));
+  const sourceFor = (occurrence: WordOccurrence | null): TimingEvidenceSource => {
+    if (!occurrence) return "interpolated";
+    if (occurrence.evidence === "micro-asr") return "micro-asr";
+    if (occurrence.pcmRefined) return "pcm-refined";
+    return occurrence.evidence === "chunk-coarse" ? "chunk-coarse" : "word-timestamp";
+  };
+  const starts = new Array<number>(verseKeys.length).fill(0);
+  const selected = new Array<WordOccurrence | null>(verseKeys.length).fill(null);
+  const candidateLists: Array<VerseBoundary["evidence"]["candidates"]> = Array.from(
+    { length: verseKeys.length },
+    () => [],
+  );
+  starts[0] = Math.max(0, Math.min(maximum - 1, Math.round(firstOnset)));
+
+  for (let index = 1; index < verseKeys.length; index += 1) {
+    // Do not substitute a filtered alignment derivative here. Every observed
+    // occurrence for the known next ayah is a diagnostic candidate.
+    const all = wordOccurrences
+      .filter((occurrence) => occurrence.verseKey === verseKeys[index])
+      .slice()
+      .sort((left, right) => left.startMs - right.startMs || left.canonicalWordIndex - right.canonicalWordIndex || left.occurrenceIndex - right.occurrenceIndex);
+    const credible = (occurrence: WordOccurrence) => occurrence.confidence >= 0.62
+      && occurrence.evidence !== "chunk-coarse" && containsSpeech(occurrence);
+    const directWordOne = all.filter((occurrence) => occurrence.canonicalWordIndex === 1 && credible(occurrence));
+    const coherentWordOne = directWordOne.find((occurrence) => all.some((following) => following.startMs >= occurrence.startMs
+      && following.startMs - occurrence.startMs <= 3_000
+      && following.canonicalWordIndex > 1
+      && following.canonicalWordIndex <= 4
+      && credible(following))) ?? directWordOne[0] ?? null;
+    const early = all.find((occurrence) => occurrence.canonicalWordIndex >= 2 && occurrence.canonicalWordIndex <= 4 && credible(occurrence)) ?? null;
+    const later = all.find(credible) ?? null;
+    const coarseFallback = all.find(containsSpeech) ?? null;
+    const chosen = coherentWordOne ?? early ?? later ?? coarseFallback;
+    selected[index] = chosen;
+    const chosenPriority = coherentWordOne ? "credible canonical word 1" : early ? "early-word recovery to VAD onset" : later ? "later-word recovery because no credible early evidence exists" : coarseFallback ? "coarse fallback because no credible word occurrence exists" : "no credible occurrence; retained deterministic fallback";
+    const chosenRegion = chosen ? speechRegionContaining(speechRegions, chosen.startMs, chosen.endMs) : null;
+    const recoveredStart = chosen && coherentWordOne
+      ? Math.max(chosen.startMs, chosenRegion?.startMs ?? 0)
+      : chosen && !coherentWordOne && early === chosen
+      ? chosenRegion?.startMs ?? chosen.startMs
+      : chosen?.startMs ?? starts[index - 1] + 1;
+    starts[index] = Math.max(starts[index - 1] + 1, Math.min(maximum - 1, Math.round(recoveredStart)));
+    candidateLists[index] = all.map((occurrence) => {
+      const isChosen = occurrence === chosen;
+      const valid = credible(occurrence);
+      const reason = isChosen ? chosenPriority
+        : !containsSpeech(occurrence) ? "rejected: occurrence lies outside VAD speech"
+        : occurrence.confidence < 0.62 ? "rejected: confidence below deterministic credibility threshold"
+        : occurrence.evidence === "chunk-coarse" ? "rejected: coarse chunk timing cannot override word evidence"
+        : chosen && occurrence.canonicalWordIndex >= 16 && coherentWordOne ? "rejected: later internal word cannot override credible canonical word 1"
+        : valid ? "rejected: lower deterministic priority than selected earlier onset evidence"
+        : "rejected: not credible";
+      return {
+        timestampMs: occurrence.startMs,
+        canonicalWordIndex: occurrence.canonicalWordIndex,
+        confidence: occurrence.confidence,
+        evidence: occurrence.evidence,
+        accepted: isChosen,
+        reason,
+      };
+    });
+  }
+
+  return verseKeys.map((verseKey, index) => {
+    const startMs = starts[index];
+    const endMs = index < verseKeys.length - 1
+      ? starts[index + 1]
+      : Math.max(startMs + 1, Math.min(maximum, Math.round(finalSpeechEnd)));
+    return {
+      verseKey,
+      startMs,
+      endMs,
+      evidence: {
+        source: index === 0 ? "word-timestamp" : sourceFor(selected[index]),
+        selectedWord: selected[index] && {
+          canonicalWordIndex: selected[index].canonicalWordIndex,
+          startMs: selected[index].startMs,
+          confidence: selected[index].confidence,
+          evidence: selected[index].evidence,
+        },
+        candidates: candidateLists[index],
+      },
+    };
+  });
+}
+
 function regionsInCorridor(
   speechRegions: readonly VadSpeechRegion[] | undefined,
   startMs: number,
@@ -1303,13 +1433,8 @@ function forceAlignPassage(
     verseKey: timing.verseKey,
     canonicalStartWordIndex: 1,
     canonicalEndWordIndex: timing.lastCanonicalWordIndex,
-    startMs: timing.startMs,
-    endMs: timing.endMs,
     cutReason: "whole-ayah" as const,
   }));
-  for (let index = 0; index < captionSets.length - 1; index += 1) {
-    captionSets[index].endMs = Math.max(captionSets[index].startMs + 1, captionSets[index + 1].startMs);
-  }
   return { canonicalPassage, canonicalWordAlignments, wordOccurrences: occurrences, verseTimings, pauseCandidates, captionSets };
 }
 
@@ -1843,21 +1968,84 @@ export function analyzeTranscript(
     ? input
     : createPrimaryTranscript(input, options.timestampMode ?? (input.some((chunk) => chunk.words?.length) ? "word" : "chunk-fallback"));
   const { diagnostics, passage, best } = identifyPrimaryTranscript(primary, options);
-  if (!best) return { matches: [], diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, timingRecoveryPlan: null };
+  if (!best) return { matches: [], verseBoundaries: [], diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, timingRecoveryPlan: null };
   const verses = options.corpus ?? hafsVerses;
   const timingChunks = [...primary.chunks, ...(options.timingEvidenceChunks ?? [])]
     .sort((left, right) => left.startMs - right.startMs);
   const timingCandidate = withTimingEvidence(best, timingChunks, verses);
   const reconstructed = reconstructPassage(timingCandidate, timingChunks, verses, options.audioAnalysis, options.speechRegions);
-  const forcedAlignment = forceAlignPassage(timingCandidate, timingChunks, verses, reconstructed.matches, options.audioAnalysis, options.speechRegions, options.timingRecoveryAttempted);
+  const rawForcedAlignment = forceAlignPassage(timingCandidate, timingChunks, verses, reconstructed.matches, options.audioAnalysis, options.speechRegions, options.timingRecoveryAttempted);
+  const durationMs = Math.max(1, options.audioAnalysis?.durationMs ?? 0, ...timingChunks.map((chunk) => chunk.endMs), ...(options.speechRegions ?? []).map((region) => region.endMs));
+  const verseBoundaries = resolveVerseBoundaries({
+    verseKeys: reconstructed.matches.map((match) => match.verseKey),
+    wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
+    speechRegions: options.speechRegions,
+    firstOnset: reconstructed.matches[0]?.startMs ?? 0,
+    finalSpeechEnd: reconstructed.matches.at(-1)?.endMs ?? durationMs,
+    durationMs,
+  });
+  const boundaryByVerse = new Map(verseBoundaries.map((boundary) => [boundary.verseKey, boundary]));
+  const matches = reconstructed.matches.map((match, index) => {
+    const boundary = boundaryByVerse.get(match.verseKey);
+    if (!boundary) return match;
+    return {
+      ...match,
+      startMs: boundary.startMs,
+      endMs: boundary.endMs,
+      timing: {
+        ...match.timing,
+        start: { timestampMs: boundary.startMs, source: index === 0 ? match.timing.start.source : boundary.evidence.source },
+        end: { timestampMs: boundary.endMs, source: boundary.evidence.source },
+      },
+    };
+  });
+  const forcedAlignment = rawForcedAlignment && {
+    ...rawForcedAlignment,
+    // These remain diagnostics, but if inspected they are derived from the
+    // same boundary result and therefore cannot contradict editor captions.
+    verseTimings: rawForcedAlignment.verseTimings.map((timing) => {
+      const boundary = boundaryByVerse.get(timing.verseKey);
+      return boundary ? { ...timing, startMs: boundary.startMs, endMs: boundary.endMs, startEvidence: boundary.evidence.source, endEvidence: boundary.evidence.source } : timing;
+    }),
+    captionSets: rawForcedAlignment.captionSets,
+  };
+  const timingTrace = reconstructed.timingTrace && {
+    ...reconstructed.timingTrace,
+    verseAlignmentStartMs: verseBoundaries[0]?.startMs ?? reconstructed.timingTrace.verseAlignmentStartMs,
+    verses: reconstructed.timingTrace.verses.map((trace) => {
+      const boundary = boundaryByVerse.get(trace.verseKey);
+      return boundary ? { ...trace, verseAlignmentStartMs: boundary.startMs, verseAlignmentEndMs: boundary.endMs } : trace;
+    }),
+    transitions: reconstructed.timingTrace.transitions.map((trace) => {
+      const boundary = boundaryByVerse.get(trace.nextVerseKey);
+      const candidates = boundary?.evidence.candidates ?? [];
+      return boundary ? {
+        ...trace,
+        firstNextAyahEvidenceMs: candidates[0]?.timestampMs ?? null,
+        firstNextCanonicalWordSupported: boundary.evidence.selectedWord?.canonicalWordIndex ?? null,
+        candidateNextAyahEvidence: candidates.map((candidate) => ({
+          timestampMs: candidate.timestampMs,
+          canonicalWordIndex: candidate.canonicalWordIndex,
+          confidence: candidate.confidence,
+          evidenceType: candidate.canonicalWordIndex === 1 ? "direct-word-1" as const : candidate.canonicalWordIndex <= 4 ? "coherent-early-words" as const : "backward-recovery" as const,
+          vadSpeechOnsetNearby: (options.speechRegions ?? []).some((region) => Math.abs(region.startMs - candidate.timestampMs) <= 400),
+          accepted: candidate.accepted,
+          reason: candidate.reason,
+        })),
+        selectedTransitionMs: boundary.startMs,
+        evidence: boundary.evidence.source,
+      } : trace;
+    }),
+  };
   return {
-    matches: reconstructed.matches,
+    matches,
+    verseBoundaries,
     diagnostics,
     passage,
-    timingTrace: reconstructed.timingTrace,
+    timingTrace,
     forcedAlignment,
     ctcShadow: null,
-    timingRecoveryPlan: timingRecoveryPlan(forcedAlignment, reconstructed.matches, options.audioAnalysis, options.speechRegions, primary.timestampMode),
+    timingRecoveryPlan: timingRecoveryPlan(forcedAlignment, matches, options.audioAnalysis, options.speechRegions, primary.timestampMode),
   };
 }
 

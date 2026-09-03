@@ -304,7 +304,7 @@ test("uses canonical word transitions even when two ayat have no acoustic pause"
   assert.equal(analysis.matches[1]?.startMs, 700);
 });
 
-test("refines only the expected text boundary with a local PCM energy gap", () => {
+test("direct next-ayah word evidence remains the boundary when PCM finds a nearby gap", () => {
   const corpus = [{ verseKey: "1:1", text: "قال" }, { verseKey: "1:2", text: "رجع" }];
   const pcm = new Float32Array(2_000);
   for (let index = 100; index < 750; index += 1) pcm[index] = 0.2;
@@ -316,10 +316,8 @@ test("refines only the expected text boundary with a local PCM energy gap", () =
     words: [{ text: "قال", startMs: 100, endMs: 800 }, { text: "رجع", startMs: 1_000, endMs: 1_600 }],
   }], { corpus, minConfidence: 0.6, audioAnalysis: analyzeMonoPcm(pcm, 1_000) });
   const [first, second] = analysis.matches;
-  assert.equal(first?.endMs, 1_050);
-  assert.equal(second?.startMs, 1_050);
-  assert.equal(first?.timing.end.source, "pcm-refined");
-  assert.equal(second?.timing.start.source, "pcm-refined");
+  assert.equal(first?.endMs, 1_010);
+  assert.equal(second?.startMs, 1_010);
   assert.equal(first!.endMs, second!.startMs, "the previous ayah remains visible throughout a real pause");
 });
 

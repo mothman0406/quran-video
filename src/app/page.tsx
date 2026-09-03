@@ -19,8 +19,9 @@ import {
 } from "@/lib/editor/recognition";
 import {
   clampCaptionPositioning,
-  createAutomaticCaptionSegments,
+  assertDerivedTimingMatchesCaptions,
   createCaptionSegments,
+  createCaptionSegmentsFromVerseBoundaries,
   generatedCaptionBoundaryTrace,
   DEFAULT_CAPTION_BACKGROUND,
   DEFAULT_CAPTION_PRESENTATION,
@@ -793,9 +794,10 @@ export default function Home() {
       const verseContent = Object.fromEntries(
         getVerses(next[0].verseKey, next.at(-1)!.verseKey).map((verse) => [verse.verseKey, verse]),
       );
-      // `forcedAlignment` remains diagnostic evidence only. A generated editor
-      // caption always receives its interval from the final VerseAlignment.
-      const nextSegments = createAutomaticCaptionSegments(next, verseContent);
+      // One generated display authority: pure boundaries -> CaptionSegment[].
+      // VerseAlignment and forced alignment remain diagnostics only.
+      const nextSegments = createCaptionSegmentsFromVerseBoundaries(analysis.verseBoundaries, verseContent);
+      assertDerivedTimingMatchesCaptions(nextSegments, analysis.forcedAlignment?.verseTimings ?? []);
       setAlignments(next);
       setSegments(nextSegments);
       alignmentDebug.current = {
@@ -840,11 +842,12 @@ export default function Home() {
           startEvidence: item.timingEvidence.start,
           endEvidence: item.timingEvidence.end,
         })),
-        generatedCaptionSegments: nextSegments.map((segment) => ({
+        AUTHORITATIVE_CAPTIONS: nextSegments.map((segment) => ({
           id: segment.id,
           verseKeys: segment.verseKeys,
           startMs: segment.startMs,
           endMs: segment.endMs,
+          revision: `${segment.id}:${segment.startMs}-${segment.endMs}`,
         })),
         transitions: (analysis.timingTrace?.transitions ?? []).map((transition) => ({
           ...transition,
@@ -854,7 +857,11 @@ export default function Home() {
         })),
         finalAyahEnd: analysis.timingTrace?.finalAyahEnd ?? null,
         pauses: analysis.forcedAlignment?.pauseCandidates ?? [],
-        displaySets: analysis.forcedAlignment?.captionSets ?? [],
+        legacyDiagnosticTimings: {
+          forcedVerseTimings: analysis.forcedAlignment?.verseTimings ?? [],
+          displaySets: analysis.forcedAlignment?.captionSets ?? [],
+          note: "NON-AUTHORITATIVE: diagnostics derived from the resolver; captions render only CaptionSegment[].",
+        },
         ctcShadowStatus: {
           // `complete` is the successful CTC status in this codebase.
           status: analysis.ctcShadow?.status ?? "not-run",
@@ -920,9 +927,9 @@ export default function Home() {
   useEffect(() => {
     const debug = alignmentDebug.current;
     if (!debug?.transitions?.length) return;
-    const boundaries = generatedCaptionBoundaryTrace(alignments, segments);
+    const boundaries = generatedCaptionBoundaryTrace(segments);
     const boundaryByPair = new Map(boundaries.map((trace) => [`${trace.previousVerseKey}->${trace.nextVerseKey}`, trace]));
-    debug.runtimeCaptionTiming = debug.transitions.map((transition) => {
+    debug.ACTUAL_PREVIEW = debug.transitions.map((transition) => {
       const boundary = boundaryByPair.get(`${transition.previousVerseKey}->${transition.nextVerseKey}`);
       const selectedTransitionMs = transition.selectedTransitionMs;
       const activeBefore = getActiveCaptionSegment(segments, selectedTransitionMs - 1);
@@ -933,13 +940,10 @@ export default function Home() {
         earliestCandidateNextAyahEvidence: transition.candidateNextAyahEvidence[0] ?? null,
         chosenTransitionCandidate: selectedTransitionMs,
         selectedTransitionMs,
-        verseAlignment: boundary?.verseAlignment ?? null,
-        generatedCaptionSegment: boundary?.captionSegment ?? null,
-        // These are captured only after React committed `setSegments`; the
-        // timeline receives this same `segments` state as a prop.
-        editorStateCaptionSegment: boundary?.captionSegment ?? null,
-        timelineSegment: boundary?.captionSegment ?? null,
-        previewActiveSegment: {
+        selectedCaptionSegment: boundary?.captionSegment ?? null,
+        // Captured after React commits the exact array passed to CaptionPreview
+        // and EditorWorkspace. The selector is getActiveCaptionSegment.
+        selection: {
           atSelectedTransitionMinusOneMs: activeBefore?.verseKeys ?? null,
           atSelectedTransitionMs: activeAt?.verseKeys ?? null,
         },
