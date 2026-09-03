@@ -143,6 +143,10 @@ export type PassageInference = {
   uniquenessMargin: number | null;
   firstBoundaryConfidence: number | null;
   lastBoundaryConfidence: number | null;
+  /** Identity can be strong even when the recording's Quran boundaries are not. */
+  identityConfidence: number | null;
+  boundaryConfidence: number | null;
+  coverageConfidence: number | null;
   boundaryCompletion: { extendedBackward: boolean; extendedForward: boolean };
   shadowComparison: {
     stablePreF0840e7: { state: PassageAmbiguityState; selectedCandidate: PassageCandidateDiagnostic | null };
@@ -2079,11 +2083,135 @@ function passageDiagnostic(candidate: ScoredCandidate, verses: readonly QuranCor
   };
 }
 
-function canonicalSpan(candidate: ScoredCandidate, verses: readonly QuranCorpusVerse[]): CanonicalSpan | null {
+type BoundaryCompletion = {
+  startsAtVerseBeginning: boolean;
+  endsAtVerseEnd: boolean;
+  extendedBackward: boolean;
+  extendedForward: boolean;
+};
+
+function alignedTokenIndexesForVerse(
+  candidate: ScoredCandidate,
+  verses: readonly QuranCorpusVerse[],
+  verseOffset: number,
+  evidence: readonly TimedToken[],
+) {
+  const canonical = canonicalPassageTokens(verses.slice(candidate.start, candidate.end + 1));
+  const indexes: Array<{ asrIndex: number; similarity: number }> = [];
+  candidate.alignment.matched.forEach((tokens, canonicalIndex) => {
+    if (canonical[canonicalIndex]?.ayah !== verseOffset) return;
+    const similarities = candidate.alignment.similarities.get(canonicalIndex) ?? [];
+    tokens.forEach((token, tokenIndex) => {
+      const asrIndex = evidence.indexOf(token);
+      if (asrIndex >= 0) indexes.push({ asrIndex, similarity: similarities[tokenIndex] ?? 0 });
+    });
+  });
+  return indexes.sort((left, right) => left.asrIndex - right.asrIndex);
+}
+
+/**
+ * A local passage match is an anchor, not a final recording boundary.  Once
+ * it identifies a Quran neighbourhood, finish only the adjacent prefix and
+ * suffix with the same monotonic alignment used for passage scoring.  This
+ * deliberately never re-opens a whole-Quran search.
+ */
+function completePassageBoundaries(
+  anchor: ScoredCandidate,
+  evidence: readonly TimedToken[],
+  transcriptUnits: QuranRecognitionUnits,
+  verses: readonly QuranCorpusVerse[],
+): { candidate: ScoredCandidate; completion: BoundaryCompletion } {
+  const anchorCanonical = canonicalPassageTokens(verses.slice(anchor.start, anchor.end + 1));
+  const firstMatched = anchor.alignment.firstCanonicalIndex === null ? null : anchorCanonical[anchor.alignment.firstCanonicalIndex];
+  const lastMatched = anchor.alignment.lastCanonicalIndex === null ? null : anchorCanonical[anchor.alignment.lastCanonicalIndex];
+  if (!firstMatched || !lastMatched) {
+    return {
+      candidate: anchor,
+      completion: { startsAtVerseBeginning: false, endsAtVerseEnd: false, extendedBackward: false, extendedForward: false },
+    };
+  }
+
+  // Start from the actual local match, rather than carrying unaligned ayat
+  // that happened to be present in the retrieval candidate.
+  const anchorStart = anchor.start + firstMatched.ayah;
+  const anchorEnd = anchor.start + lastMatched.ayah;
+  let start = anchorStart;
+  let end = anchorEnd;
+  let working = scorePassageCandidate(start, end, evidence, transcriptUnits, verses);
+  const firstWord = firstMatched.wordIndex;
+  const lastWordCount = normalizedVerseWords(verses[anchorEnd]!).length;
+  const firstAnchorTokens = alignedTokenIndexesForVerse(working, verses, 0, evidence);
+  const lastAnchorTokens = alignedTokenIndexesForVerse(working, verses, end - start, evidence);
+  const firstAsrIndex = firstAnchorTokens[0]?.asrIndex ?? 0;
+  const lastAsrIndex = lastAnchorTokens.at(-1)?.asrIndex ?? evidence.length - 1;
+  const firstAnchorQuality = firstAnchorTokens.length
+    ? firstAnchorTokens.reduce((sum, item) => sum + item.similarity, 0) / firstAnchorTokens.length
+    : 0;
+  const lastAnchorQuality = lastAnchorTokens.length
+    ? lastAnchorTokens.reduce((sum, item) => sum + item.similarity, 0) / lastAnchorTokens.length
+    : 0;
+
+  // A preceding/following unused ASR token plus a strong local canonical run
+  // is enough to recover a missing edge word contextually.  Exact similarity
+  // is intentionally not demanded for this one weak edge token.
+  let startsAtVerseBeginning = firstWord === 0 || (firstWord > 0 && firstAsrIndex > 0 && firstAnchorTokens.length >= 2 && firstAnchorQuality >= 0.62);
+  let endsAtVerseEnd = lastMatched.wordIndex === lastWordCount - 1
+    || (lastMatched.wordIndex < lastWordCount - 1 && lastAsrIndex < evidence.length - 1 && lastAnchorTokens.length >= 2 && lastAnchorQuality >= 0.62);
+  const contextualBackward = startsAtVerseBeginning && firstWord > 0;
+  const contextualForward = endsAtVerseEnd && lastMatched.wordIndex < lastWordCount - 1;
+
+  // Six ayat is a deterministic hard bound.  Each added ayah must explain at
+  // least two previously unexplained, chronologically preceding ASR tokens.
+  let prefixLimit = firstAsrIndex;
+  for (let steps = 0; steps < 6 && start > 0; steps += 1) {
+    const previous = start - 1;
+    if (verses[previous]?.verseKey.split(":")[0] !== verses[start]?.verseKey.split(":")[0]) break;
+    const proposal = scorePassageCandidate(previous, end, evidence, transcriptUnits, verses);
+    const support = alignedTokenIndexesForVerse(proposal, verses, 0, evidence)
+      .filter((item) => item.asrIndex < prefixLimit);
+    const average = support.length ? support.reduce((sum, item) => sum + item.similarity, 0) / support.length : 0;
+    if (support.length < 2 || average < 0.62) break;
+    start = previous;
+    working = proposal;
+    prefixLimit = support[0]!.asrIndex;
+    startsAtVerseBeginning = true;
+  }
+
+  let suffixLimit = lastAsrIndex;
+  for (let steps = 0; steps < 6 && end + 1 < verses.length; steps += 1) {
+    const next = end + 1;
+    if (verses[next]?.verseKey.split(":")[0] !== verses[end]?.verseKey.split(":")[0]) break;
+    const proposal = scorePassageCandidate(start, next, evidence, transcriptUnits, verses);
+    const support = alignedTokenIndexesForVerse(proposal, verses, next - start, evidence)
+      .filter((item) => item.asrIndex > suffixLimit);
+    const average = support.length ? support.reduce((sum, item) => sum + item.similarity, 0) / support.length : 0;
+    if (support.length < 2 || average < 0.62) break;
+    end = next;
+    working = proposal;
+    suffixLimit = support.at(-1)!.asrIndex;
+    endsAtVerseEnd = true;
+  }
+
+  return {
+    candidate: working,
+    completion: {
+      startsAtVerseBeginning,
+      endsAtVerseEnd,
+      extendedBackward: contextualBackward || start < anchorStart,
+      extendedForward: contextualForward || end > anchorEnd,
+    },
+  };
+}
+
+function canonicalSpan(
+  candidate: ScoredCandidate,
+  verses: readonly QuranCorpusVerse[],
+  completion?: BoundaryCompletion,
+): CanonicalSpan | null {
   if (candidate.alignment.firstCanonicalIndex === null || candidate.alignment.lastCanonicalIndex === null) return null;
   const canonical = canonicalPassageTokens(verses.slice(candidate.start, candidate.end + 1));
-  const first = canonical[candidate.alignment.firstCanonicalIndex];
-  const last = canonical[candidate.alignment.lastCanonicalIndex];
+  const first = completion?.startsAtVerseBeginning ? canonical[0] : canonical[candidate.alignment.firstCanonicalIndex];
+  const last = completion?.endsAtVerseEnd ? canonical.at(-1) : canonical[candidate.alignment.lastCanonicalIndex];
   if (!first || !last) return null;
   const coveredVerseKeys = [...new Set(canonical.slice(candidate.alignment.firstCanonicalIndex, candidate.alignment.lastCanonicalIndex + 1).map((token) => token.verseKey))];
   const lastWordCount = normalizedVerseWords(verses[candidate.start + last.ayah]).length;
@@ -2244,7 +2372,9 @@ function identifyPrimaryTranscript(
     passageSource: "primary-transcript",
     state: "no-reliable-match", candidates: [], candidateMargin: null, selectedCandidate: null, disambiguatedByLaterChunks: false,
     canonicalSpan: null, mappingQuality: null, transcriptCoverage: null, canonicalSpanCoverage: null, uniquenessMargin: null,
-    firstBoundaryConfidence: null, lastBoundaryConfidence: null, boundaryCompletion: { extendedBackward: false, extendedForward: false },
+    firstBoundaryConfidence: null, lastBoundaryConfidence: null,
+    identityConfidence: null, boundaryConfidence: null, coverageConfidence: null,
+    boundaryCompletion: { extendedBackward: false, extendedForward: false },
     shadowComparison: {
       stablePreF0840e7: { state: "no-reliable-match", selectedCandidate: null },
       current: { state: "no-reliable-match", selectedCandidate: null },
@@ -2262,9 +2392,13 @@ function identifyPrimaryTranscript(
   });
   const global = scoreGlobalPassages(orderedChunks, verses, maxPassageVerses, priorityStarts);
   const ranked = global.candidates.slice(0, 5);
-  const best = ranked[0];
-  const runnerUp = ranked.find((candidate) => candidate.start !== best?.start || candidate.end !== best.end);
-  const margin = best && runnerUp ? best.score - runnerUp.score : null;
+  const initialBest = ranked[0];
+  const completed = initialBest
+    ? completePassageBoundaries(initialBest, global.evidence, global.transcriptUnits, verses)
+    : null;
+  const best = completed?.candidate;
+  const runnerUp = ranked.find((candidate) => candidate.start !== initialBest?.start || candidate.end !== initialBest.end);
+  const margin = initialBest && runnerUp ? initialBest.score - runnerUp.score : null;
   const bestDiagnostic = best ? passageDiagnostic(best, verses) : null;
   const currentBaseState = passageStateFor(best, minConfidence, true);
   const sufficientEvidence = currentBaseState !== "no-reliable-match";
@@ -2273,7 +2407,6 @@ function identifyPrimaryTranscript(
       && (runnerUp.transcriptCoverage ?? 0) >= (best!.transcriptCoverage ?? 0) - 0.02
       && runnerUp.textSimilarity >= best!.textSimilarity - 0.02,
   );
-  const state: PassageAmbiguityState = !sufficientEvidence ? "no-reliable-match" : ambiguous ? "plausible-ambiguous" : "confident-unique";
   const stableBaseState = passageStateFor(best, minConfidence, false);
   const stableState: PassageAmbiguityState = stableBaseState === "no-reliable-match" ? stableBaseState : ambiguous ? "plausible-ambiguous" : "confident-unique";
   const selectedCandidate = sufficientEvidence ? bestDiagnostic : null;
@@ -2282,15 +2415,24 @@ function identifyPrimaryTranscript(
     selectedCandidate && firstChunkBest
       && (firstChunkBest.startVerseKey !== selectedCandidate.startVerseKey || firstChunkBest.endVerseKey !== selectedCandidate.endVerseKey),
   );
+  const span = best ? canonicalSpan(best, verses, completed?.completion) : null;
   const strongestLocalAnchor = diagnostics.reduce<RecognitionDiagnostic["topCandidate"]>((strongest, diagnostic) => {
     if (!diagnostic.topCandidate || (strongest && strongest.confidence >= diagnostic.topCandidate.confidence)) return strongest;
     return diagnostic.topCandidate;
   }, undefined);
-  const span = best ? canonicalSpan(best, verses) : null;
   const selectedStartIndex = span ? verses.findIndex((verse) => verse.verseKey === span.firstVerseKey) : -1;
   const selectedEndIndex = span ? verses.findIndex((verse) => verse.verseKey === span.lastVerseKey) : -1;
   const anchorStartIndex = strongestLocalAnchor ? verses.findIndex((verse) => verse.verseKey === strongestLocalAnchor.startVerseKey) : -1;
   const anchorEndIndex = strongestLocalAnchor ? verses.findIndex((verse) => verse.verseKey === strongestLocalAnchor.endVerseKey) : -1;
+  const boundaryIncomplete = Boolean(
+    span && bestDiagnostic
+      && ((span.firstBoundary === "mid-verse" && bestDiagnostic.unexplainedTranscriptBefore > 0)
+        || (span.lastBoundary === "mid-verse" && bestDiagnostic.unexplainedTranscriptAfter > 0)),
+  );
+  const boundaryConfidence = best ? Number((boundaryIncomplete ? 0.4 : 1).toFixed(4)) : null;
+  const state: PassageAmbiguityState = !sufficientEvidence
+    ? "no-reliable-match"
+    : boundaryIncomplete || ambiguous ? "plausible-ambiguous" : "confident-unique";
   const passage: PassageInference = {
     passageSource: "primary-transcript",
     state,
@@ -2305,9 +2447,14 @@ function identifyPrimaryTranscript(
     uniquenessMargin: margin === null ? null : Number(margin.toFixed(4)),
     firstBoundaryConfidence: best && best.alignment.firstCanonicalIndex !== null ? Number(((best.alignment.similarities.get(best.alignment.firstCanonicalIndex)?.[0] ?? 0)).toFixed(4)) : null,
     lastBoundaryConfidence: best && best.alignment.lastCanonicalIndex !== null ? Number(((best.alignment.similarities.get(best.alignment.lastCanonicalIndex)?.at(-1) ?? 0)).toFixed(4)) : null,
+    identityConfidence: best ? Number(confidenceFor(best.score, verses.slice(best.start, best.end + 1).map(normalizedVerseText).join(" ")).toFixed(4)) : null,
+    boundaryConfidence,
+    coverageConfidence: best ? Number((best.transcriptCoverage ?? 0).toFixed(4)) : null,
     boundaryCompletion: {
-      extendedBackward: selectedStartIndex >= 0 && anchorStartIndex >= 0 && selectedStartIndex < anchorStartIndex,
-      extendedForward: selectedEndIndex >= 0 && anchorEndIndex >= 0 && selectedEndIndex > anchorEndIndex,
+      extendedBackward: Boolean(completed?.completion.extendedBackward)
+        || (selectedStartIndex >= 0 && anchorStartIndex >= 0 && selectedStartIndex < anchorStartIndex),
+      extendedForward: Boolean(completed?.completion.extendedForward)
+        || (selectedEndIndex >= 0 && anchorEndIndex >= 0 && selectedEndIndex > anchorEndIndex),
     },
     shadowComparison: {
       stablePreF0840e7: { state: stableState, selectedCandidate: stableBaseState === "no-reliable-match" ? null : bestDiagnostic },

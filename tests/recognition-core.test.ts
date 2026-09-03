@@ -3,6 +3,7 @@ import test from "node:test";
 import { performance } from "node:perf_hooks";
 import { analyzeTranscript, createPrimaryTranscript, hafsVerses, identifyQuranPassage, normalizeArabic, recognizeTranscript, resolveFirstQuranOnset } from "../src/lib/recognition/core.ts";
 import { quranRecognitionUnits } from "../src/lib/recognition/quran-recitation.ts";
+import { canonicalCtcWords } from "../src/lib/recognition/ctc-forced-alignment.ts";
 import { analyzeMonoPcm } from "../src/lib/recognition/audio-analysis.ts";
 
 const verse = (key: string) => hafsVerses.find((item) => item.verseKey === key)!;
@@ -148,6 +149,28 @@ test("extends a clean 6:76-77 anchor backward into a noisy 6:75 after initial si
   assert.equal(analysis.matches[0]?.startMs, 10_000, "initial silence must not become Quran timing");
   assert.ok((analysis.passage.transcriptCoverage ?? 0) > 0.8);
   assert.equal(analysis.passage.boundaryCompletion.extendedBackward, true);
+});
+
+test("completes noisy leading Quran evidence before timestamped passage timing", () => {
+  // Real 3:33-35 failure family: Whisper's "زجيت" is a poor rendering of
+  // 3:34 word one, while the leading 3:33 sequence is noisy but monotonic.
+  const text = "إن الله استفاق أدم ونحاول آل إبراهما وألع إمران على العالمين زجيت بعضها من بعضوا والله سمعون عليم إفقالة إمراءت عمران ربي إنين ذرت لكما في بطني محرورا فتقبل مني إنك أنت السميع العليم";
+  const starts = [800, 1450, 2100, 2750, 3400, 4050, 4700, 5350, 6000, 6650, 7300, 9300, 10020, 10600, 11180, 11760, 12340, 12920, 13600, 14280, 14960, 15640, 16320, 17000, 17680, 18360, 19040, 19720, 20400, 21080, 21760, 22440, 23120, 23800];
+  const words = text.split(/\s+/).map((word, index) => ({ text: word, startMs: starts[index]!, endMs: starts[index]! + 520 }));
+  const analysis = analyzeTranscript([{ startMs: 0, endMs: 27_305, text, words }], { timestampMode: "word" });
+
+  assert.deepEqual(analysis.passage.canonicalSpan?.coveredVerseKeys, ["3:33", "3:34", "3:35"]);
+  assert.equal(analysis.passage.canonicalSpan?.firstBoundary, "verse-beginning");
+  assert.equal(analysis.passage.canonicalSpan?.firstWordIndex, 1);
+  assert.deepEqual(analysis.matches.map((match) => match.verseKey), ["3:33", "3:34", "3:35"]);
+  assert.ok(analysis.matches[1]!.startMs < 10_020, "3:34 must be recovered before its word-two timestamp");
+  assert.equal(analysis.forcedAlignment?.canonicalPassage.find((word) => word.verseKey === "3:34")?.canonicalWordIndex, 1);
+  assert.deepEqual(
+    [...new Set(canonicalCtcWords(hafsVerses.filter((item) => new Set(analysis.matches.map((match) => match.verseKey)).has(item.verseKey))).map((word) => word.verseKey))],
+    ["3:33", "3:34", "3:35"],
+    "the shadow CTC target is built from the finalized passage",
+  );
+  assert.ok(analysis.matches.every((match, index) => index === 0 || analysis.matches[index - 1]!.endMs === match.startMs), "automatic boundaries remain contiguous");
 });
 
 test("reports exact partial canonical boundaries without claiming unrecorded ayah words", () => {

@@ -1,5 +1,30 @@
 # Status
 
+## Current milestone: Deterministic Quran passage-boundary completion
+
+Complete:
+
+- Treat local passage matching as an identity anchor, then complete the final
+  canonical span with a bounded monotonic scan of its adjacent ayat before any
+  timestamped, forced-alignment, caption, or CTC input is built.
+- Recover a missing current-ayah edge word contextually only when an unused
+  adjacent ASR token and a strong local canonical run support it; extend into
+  each neighbouring ayah only with at least two monotonic, sequential ASR
+  anchors. The bounded search stops after six ayat and never re-searches the
+  Quran corpus.
+- Added separate identity, coverage, and boundary confidence diagnostics. A
+  locally unique candidate with unexplained speech at a mid-ayah edge is now
+  only plausible until boundary completion resolves it.
+- Added the permanent timestamped 3:33–35 real-failure family. It verifies
+  restored 3:33 display, contextual recovery of 3:34 word one before the
+  word-two timestamp, contiguous automatic boundaries, and a CTC target that
+  includes the completed passage.
+
+Verification: focused recognition tests, full `npm test` (158 passing),
+`npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check`
+pass. The production build retains the existing ONNX Runtime dynamic-require
+warning.
+
 ## Current milestone: Verified first Quran onset in timestamped alignment
 
 Complete:
