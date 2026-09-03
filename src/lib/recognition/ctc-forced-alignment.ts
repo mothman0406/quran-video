@@ -3,6 +3,7 @@
  * identified. This module intentionally has no ASR decoding dependency: the
  * canonical token sequence is the only display truth.
  */
+import { normalizeArabic } from "./core.ts";
 
 export type CtcCanonicalWord = {
   verseKey: string;
@@ -286,11 +287,16 @@ export function forceAlignCtc(
 /** Builds complete display words from the fixed identified verse range. */
 export function canonicalCtcWords(verses: readonly { verseKey: string; text: string }[]): CtcCanonicalWord[] {
   let globalWordIndex = 0;
-  return verses.flatMap((verse) => verse.text.trim().split(/\s+/).filter(Boolean).map((canonicalArabic, index) => ({
-    verseKey: verse.verseKey,
-    canonicalWordIndex: index + 1,
-    globalWordIndex: ++globalWordIndex,
-    canonicalArabic,
-    alignmentText: canonicalArabic,
-  })));
+  return verses.flatMap((verse) => verse.text.trim().split(/\s+/)
+    // Keep acoustic numbering identical to the canonical editor/display
+    // representation: standalone waqf, ayah-number, and annotation glyphs
+    // normalize to no Arabic word and are not spoken target positions.
+    .filter((canonicalArabic) => Boolean(normalizeArabic(canonicalArabic)))
+    .map((canonicalArabic, index) => ({
+      verseKey: verse.verseKey,
+      canonicalWordIndex: index + 1,
+      globalWordIndex: ++globalWordIndex,
+      canonicalArabic,
+      alignmentText: canonicalArabic,
+    })));
 }

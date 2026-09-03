@@ -112,12 +112,25 @@ export function normalizeWav2Vec2Pcm(audio: Float32Array): Float32Array {
 /** Returns a canonical-word-preserving character CTC target, including known word delimiters. */
 export function encodeCtcWords(words: ReturnType<typeof canonicalCtcWords>): { canonicalWords: ReturnType<typeof canonicalCtcWords>; targetTokens: CtcTargetToken[] } {
   const canonicalWords = words.map((word) => ({ ...word, alignmentText: normalizeCtcArabic(word.canonicalArabic) }));
+  const unsupported = canonicalWords.flatMap((word) => {
+    const unsupportedCharacters = [...word.alignmentText].filter((token) => ARABIC_CTC_VOCABULARY[token] === undefined);
+    return !word.alignmentText || unsupportedCharacters.length
+      ? [{ word, unsupportedCharacters }]
+      : [];
+  });
+  if (unsupported.length) {
+    const details = unsupported.map(({ word, unsupportedCharacters }) => {
+      const unicode = [...word.canonicalArabic].map((character) => `U+${character.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}`).join(" ");
+      return `${word.verseKey} word ${word.canonicalWordIndex}: original=${JSON.stringify(word.canonicalArabic)} unicode=[${unicode}] normalized=${JSON.stringify(word.alignmentText)} unsupported=[${unsupportedCharacters.map((character) => JSON.stringify(character)).join(", ")}]`;
+    }).join("; ");
+    throw new Error(`CTC target validation failed for real Quran word(s): ${details}`);
+  }
   const targetTokens: CtcTargetToken[] = [];
   for (const [index, word] of canonicalWords.entries()) {
-    if (!word.alignmentText) throw new Error(`Canonical Quran word ${word.globalWordIndex} cannot be represented by the CTC vocabulary.`);
     for (const token of word.alignmentText) {
       const tokenId = ARABIC_CTC_VOCABULARY[token];
-      if (tokenId === undefined) throw new Error(`The CTC vocabulary cannot encode ${JSON.stringify(token)} in canonical Quran word ${word.globalWordIndex}.`);
+      // Validation above keeps this defensive branch unreachable.
+      if (tokenId === undefined) throw new Error(`CTC target validation failed for ${word.verseKey} word ${word.canonicalWordIndex}.`);
       targetTokens.push({ tokenId, token, globalWordIndex: word.globalWordIndex });
     }
     if (index < canonicalWords.length - 1) targetTokens.push({ tokenId: ARABIC_CTC_VOCABULARY[WORD_DELIMITER]!, token: WORD_DELIMITER, globalWordIndex: word.globalWordIndex });

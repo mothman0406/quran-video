@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { canonicalCtcWords } from "../src/lib/recognition/ctc-forced-alignment.ts";
+import { hafsVerses } from "../src/lib/recognition/core.ts";
 import {
   encodeCtcWords,
   normalizeCtcArabic,
@@ -18,6 +19,20 @@ test("Wav2Vec2 CTC normalization preserves original canonical words while making
   assert.equal(encoded.targetTokens.filter((token) => token.token === "|").length, 3);
   assert.ok(encoded.targetTokens.every((token) => Number.isInteger(token.tokenId)));
   assert.equal(normalizeCtcArabic("۞ وَٱلضُّحَىٰ۝"), "والضحى");
+});
+
+test("CTC target excludes standalone Quran structural glyphs without shifting spoken word indexes", () => {
+  const encoded = encodeCtcWords(canonicalCtcWords([{ verseKey: "1:1", text: "كلمة ۖ كلمة" }]));
+  assert.deepEqual(encoded.canonicalWords.map((word) => [word.canonicalWordIndex, word.canonicalArabic]), [[1, "كلمة"], [2, "كلمة"]]);
+  assert.ok(encoded.targetTokens.every((token) => token.token !== "ۖ"));
+});
+
+test("the real 6:74-77 CTC target contains only encodable spoken canonical words", () => {
+  const verses = hafsVerses.filter((verse) => ["6:74", "6:75", "6:76", "6:77"].includes(verse.verseKey));
+  const encoded = encodeCtcWords(canonicalCtcWords(verses));
+  assert.deepEqual(verses.map((verse) => encoded.canonicalWords.filter((word) => word.verseKey === verse.verseKey).length), [14, 9, 15, 18]);
+  assert.ok(encoded.targetTokens.length > 0);
+  assert.ok(encoded.canonicalWords.every((word) => encoded.targetTokens.some((token) => token.globalWordIndex === word.globalWordIndex)));
 });
 
 test("Wav2Vec2 preprocessing is the configured per-utterance zero-mean/unit-variance normalization", () => {

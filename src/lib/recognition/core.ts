@@ -290,6 +290,16 @@ export type TransitionTimingTrace = {
   firstPreviousAyahEvidenceMs: number | null;
   firstNextAyahEvidenceMs: number | null;
   firstNextCanonicalWordSupported: number | null;
+  /** Canonical next-ayah candidates, retained in chronological order for diagnosis. */
+  candidateNextAyahEvidence: Array<{
+    timestampMs: number;
+    canonicalWordIndex: number;
+    confidence: number;
+    evidenceType: "direct-word-1" | "coherent-early-words" | "backward-recovery";
+    vadSpeechOnsetNearby: boolean;
+    accepted: boolean;
+    reason: string;
+  }>;
   selectedTransitionMs: number;
   evidence: TimingEvidenceSource;
 };
@@ -734,24 +744,20 @@ function canonicalPassageTokens(passage: readonly QuranCorpusVerse[]) {
  */
 function selectFirstAyahOnsetAnchor(evidence: readonly AlignedAyahEvidence[]): AlignedAyahEvidence | null {
   if (!evidence.length) return null;
-  const strong = evidence.filter((item) => item.similarity >= 0.7);
-  const candidates = (strong.length ? strong : evidence).slice().sort((left, right) => left.token.startMs - right.token.startMs);
-  if (candidates.length === 1) return candidates[0];
-  const clusters: AlignedAyahEvidence[][] = [];
-  for (const item of candidates) {
-    const current = clusters.at(-1);
-    if (!current || item.token.startMs - current.at(-1)!.token.endMs > 1_800) clusters.push([item]);
-    else current.push(item);
-  }
-  const best = clusters.reduce((winner, cluster) => {
-    const score = (items: readonly AlignedAyahEvidence[]) => {
-      const distinctWords = new Set(items.map((item) => item.canonicalWordIndex)).size;
-      const averageSimilarity = items.reduce((sum, item) => sum + item.similarity, 0) / items.length;
-      return items.length + distinctWords * 0.5 + averageSimilarity;
-    };
-    return score(cluster) > score(winner) ? cluster : winner;
+  // The transition is the beginning of a known next ayah, not a best-match
+  // search over its entire duration. A later dense cluster must never evict a
+  // credible word-one observation merely because it has more support.
+  const candidates = evidence.slice().sort((left, right) => left.token.startMs - right.token.startMs || left.canonicalWordIndex - right.canonicalWordIndex);
+  const directWordOne = candidates.find((item) => item.canonicalWordIndex === 0 && item.similarity >= 0.62);
+  if (directWordOne) return directWordOne;
+  const earlyCoherent = candidates.find((item, index) => {
+    if (item.similarity < 0.62 || item.canonicalWordIndex > 2) return false;
+    const following = candidates[index + 1];
+    return Boolean(following && following.canonicalWordIndex === item.canonicalWordIndex + 1
+      && following.similarity >= 0.62 && following.token.startMs - item.token.endMs <= 1_800);
   });
-  return best[0] ?? null;
+  if (earlyCoherent) return earlyCoherent;
+  return candidates.find((item) => item.similarity >= 0.7) ?? candidates[0]!;
 }
 
 function selectFirstQuranSpeechRegion(
@@ -923,11 +929,37 @@ function reconstructPassage(
         && (!speechRegions || Boolean(speechRegionContaining(speechRegions, item.token.startMs, item.token.endMs))));
     const nextAnchor = selectFirstAyahOnsetAnchor(nextEvidence);
     const nextFirst = nextAnchor?.token.startMs ?? (next.length ? Math.min(...next.map((token) => token.startMs)) : null);
-    const predicted = starts[index + 1] ?? nextFirst ?? ends[index] ?? 0;
-    const corridorStart = Math.max(0, Math.round(predicted - 2_800));
-    const corridorEnd = Math.min(sourceDuration, Math.round(predicted + 2_200));
+    // This corridor must be derived from observed passage evidence, not the
+    // mutable verse start it is about to correct. In particular, retain the
+    // earliest next-ayah observation even when a later internal word formed
+    // the old estimated start.
+    const earliestNextEvidenceMs = nextEvidence.length ? Math.min(...nextEvidence.map((item) => item.token.startMs)) : nextFirst;
+    const latestNextEvidenceMs = nextEvidence.length ? Math.max(...nextEvidence.map((item) => item.token.endMs)) : nextFirst;
+    const corridorStart = Math.max(0, Math.round(Math.min(previousLast ?? earliestNextEvidenceMs ?? 0, earliestNextEvidenceMs ?? previousLast ?? 0) - 600));
+    const corridorEnd = Math.min(sourceDuration, Math.round(Math.max(latestNextEvidenceMs ?? 0, nextFirst ?? 0) + 600));
     const vadRegions = regionsInCorridor(speechRegions, corridorStart, corridorEnd);
     const region = nextAnchor ? speechRegionContaining(speechRegions, nextAnchor.token.startMs, nextAnchor.token.endMs) : null;
+    const candidateNextAyahEvidence = nextEvidence
+      .slice()
+      .sort((left, right) => left.token.startMs - right.token.startMs || left.canonicalWordIndex - right.canonicalWordIndex)
+      .map((item) => {
+        const isSelected = item === nextAnchor;
+        const nearbyOnset = (speechRegions ?? []).some((candidate) => Math.abs(candidate.startMs - item.token.startMs) <= 400);
+        const evidenceType = item.canonicalWordIndex === 0
+          ? "direct-word-1" as const
+          : item.canonicalWordIndex <= 2 ? "coherent-early-words" as const : "backward-recovery" as const;
+        return {
+          timestampMs: item.token.startMs,
+          canonicalWordIndex: item.canonicalWordIndex + 1,
+          confidence: Number(item.similarity.toFixed(4)),
+          evidenceType,
+          vadSpeechOnsetNearby: nearbyOnset,
+          accepted: isSelected,
+          reason: isSelected
+            ? item.canonicalWordIndex === 0 ? "earliest credible direct evidence for next ayah word 1" : "earliest credible early-word evidence for backward onset recovery"
+            : "later next-ayah evidence cannot override the earliest credible onset candidate",
+        };
+      });
     const recovered = recoverAyahOnsetFromLocalAnchor(nextAnchor, nextEvidence, region);
     let transition = recovered?.onsetMs ?? nextFirst ?? starts[index + 1] ?? ends[index] ?? 0;
     let evidenceSource = recovered?.source ?? startSources[index + 1];
@@ -953,6 +985,7 @@ function reconstructPassage(
       firstPreviousAyahEvidenceMs: previous.length ? Math.min(...previous.map((token) => token.startMs)) : null,
       firstNextAyahEvidenceMs: nextFirst,
       firstNextCanonicalWordSupported: nextAnchor ? nextAnchor.canonicalWordIndex + 1 : null,
+      candidateNextAyahEvidence,
       selectedTransitionMs: transition,
       evidence: evidenceSource,
     });

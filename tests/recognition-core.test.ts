@@ -374,6 +374,34 @@ test("a clear pause keeps the previous ayah visible until next Quran speech begi
   assert.equal(analysis.matches[0]?.endMs, 1_060);
 });
 
+test("an early 6:77 word one at a VAD onset beats a later internal-word pause", () => {
+  const nextWords = ["فلمّا", "رأى", "الشمس", "بازغة", "قال", "هذا", "ربي", "هذا", "أكبر", "فلمّا", "أفلت", "قال", "يا", "قوم", "إني", "بريء", "مما", "تشركون"];
+  const corpus = [{ verseKey: "6:76", text: "قال" }, { verseKey: "6:77", text: nextWords.join(" ") }];
+  const words = [
+    { text: "قال", startMs: 42_864, endMs: 44_864 },
+    ...nextWords.map((text, index) => ({
+      text,
+      startMs: index === 0 ? 44_832 : index === 17 ? 55_584 : 45_100 + index * 550,
+      endMs: index === 0 ? 45_050 : index === 17 ? 55_900 : 45_500 + index * 550,
+    })),
+  ];
+  const analysis = analyzeTranscript([{ startMs: 42_864, endMs: 55_900, text: words.map((word) => word.text).join(" "), words }], {
+    corpus,
+    minConfidence: 0.5,
+    speechRegions: [
+      { startMs: 32_064, endMs: 44_256, durationMs: 12_192, confidence: 0.95 },
+      { startMs: 44_832, endMs: 55_104, durationMs: 10_272, confidence: 0.95 },
+      { startMs: 55_584, endMs: 56_000, durationMs: 416, confidence: 0.95 },
+    ],
+  });
+  const transition = analysis.timingTrace?.transitions[0];
+  assert.equal(analysis.matches[0]?.endMs, 44_832);
+  assert.equal(analysis.matches[1]?.startMs, 44_832);
+  assert.equal(transition?.selectedTransitionMs, 44_832);
+  assert.equal(transition?.candidateNextAyahEvidence.find((item) => item.canonicalWordIndex === 1)?.accepted, true);
+  assert.equal(transition?.candidateNextAyahEvidence.find((item) => item.canonicalWordIndex === 18)?.accepted, false);
+});
+
 test("a long final ayah remains displayed through its Quran-aligned VAD speech region", () => {
   const corpus = [{ verseKey: "1:1", text: "الف باء جيم" }];
   const analysis = analyzeTranscript([{

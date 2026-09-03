@@ -1,6 +1,17 @@
 # Status
 
-## Current milestone: CTC forced-alignment shadow prototype
+## Current milestone: Fix earliest ayah transition selection and CTC structural targets
+
+Complete:
+
+- Replaced the self-referential transition corridor with a candidate interval derived from previous-ayah evidence, all next-ayah evidence, VAD, and the known passage sequence. Direct credible next-ayah word-one evidence now wins chronologically over later internal-word matches.
+- Added chronological transition diagnostics showing candidate timestamp, canonical word index, confidence, evidence type, nearby VAD speech onset, acceptance, and reason. The real-shaped 6:76 → 6:77 regression selects 44,832 ms, leaving 6:76 visible through the preceding breath; the later word-18 / 55,584 ms event remains inside 6:77.
+- Made CTC canonical target construction use the same Arabic-word convention as display/editor construction, excluding standalone waqf, ayah-number, and annotation glyphs before acoustic indexing. Validation now reports verse, word, original Unicode, normalized target text, and unsupported characters for any real unencodable word.
+- Added structural-token coverage and target validation for 6:74–77. The four ayat produce 14, 9, 15, and 18 real spoken target words respectively, each with a non-empty encodable token sequence. CTC remains shadow-only.
+
+Verification: `npm test` (152 passing), `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. The production build retains the existing non-fatal `vad-web` critical-dependency warning.
+
+## Previous milestone: CTC forced-alignment shadow prototype
 
 Implementation complete; real-recording acceptance validation pending:
 
