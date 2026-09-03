@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { performance } from "node:perf_hooks";
-import { analyzeTranscript, createPrimaryTranscript, hafsVerses, identifyQuranPassage, normalizeArabic, recognizeTranscript } from "../src/lib/recognition/core.ts";
+import { analyzeTranscript, createPrimaryTranscript, hafsVerses, identifyQuranPassage, normalizeArabic, recognizeTranscript, resolveFirstQuranOnset } from "../src/lib/recognition/core.ts";
 import { quranRecognitionUnits } from "../src/lib/recognition/quran-recitation.ts";
 import { analyzeMonoPcm } from "../src/lib/recognition/audio-analysis.ts";
 
@@ -428,6 +428,52 @@ test("real Surah 93 timestamp fixture aligns split Arabic tokens without VAD rew
   assert.ok(analysis.matches.every((match) => match.endMs <= 20_362 && match.endMs > match.startMs));
   assert.equal(analysis.timingRecoveryPlan?.required, false);
   assert.deepEqual(corpus.map((item) => item.text), hafsVerses.filter((item) => /^93:[1-5]$/.test(item.verseKey)).map((item) => item.text));
+});
+
+test("timestamped first caption ignores a zero-start token inside a merged first Quran word", () => {
+  const corpus = hafsVerses.filter((item) => /^93:[1-5]$/.test(item.verseKey));
+  const words = [
+    ["و", 0, 1_700], ["الضحى", 1_700, 2_800],
+    ["والليل", 2_670, 2_860], ["اذا", 2_860, 3_300], ["سجى", 3_300, 3_800],
+    ["ما", 4_000, 4_500], ["ودعك", 4_500, 5_400], ["ربك", 5_400, 6_200], ["وما", 6_200, 7_000], ["قلى", 7_000, 9_420],
+    ["خير", 11_520, 12_100], ["لك", 12_100, 12_600], ["من", 12_600, 13_000], ["الاولى", 13_000, 14_000],
+    ["ولسوف", 14_640, 15_000], ["يعطيك", 15_000, 15_500], ["ربك", 15_500, 16_000], ["فترضى", 16_000, 17_000],
+  ].map(([text, startMs, endMs]) => ({ text: text as string, startMs: startMs as number, endMs: endMs as number }));
+  const pcm = new Float32Array(20_362);
+  for (let index = 1_640; index < pcm.length; index += 1) pcm[index] = 0.2;
+  const analysis = analyzeTranscript(createPrimaryTranscript([{
+    startMs: 0,
+    endMs: 20_362,
+    text: words.map((word) => word.text).join(" "),
+    words,
+  }], "word"), {
+    corpus,
+    minConfidence: 0.45,
+    audioAnalysis: analyzeMonoPcm(pcm, 1_000),
+    speechRegions: [{ startMs: 672, endMs: 20_362, durationMs: 19_690, confidence: 0.95 }],
+  });
+  const rawFirstWord = analysis.forcedAlignment?.wordOccurrences.find((word) => word.verseKey === "93:1" && word.canonicalWordIndex === 1);
+  assert.equal(rawFirstWord?.startMs, 0, "the raw merged ASR group remains available as diagnostics");
+  assert.equal(analysis.timingTrace?.rawVerseAlignmentStartMs, 1_700);
+  assert.equal(analysis.timingTrace?.pcmLocalOnsetCandidateMs, 1_640);
+  assert.equal(analysis.matches[0]?.startMs, 1_640, "the authoritative first caption starts at verified Quran onset");
+  assert.deepEqual(analysis.matches.slice(1).map((match) => [match.verseKey, match.startMs]), [
+    ["93:2", 2_670], ["93:3", 4_000], ["93:4", 9_420], ["93:5", 14_640],
+  ]);
+});
+
+test("first Quran onset accepts immediate recitation but rejects an acoustically implausible raw zero", () => {
+  assert.deepEqual(resolveFirstQuranOnset({
+    lexicalEvidence: { firstAlignedMs: 1_700, strongAnchorMs: 1_700 },
+    speechRegions: [{ startMs: 672, endMs: 20_362, durationMs: 19_690, confidence: 0.95 }],
+    pcmEvidence: 1_640,
+    rawTimestampEvidence: 0,
+  }), { onsetMs: 1_640, source: "pcm-refined" });
+  assert.deepEqual(resolveFirstQuranOnset({
+    lexicalEvidence: { firstAlignedMs: 40, strongAnchorMs: 40 },
+    speechRegions: [{ startMs: 0, endMs: 20_000, durationMs: 20_000, confidence: 0.95 }],
+    rawTimestampEvidence: 0,
+  }), { onsetMs: 0, source: "word-timestamp" });
 });
 
 test("a long final ayah remains displayed through its Quran-aligned VAD speech region", () => {

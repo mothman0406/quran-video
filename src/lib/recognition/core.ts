@@ -625,6 +625,77 @@ type AlignedAyahEvidence = {
   similarity: number;
 };
 
+export type FirstQuranOnsetLexicalEvidence = {
+  /** Earliest accepted aligned Quran word evidence for the selected passage. */
+  firstAlignedMs: number | null;
+  /** Strong local anchor used to reject an isolated early ASR token. */
+  strongAnchorMs: number | null;
+};
+
+export type FirstQuranOnsetResolution = {
+  onsetMs: number | null;
+  source: TimingEvidenceSource | null;
+};
+
+/**
+ * Resolves the first visible Quran onset independently from a merged ASR
+ * token-group start. A VAD region is usable only when it begins close to
+ * selected Quran lexical evidence; a generic early speech region cannot pull
+ * a caption into an unrelated prefix. PCM is already corridor-bounded by the
+ * caller, but the lexical checks here keep this helper safe when reused by
+ * either timing mode.
+ */
+export function resolveFirstQuranOnset({
+  lexicalEvidence,
+  speechRegions,
+  pcmEvidence,
+  rawTimestampEvidence,
+}: {
+  lexicalEvidence: FirstQuranOnsetLexicalEvidence;
+  speechRegions?: readonly VadSpeechRegion[];
+  pcmEvidence?: number | null;
+  rawTimestampEvidence?: number | null;
+}): FirstQuranOnsetResolution {
+  const finiteMs = (value: number | null | undefined) => value !== null && value !== undefined && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : null;
+  const firstAlignedMs = finiteMs(lexicalEvidence.firstAlignedMs);
+  const strongAnchorMs = finiteMs(lexicalEvidence.strongAnchorMs);
+  const lexicalMs = strongAnchorMs ?? firstAlignedMs;
+  const regions = speechRegions ?? [];
+  const quranRegion = lexicalMs === null
+    ? null
+    : regions.find((region) => lexicalMs < region.endMs && lexicalMs >= region.startMs) ?? null;
+  const pcmMs = finiteMs(pcmEvidence);
+
+  // A PCM candidate is authoritative only when it remains near the selected
+  // Quran evidence and inside its verified speech region, if one exists.
+  if (pcmMs !== null && lexicalMs !== null
+    && Math.abs(pcmMs - lexicalMs) <= 2_800
+    && (!quranRegion || (pcmMs >= quranRegion.startMs && pcmMs < quranRegion.endMs))) {
+    return { onsetMs: pcmMs, source: "pcm-refined" };
+  }
+
+  // VAD can include isti'adhah, basmalah, or unrelated speech. Treat its
+  // onset as Quran onset only when lexical evidence follows closely enough to
+  // associate the region with the selected passage.
+  if (quranRegion && lexicalMs !== null && lexicalMs - quranRegion.startMs <= 400) {
+    return { onsetMs: Math.round(quranRegion.startMs), source: "word-timestamp" };
+  }
+
+  const rawMs = finiteMs(rawTimestampEvidence);
+  const rawInSpeech = rawMs !== null && (!regions.length || regions.some((region) => rawMs < region.endMs && rawMs + 1 >= region.startMs));
+  const rawNearLexicalEvidence = rawMs !== null && (lexicalMs === null || Math.abs(rawMs - lexicalMs) <= 400);
+  if (rawMs !== null && rawInSpeech && rawNearLexicalEvidence) {
+    return { onsetMs: rawMs, source: "word-timestamp" };
+  }
+
+  // If raw ASR starts before the first credible Quran evidence, it is padding
+  // or a weak/hallucinated token rather than a display onset.
+  if (lexicalMs !== null) return { onsetMs: lexicalMs, source: "word-timestamp" };
+  return { onsetMs: null, source: null };
+}
+
 function timedTokens(chunks: readonly TranscriptChunk[]): TimedToken[] {
   return chunks.reduce<TimedToken[]>((all, chunk) => {
     if (chunk.words?.length) {
@@ -1028,18 +1099,20 @@ function timestampedForcedAlignment(
   };
 }
 
-/** Timestamp-first resolver. VAD can reject an impossible direct timestamp,
- * but it never supplies an ayah onset in this mode. */
+/** Timestamp-first resolver. The first ayah uses the shared verified-onset
+ * result; all subsequent ayah starts remain direct timestamp evidence. */
 function resolveTimestampedVerseBoundaries({
   verseKeys,
   wordOccurrences,
   speechRegions,
+  firstOnset,
   finalSpeechEnd,
   durationMs,
 }: {
   verseKeys: readonly string[];
   wordOccurrences: readonly WordOccurrence[];
   speechRegions?: readonly VadSpeechRegion[];
+  firstOnset?: FirstQuranOnsetResolution | null;
   finalSpeechEnd: number;
   durationMs: number;
 }): VerseBoundary[] {
@@ -1077,8 +1150,10 @@ function resolveTimestampedVerseBoundaries({
       source = "interpolated";
       picked = null;
     }
-    starts.push(Math.max(0, Math.min(maximum - 1, Math.round(start))));
-    sources.push(source);
+    starts[index] = index === 0 && firstOnset?.onsetMs !== null && firstOnset?.onsetMs !== undefined
+      ? Math.max(0, Math.min(maximum - 1, Math.round(firstOnset.onsetMs)))
+      : Math.max(0, Math.min(maximum - 1, Math.round(start)));
+    sources[index] = index === 0 ? firstOnset?.source ?? source : source;
     selected.push(picked);
     candidates.push(words.map((word) => ({
       timestampMs: word.startMs,
@@ -1118,7 +1193,12 @@ function assertTimestampedBoundaryInvariants(
     if (!words.length) continue;
     const earliest = Math.min(...words.map((word) => word.startMs));
     const latest = Math.max(...words.map((word) => word.endMs));
-    if (boundary.startMs > earliest) throw new Error(`Timestamped boundary starts after canonical evidence for ${boundary.verseKey}.`);
+    // The first merged Whisper group may begin before phonation. Its raw
+    // start remains useful diagnostics, but the verified first onset is the
+    // visible boundary. Interior ayat must still be bounded by their own
+    // canonical evidence.
+    if (index > 0 && boundary.startMs > earliest) throw new Error(`Timestamped boundary starts after canonical evidence for ${boundary.verseKey}.`);
+    if (index === 0 && boundary.startMs >= latest) throw new Error(`Timestamped first boundary starts after canonical evidence for ${boundary.verseKey}.`);
     const isNonFinal = index < boundaries.length - 1;
     if (!isNonFinal && boundary.endMs < latest) throw new Error(`Timestamped boundary ends before canonical evidence for ${boundary.verseKey}.`);
     if (isNonFinal && boundary.endMs < latest && boundaries[index + 1]!.startMs >= latest) throw new Error(`Timestamped boundary truncates canonical evidence for ${boundary.verseKey}.`);
@@ -2290,11 +2370,25 @@ export function analyzeTranscript(
     ? timestampedForcedAlignment(best, primary.chunks, verses)
     : forceAlignPassage(timingCandidate, timingChunks, verses, reconstructed.matches, options.audioAnalysis, options.speechRegions, options.timingRecoveryAttempted);
   const verseKeys = reconstructed.matches.map((match) => match.verseKey);
+  const firstRawTimestampEvidence = rawForcedAlignment?.wordOccurrences
+    .find((word) => word.verseKey === verseKeys[0] && word.canonicalWordIndex === 1)?.startMs
+    ?? rawForcedAlignment?.wordOccurrences.find((word) => word.verseKey === verseKeys[0])?.startMs
+    ?? null;
+  const firstQuranOnset = resolveFirstQuranOnset({
+    lexicalEvidence: {
+      firstAlignedMs: reconstructed.timingTrace.firstAsrWordAlignedToDetectedQuranMs,
+      strongAnchorMs: reconstructed.timingTrace.firstStrongAlignmentAnchorMs,
+    },
+    speechRegions: options.speechRegions,
+    pcmEvidence: reconstructed.timingTrace.pcmLocalOnsetCandidateMs,
+    rawTimestampEvidence: firstRawTimestampEvidence,
+  });
   const verseBoundaries = timestampedMode
     ? resolveTimestampedVerseBoundaries({
       verseKeys,
       wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
       speechRegions: options.speechRegions,
+      firstOnset: firstQuranOnset,
       finalSpeechEnd: reconstructed.matches.at(-1)?.endMs ?? sourceDurationMs,
       durationMs: sourceDurationMs,
     })
@@ -2302,7 +2396,7 @@ export function analyzeTranscript(
       verseKeys,
       wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
       speechRegions: options.speechRegions,
-      firstOnset: reconstructed.matches[0]?.startMs ?? 0,
+      firstOnset: firstQuranOnset.onsetMs ?? reconstructed.matches[0]?.startMs ?? 0,
       finalSpeechEnd: reconstructed.matches.at(-1)?.endMs ?? sourceDurationMs,
       durationMs: sourceDurationMs,
     });

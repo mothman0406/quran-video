@@ -1,5 +1,23 @@
 # Status
 
+## Current milestone: Verified first Quran onset in timestamped alignment
+
+Complete:
+
+- Separated the first visible Quran onset from the earliest timestamp in a
+  merged Whisper token group. The shared pure resolver prioritizes corridor-
+  bounded PCM onset, closely associated VAD onset, and acoustically plausible
+  lexical timestamps while rejecting an implausible raw zero.
+- Applied the verified onset to timestamped and fallback boundary generation
+  without changing interior ayah transition timing, passage identification,
+  CTC, or the fallback recovery architecture.
+- Added the Surah 93 merged-token regression, including the raw diagnostic
+  start at 0, verified onset at 1,640 ms, and preserved interior boundaries.
+
+Verification: focused and full `npm test`, `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. The build retains the existing
+ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Deterministic timestamp-first Quran word alignment
 
 Complete:
