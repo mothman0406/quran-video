@@ -1,5 +1,34 @@
 # Status
 
+## Current milestone: Deterministic timestamp-first Quran word alignment
+
+Complete:
+
+- Split recognition timing into explicit modes. When Whisper supplies real word
+  timestamps, the selected canonical passage is aligned monotonically with a
+  dedicated dynamic program; the no-word-timestamp VAD/micro-ASR fallback
+  remains separate.
+- The timestamped path supports one canonical word to one, two, or three ASR
+  tokens and two short canonical words to one ASR token. Canonical starts use
+  the first ASR token start and ends use the final ASR token end; Uthmani
+  display text is never changed.
+- Removed broad VAD rewind from timestamped ayah timing. A missing word one is
+  recovered only inside the closed interval from the prior ayah's final
+  aligned word end to this ayah's earliest aligned word. Timestamped runs do
+  not schedule general transition or final micro-ASR windows.
+- Added immutable analysis-run snapshots (source identity/object URL, decoded
+  duration, sample rate, and PCM identity). Whisper, timing recovery, CTC,
+  progress, captions, and debug state are discarded unless their run id still
+  matches the active source. Core timing rejects evidence outside the decoded
+  source duration (2 ms numeric tolerance).
+- Added the real-shaped 93:1–5 fixture: `و + الضحى` begins at 1,640 ms,
+  93:4 bounded recovery begins at 9,420 ms rather than the 5,952 ms VAD
+  onset, 93:5 begins at 14,640 ms, and no result exceeds 20,362 ms. The
+  existing 6:76–77 word-one regression remains green.
+
+Verification: `npm test` (155 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass.
+
 ## Current milestone: Deterministic single-source Quran verse timing
 
 Complete:

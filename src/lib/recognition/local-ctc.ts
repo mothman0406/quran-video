@@ -168,11 +168,11 @@ async function loadCtcModel(): Promise<LoadedCtcModel> {
 }
 
 /** Creates a browser-only, lazy CTC runner over the already decoded PCM. */
-export function createCtcShadowRunner(audio: Float32Array, speechRegions: readonly VadSpeechRegion[]): CtcShadowRunner {
+export function createCtcShadowRunner(audio: Float32Array, speechRegions: readonly VadSpeechRegion[], analysisRunId?: string): CtcShadowRunner {
   return async (verses, matches) => {
     const canonical = canonicalCtcWords(verses);
     const window = ctcWindow(audio, speechRegions, matches);
-    if (!window) return unavailable("No VAD-constrained Quran interval was available for CTC alignment.", verses);
+    if (!window) return { ...unavailable("No VAD-constrained Quran interval was available for CTC alignment.", verses), analysisRunId };
     const totalStartedAt = performance.now();
     const isMemoryWarm = sharedModelPromise !== null;
     try {
@@ -202,6 +202,7 @@ export function createCtcShadowRunner(audio: Float32Array, speechRegions: readon
       });
       return {
         ...aligned,
+        analysisRunId,
         performance: {
           ...aligned.performance,
           modelArtifactBytes: QURAN_CTC_SHADOW_MODEL_BYTES,
@@ -216,11 +217,11 @@ export function createCtcShadowRunner(audio: Float32Array, speechRegions: readon
         },
       };
     } catch (error) {
-      return unavailable(error instanceof Error ? error.message : String(error), verses, {
+      return { ...unavailable(error instanceof Error ? error.message : String(error), verses, {
         modelArtifactBytes: QURAN_CTC_SHADOW_MODEL_BYTES,
         cacheStatus: "unavailable",
         totalMs: Math.round(performance.now() - totalStartedAt),
-      });
+      }), analysisRunId };
     }
   };
 }

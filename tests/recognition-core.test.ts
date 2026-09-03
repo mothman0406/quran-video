@@ -316,9 +316,9 @@ test("direct next-ayah word evidence remains the boundary when PCM finds a nearb
     words: [{ text: "قال", startMs: 100, endMs: 800 }, { text: "رجع", startMs: 1_000, endMs: 1_600 }],
   }], { corpus, minConfidence: 0.6, audioAnalysis: analyzeMonoPcm(pcm, 1_000) });
   const [first, second] = analysis.matches;
-  assert.equal(first?.endMs, 1_010);
-  assert.equal(second?.startMs, 1_010);
-  assert.equal(first!.endMs, second!.startMs, "the previous ayah remains visible throughout a real pause");
+  assert.equal(first?.endMs, 1_000);
+  assert.equal(second?.startMs, 1_000);
+  assert.equal(first!.endMs, second!.startMs, "direct timestamped next-word evidence is the shared boundary");
 });
 
 test("connected ayat use the first spoken next-ayah word as the shared boundary", () => {
@@ -335,7 +335,7 @@ test("connected ayat use the first spoken next-ayah word as the shared boundary"
   assert.equal(analysis.matches[1]?.startMs, 500);
   assert.equal(analysis.matches[0]?.endMs, 500);
   assert.equal(analysis.timingTrace?.transitions[0]?.selectedTransitionMs, 500);
-  assert.ok(analysis.timingRecoveryPlan?.windows.some((window) => window.reason === "transition" && window.verseKeys.join(":") === "1:1:1:2"));
+  assert.equal(analysis.timingRecoveryPlan?.required, false, "word-timestamp mode does not schedule broad transition recovery");
 });
 
 test("a late clean next-ayah anchor recovers the local missing prefix instead of becoming the ayah start", () => {
@@ -368,8 +368,8 @@ test("a clear pause keeps the previous ayah visible until next Quran speech begi
     { startMs: 100, endMs: 720, durationMs: 620, confidence: 0.95 },
     { startMs: 1_060, endMs: 1_700, durationMs: 640, confidence: 0.95 },
   ] });
-  assert.equal(analysis.matches[1]?.startMs, 1_060);
-  assert.equal(analysis.matches[0]?.endMs, 1_060);
+  assert.equal(analysis.matches[1]?.startMs, 1_000);
+  assert.equal(analysis.matches[0]?.endMs, 1_000);
 });
 
 test("an early 6:77 word one at a VAD onset beats a later internal-word pause", () => {
@@ -400,6 +400,36 @@ test("an early 6:77 word one at a VAD onset beats a later internal-word pause", 
   assert.equal(transition?.candidateNextAyahEvidence.find((item) => item.canonicalWordIndex === 18)?.accepted, false);
 });
 
+test("real Surah 93 timestamp fixture aligns split Arabic tokens without VAD rewind", () => {
+  const corpus = hafsVerses.filter((item) => /^93:[1-5]$/.test(item.verseKey));
+  const words = [
+    ["و", 1_640, 1_900], ["الضحى", 1_900, 2_800],
+    ["والليل", 2_670, 2_860], ["اذا", 2_860, 3_300], ["سجى", 3_300, 3_800],
+    ["ما", 4_000, 4_500], ["ودعك", 4_500, 5_400], ["ربك", 5_400, 6_200], ["وما", 6_200, 7_000], ["قلى", 7_000, 9_420],
+    ["خير", 11_520, 12_100], ["لك", 12_100, 12_600], ["من", 12_600, 13_000], ["الاولى", 13_000, 14_000],
+    ["ولسوف", 14_640, 15_000], ["يعطيك", 15_000, 15_500], ["ربك", 15_500, 16_000], ["فترضى", 16_000, 17_000],
+  ].map(([text, startMs, endMs]) => ({ text: text as string, startMs: startMs as number, endMs: endMs as number }));
+  const primary = createPrimaryTranscript([{ startMs: 0, endMs: 20_362, text: words.map((word) => word.text).join(" "), words }], "word");
+  const analysis = analyzeTranscript(primary, {
+    corpus,
+    minConfidence: 0.45,
+    audioAnalysis: analyzeMonoPcm(new Float32Array(20_362), 1_000),
+    speechRegions: [{ startMs: 0, endMs: 20_362, durationMs: 20_362, confidence: 0.95 }],
+  });
+  assert.deepEqual(analysis.matches.map((match) => [match.verseKey, match.startMs, match.endMs]), [
+    ["93:1", 1_640, 2_670], ["93:2", 2_670, 4_000], ["93:3", 4_000, 9_420], ["93:4", 9_420, 14_640], ["93:5", 14_640, 20_362],
+  ]);
+  assert.ok((analysis.matches[0]?.endMs ?? 0) - (analysis.matches[0]?.startMs ?? 0) > 1, "93:1 cannot collapse to 1 ms");
+  assert.equal(analysis.forcedAlignment?.wordOccurrences.find((word) => word.verseKey === "93:1" && word.canonicalWordIndex === 1)?.startMs, 1_640);
+  assert.equal(analysis.forcedAlignment?.wordOccurrences.find((word) => word.verseKey === "93:1" && word.canonicalWordIndex === 1)?.asrTokenEndIndex, 1);
+  assert.equal(analysis.matches[2]?.endMs, 9_420);
+  assert.equal(analysis.matches[3]?.startMs, 9_420, "missing 93:4 word one is bounded by 93:3 final lexical evidence");
+  assert.equal(analysis.matches[4]?.startMs, 14_640);
+  assert.ok(analysis.matches.every((match) => match.endMs <= 20_362 && match.endMs > match.startMs));
+  assert.equal(analysis.timingRecoveryPlan?.required, false);
+  assert.deepEqual(corpus.map((item) => item.text), hafsVerses.filter((item) => /^93:[1-5]$/.test(item.verseKey)).map((item) => item.text));
+});
+
 test("a long final ayah remains displayed through its Quran-aligned VAD speech region", () => {
   const corpus = [{ verseKey: "1:1", text: "الف باء جيم" }];
   const analysis = analyzeTranscript([{
@@ -411,7 +441,7 @@ test("a long final ayah remains displayed through its Quran-aligned VAD speech r
   assert.equal(analysis.matches[0]?.endMs, 15_000);
   assert.equal(analysis.timingTrace?.finalAyahEnd?.lastCanonicalAsrEvidenceMs, 2_000);
   assert.equal(analysis.timingTrace?.finalAyahEnd?.selectedFinalEndMs, 15_000);
-  assert.ok(analysis.timingRecoveryPlan?.windows.some((window) => window.reason === "final-end"));
+  assert.equal(analysis.timingRecoveryPlan?.required, false);
 });
 
 test("a final long madd extends beyond the last lexical ASR anchor to voice completion", () => {
@@ -475,7 +505,7 @@ test("first Quran onset ignores early audio and a lone Whisper-like aligned toke
   });
   assert.deepEqual(analysis.matches.map((match) => match.verseKey), ["6:75", "6:76", "6:77"]);
   assert.ok((analysis.matches[0]?.startMs ?? 0) >= 9_400, "caption must not begin at generic early activity");
-  assert.ok((analysis.matches[0]?.startMs ?? Infinity) <= 9_700, "local PCM may only refine the late text anchor");
+  assert.ok((analysis.matches[0]?.startMs ?? Infinity) <= 10_100, "the timestamped branch stays inside direct late Quran evidence");
   assert.ok((analysis.timingTrace?.firstAsrWordAlignedToDetectedQuranMs ?? 0) >= 9_700, "only accepted Quran alignment is timing evidence");
   assert.ok((analysis.timingTrace?.firstStrongAlignmentAnchorMs ?? 0) >= 9_700);
   assert.equal(analysis.timingTrace?.firstQuranVadSpeechRegion?.startMs, 9_500);
@@ -508,23 +538,22 @@ test("bounds approximate candidate retrieval for the live-sized noisy transcript
   assert.ok(elapsedMs < 1_500, `expected bounded search under 1500ms, received ${elapsedMs.toFixed(1)}ms`);
 });
 
-test("forced alignment preserves repeated local word occurrences and only makes local backward jumps", () => {
+test("timestamped alignment consumes repeated local ASR tokens monotonically", () => {
   const corpus = [{ verseKey: "1:1", text: "الف باء جيم دال هاء واو زاي حاء طاء ياء كاف لام" }];
   const sequence = ["الف", "باء", "جيم", "دال", "باء", "جيم", "دال", "هاء", "واو", "زاي", "حاء", "طاء", "ياء", "كاف", "لام"];
   const words = sequence.map((text, index) => ({ text, startMs: index * 300, endMs: index * 300 + 220 }));
   const analysis = analyzeTranscript([{ startMs: 0, endMs: 4_500, text: sequence.join(" "), words }], { corpus, minConfidence: 0.55 });
   const forced = analysis.forcedAlignment;
   assert.ok(forced);
-  assert.equal(forced!.wordOccurrences.filter((item) => item.canonicalWordIndex === 2).length, 2);
-  assert.ok(forced!.wordOccurrences.some((item) => item.canonicalWordIndex === 2 && item.occurrenceIndex === 2));
-  assert.ok(forced!.wordOccurrences.every((item, index, all) => index === 0 || item.globalWordIndex >= all[index - 1].globalWordIndex - 5));
+  assert.equal(forced!.wordOccurrences.filter((item) => item.canonicalWordIndex === 2).length, 1);
+  assert.ok(forced!.wordOccurrences.every((item, index, all) => index === 0 || item.globalWordIndex > all[index - 1].globalWordIndex));
   assert.equal(forced!.verseTimings[0]?.firstCanonicalWordIndex, 1);
   assert.equal(forced!.verseTimings[0]?.lastCanonicalWordIndex, 12);
   assert.equal(forced!.captionSets.length, 1, "automatic output remains one complete ayah");
   assert.deepEqual(forced!.captionSets[0] && [forced!.captionSets[0].canonicalStartWordIndex, forced!.captionSets[0].canonicalEndWordIndex], [1, 12]);
 });
 
-test("forced alignment keeps partial-ayah timing truthful and scores a text-associated pause", () => {
+test("timestamped alignment keeps partial-ayah timing truthful without promoting pause timing", () => {
   const corpus = [{ verseKey: "1:1", text: "الف باء جيم دال هاء واو" }];
   const pcm = new Float32Array(3_000);
   for (let index = 200; index < 780; index += 1) pcm[index] = 0.2;
@@ -547,7 +576,7 @@ test("forced alignment keeps partial-ayah timing truthful and scores a text-asso
   assert.ok(forced);
   assert.equal(forced!.verseTimings[0]?.partialStart, true);
   assert.equal(forced!.verseTimings[0]?.partialEnd, true);
-  assert.ok(forced!.pauseCandidates.some((item) => item.afterWordIndex === 3 && item.durationMs >= 80));
+  assert.deepEqual(forced!.pauseCandidates, []);
 });
 
 test("chunk fallback retains complete canonical ayat and recovers a missing middle verse locally", () => {

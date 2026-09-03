@@ -47,6 +47,8 @@ export function createPrimaryTranscript(
 
 export type TimingEvidenceSource =
   | "word-timestamp"
+  | "merged-token-word1"
+  | "bounded-recovery"
   | "micro-asr"
   | "interpolated"
   | "pcm-refined"
@@ -195,6 +197,10 @@ export type WordOccurrence = CanonicalPassageWord & {
   evidence: "direct-word-alignment" | "micro-asr" | "chunk-coarse";
   pcmRefined: boolean;
   asrText: string;
+  /** Inclusive source-token range for deterministic timestamped alignment. */
+  asrTokenStartIndex?: number;
+  asrTokenEndIndex?: number;
+  mappingGroupId?: string;
 };
 
 /** The sole generated ayah timing result, derived after passage identity is
@@ -226,6 +232,9 @@ export type CanonicalWordAlignment = CanonicalPassageWord & {
   confidence: number;
   directMatch: boolean;
   recoveredMatch: boolean;
+  asrTokenStartIndex?: number;
+  asrTokenEndIndex?: number;
+  mappingGroupId?: string;
 };
 
 export type ForcedVerseTiming = {
@@ -739,6 +748,105 @@ function alignTokens(canonical: readonly CanonicalToken[], asr: readonly TimedTo
   };
 }
 
+type TimestampedTokenGroup = {
+  canonicalStart: number;
+  canonicalCount: 1 | 2;
+  asrStart: number;
+  asrCount: 1 | 2 | 3;
+  similarity: number;
+};
+
+type TimestampedTokenAlignment = {
+  matched: Map<number, TimestampedTokenGroup>;
+  matchedAsrIndexes: Set<number>;
+};
+
+function joinedUnits(words: readonly { units: QuranRecognitionUnits }[]): QuranRecognitionUnits {
+  return {
+    orthographic: words.map((word) => word.units.orthographic).join(""),
+    recitation: words.map((word) => word.units.recitation).join(""),
+  };
+}
+
+function isShortCanonicalWord(word: CanonicalToken): boolean {
+  return word.units.orthographic.length <= 3 || word.units.recitation.length <= 3;
+}
+
+/**
+ * Timestamped Whisper output is aligned to the already-selected passage, not
+ * searched against the corpus. The DP permits Arabic tokenization differences
+ * while preserving both token order and the exact Whisper word spans.
+ */
+function alignTimestampedTokens(
+  canonical: readonly CanonicalToken[],
+  asr: readonly TimedToken[],
+): TimestampedTokenAlignment {
+  type Move = TimestampedTokenGroup | { canonicalCount: 1; asrCount: 0 } | { canonicalCount: 0; asrCount: 1 } | null;
+  const rows = canonical.length + 1;
+  const columns = asr.length + 1;
+  const scores = Array.from({ length: rows }, () => new Float64Array(columns));
+  const moves = Array.from({ length: rows }, () => Array<Move>(columns).fill(null));
+  for (let i = 1; i < rows; i += 1) { scores[i][0] = scores[i - 1][0] - 0.12; moves[i][0] = { canonicalCount: 1, asrCount: 0 }; }
+  for (let j = 1; j < columns; j += 1) { scores[0][j] = scores[0][j - 1] - 0.78; moves[0][j] = { canonicalCount: 0, asrCount: 1 }; }
+
+  for (let i = 1; i < rows; i += 1) {
+    for (let j = 1; j < columns; j += 1) {
+      let bestScore = scores[i - 1][j] - 0.12;
+      let bestMove: Move = { canonicalCount: 1, asrCount: 0 };
+      const skipAsr = scores[i][j - 1] - 0.78;
+      if (skipAsr > bestScore) { bestScore = skipAsr; bestMove = { canonicalCount: 0, asrCount: 1 }; }
+      const candidates: Array<{ canonicalCount: 1 | 2; asrCount: 1 | 2 | 3 }> = [
+        { canonicalCount: 1, asrCount: 1 },
+        { canonicalCount: 1, asrCount: 2 },
+        { canonicalCount: 1, asrCount: 3 },
+      ];
+      if (i >= 2 && isShortCanonicalWord(canonical[i - 2]!) && isShortCanonicalWord(canonical[i - 1]!)) {
+        candidates.push({ canonicalCount: 2, asrCount: 1 });
+      }
+      for (const candidate of candidates) {
+        if (i < candidate.canonicalCount || j < candidate.asrCount) continue;
+        const canonicalGroup = canonical.slice(i - candidate.canonicalCount, i);
+        const asrGroup = asr.slice(j - candidate.asrCount, j);
+        const similarity = recognitionUnitSimilarity(joinedUnits(canonicalGroup), joinedUnits(asrGroup));
+        const threshold = candidate.canonicalCount === 1 && candidate.asrCount === 1 ? 0.58 : 0.64;
+        if (similarity < threshold) continue;
+        const value = scores[i - candidate.canonicalCount][j - candidate.asrCount] + similarity * 2.25 - (candidate.asrCount + candidate.canonicalCount - 2) * 0.03;
+        if (value > bestScore) {
+          bestScore = value;
+          bestMove = {
+            canonicalStart: i - candidate.canonicalCount,
+            canonicalCount: candidate.canonicalCount,
+            asrStart: j - candidate.asrCount,
+            asrCount: candidate.asrCount,
+            similarity,
+          };
+        }
+      }
+      scores[i][j] = bestScore;
+      moves[i][j] = bestMove;
+    }
+  }
+
+  let endRow = 0;
+  for (let i = 1; i < rows; i += 1) if (scores[i][columns - 1] > scores[endRow][columns - 1]) endRow = i;
+  const matched = new Map<number, TimestampedTokenGroup>();
+  const matchedAsrIndexes = new Set<number>();
+  let i = endRow;
+  let j = asr.length;
+  while (i > 0 || j > 0) {
+    const move = moves[i]?.[j];
+    if (!move) break;
+    if (move.canonicalCount > 0 && move.asrCount > 0) {
+      const group = move as TimestampedTokenGroup;
+      for (let canonicalIndex = group.canonicalStart; canonicalIndex < group.canonicalStart + group.canonicalCount; canonicalIndex += 1) matched.set(canonicalIndex, group);
+      for (let asrIndex = group.asrStart; asrIndex < group.asrStart + group.asrCount; asrIndex += 1) matchedAsrIndexes.add(asrIndex);
+    }
+    i -= move.canonicalCount;
+    j -= move.asrCount;
+  }
+  return { matched, matchedAsrIndexes };
+}
+
 function canonicalPassageTokens(passage: readonly QuranCorpusVerse[]) {
   const canonical: CanonicalToken[] = [];
   passage.forEach((verse, ayah) => {
@@ -831,6 +939,190 @@ function recoverAyahOnsetFromLocalAnchor(
     onsetMs: Math.max(Math.round(lowerBound), Math.round(anchor.token.startMs - lookbackMs)),
     source: anchor.token.source === "micro-asr" ? "micro-asr" : "word-timestamp",
   };
+}
+
+function timestampedForcedAlignment(
+  selected: ScoredCandidate,
+  chunks: readonly TranscriptChunk[],
+  verses: readonly QuranCorpusVerse[],
+): ForcedAlignment | null {
+  const canonical = canonicalPassageTokens(verses.slice(selected.start, selected.end + 1));
+  const asr = timedTokens(chunks).filter((token) => token.hasWordTimestamp && token.source === "direct-asr-word");
+  if (!canonical.length || !asr.length) return null;
+  const alignment = alignTimestampedTokens(canonical, asr);
+  const canonicalPassage = canonical.map((word, index) => ({
+    verseKey: word.verseKey,
+    canonicalWordIndex: word.wordIndex + 1,
+    globalWordIndex: index + 1,
+    canonicalText: word.displayText,
+    normalizedText: word.units.orthographic,
+  }));
+  const occurrences = [...alignment.matched.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([canonicalIndex, group]) => {
+      const tokens = asr.slice(group.asrStart, group.asrStart + group.asrCount);
+      const first = tokens[0]!;
+      const last = tokens.at(-1)!;
+      return {
+        ...canonicalPassage[canonicalIndex]!,
+        occurrenceIndex: 1,
+        startMs: Math.round(first.startMs),
+        endMs: Math.max(Math.round(first.startMs) + 1, Math.round(last.endMs)),
+        confidence: Number(group.similarity.toFixed(4)),
+        evidence: "direct-word-alignment" as const,
+        pcmRefined: false,
+        asrText: tokens.map((token) => token.displayText).join(" "),
+        asrTokenStartIndex: group.asrStart,
+        asrTokenEndIndex: group.asrStart + group.asrCount - 1,
+        mappingGroupId: `timestamp-${group.canonicalStart}-${group.asrStart}`,
+      };
+    });
+  const canonicalWordAlignments = canonicalPassage.map((word, canonicalIndex) => {
+    const occurrence = occurrences.find((item) => item.globalWordIndex === canonicalIndex + 1);
+    return {
+      ...word,
+      startMs: occurrence?.startMs ?? 0,
+      endMs: occurrence?.endMs ?? 0,
+      timingEvidence: occurrence ? "word-timestamp" as const : "interpolated" as const,
+      confidence: occurrence?.confidence ?? 0,
+      directMatch: Boolean(occurrence),
+      recoveredMatch: false,
+      asrTokenStartIndex: occurrence?.asrTokenStartIndex,
+      asrTokenEndIndex: occurrence?.asrTokenEndIndex,
+      mappingGroupId: occurrence?.mappingGroupId,
+    };
+  });
+  const verseTimings = [...new Set(canonical.map((word) => word.verseKey))].map((verseKey) => {
+    const verseWords = canonicalPassage.filter((word) => word.verseKey === verseKey);
+    const heard = occurrences.filter((word) => word.verseKey === verseKey);
+    const confidence = heard.length ? heard.reduce((sum, word) => sum + word.confidence, 0) / heard.length : 0;
+    return {
+      verseKey,
+      startMs: heard[0]?.startMs ?? 0,
+      endMs: Math.max((heard.at(-1)?.endMs ?? 0), (heard[0]?.startMs ?? 0) + 1),
+      firstCanonicalWordIndex: 1,
+      lastCanonicalWordIndex: verseWords.length,
+      partialStart: !heard.some((word) => word.canonicalWordIndex === 1),
+      partialEnd: !heard.some((word) => word.canonicalWordIndex === verseWords.length),
+      confidence: Number(confidence.toFixed(4)),
+      startEvidence: heard.length ? "word-timestamp" as const : "interpolated" as const,
+      endEvidence: heard.length ? "word-timestamp" as const : "interpolated" as const,
+      directWordCount: heard.length,
+      recoveredWordCount: 0,
+      recoveryAttempted: false,
+    };
+  });
+  return {
+    canonicalPassage,
+    canonicalWordAlignments,
+    wordOccurrences: occurrences,
+    verseTimings,
+    pauseCandidates: [],
+    captionSets: verseTimings.map((timing) => ({
+      id: `auto-${timing.verseKey}`,
+      verseKey: timing.verseKey,
+      canonicalStartWordIndex: 1,
+      canonicalEndWordIndex: timing.lastCanonicalWordIndex,
+      cutReason: "whole-ayah" as const,
+    })),
+  };
+}
+
+/** Timestamp-first resolver. VAD can reject an impossible direct timestamp,
+ * but it never supplies an ayah onset in this mode. */
+function resolveTimestampedVerseBoundaries({
+  verseKeys,
+  wordOccurrences,
+  speechRegions,
+  finalSpeechEnd,
+  durationMs,
+}: {
+  verseKeys: readonly string[];
+  wordOccurrences: readonly WordOccurrence[];
+  speechRegions?: readonly VadSpeechRegion[];
+  finalSpeechEnd: number;
+  durationMs: number;
+}): VerseBoundary[] {
+  const maximum = Math.max(1, Math.round(durationMs));
+  const inSpeech = (word: WordOccurrence) => !speechRegions?.length || Boolean(speechRegionContaining(speechRegions, word.startMs, word.endMs));
+  const verseWords = verseKeys.map((verseKey) => wordOccurrences
+    .filter((word) => word.verseKey === verseKey && word.evidence === "direct-word-alignment" && inSpeech(word))
+    .sort((left, right) => left.canonicalWordIndex - right.canonicalWordIndex || left.startMs - right.startMs));
+  const starts: number[] = [];
+  const sources: TimingEvidenceSource[] = [];
+  const selected: Array<WordOccurrence | null> = [];
+  const candidates: Array<VerseBoundary["evidence"]["candidates"]> = [];
+  for (let index = 0; index < verseKeys.length; index += 1) {
+    const words = verseWords[index]!;
+    const wordOne = words.find((word) => word.canonicalWordIndex === 1) ?? null;
+    const earliest = words[0] ?? null;
+    let start: number;
+    let source: TimingEvidenceSource;
+    let picked: WordOccurrence | null = wordOne ?? earliest;
+    if (wordOne) {
+      start = wordOne.startMs;
+      source = wordOne.asrTokenStartIndex === wordOne.asrTokenEndIndex ? "word-timestamp" : "merged-token-word1";
+    } else if (index > 0 && earliest) {
+      // Missing-word recovery is deliberately closed over only adjacent known
+      // lexical evidence: previous ayah completion through this ayah's first
+      // observed word. A VAD-region onset is never a candidate here.
+      const previousEnd = Math.max(...verseWords[index - 1]!.map((word) => word.endMs), starts[index - 1]!);
+      start = Math.min(earliest.startMs, Math.max(previousEnd, starts[index - 1]!));
+      source = "bounded-recovery";
+    } else if (earliest) {
+      start = earliest.startMs;
+      source = "word-timestamp";
+    } else {
+      start = index ? starts[index - 1]! : 0;
+      source = "interpolated";
+      picked = null;
+    }
+    starts.push(Math.max(0, Math.min(maximum - 1, Math.round(start))));
+    sources.push(source);
+    selected.push(picked);
+    candidates.push(words.map((word) => ({
+      timestampMs: word.startMs,
+      canonicalWordIndex: word.canonicalWordIndex,
+      confidence: word.confidence,
+      evidence: word.evidence,
+      accepted: word === picked,
+      reason: word === picked
+        ? wordOne ? "timestamped canonical word 1" : "bounded recovery interval from previous final word to earliest observed next word"
+        : "monotonic timestamped alignment selected an earlier canonical onset",
+    })));
+  }
+  const boundaries = verseKeys.map((verseKey, index) => {
+    const startMs = starts[index]!;
+    const endMs = index < verseKeys.length - 1
+      ? starts[index + 1]!
+      : Math.max(startMs + 1, Math.min(maximum, Math.round(Math.max(finalSpeechEnd, ...verseWords[index]!.map((word) => word.endMs)))));
+    return { verseKey, startMs, endMs, evidence: { source: sources[index]!, selectedWord: selected[index] && {
+      canonicalWordIndex: selected[index]!.canonicalWordIndex,
+      startMs: selected[index]!.startMs,
+      confidence: selected[index]!.confidence,
+      evidence: selected[index]!.evidence,
+    }, candidates: candidates[index]! } };
+  });
+  assertTimestampedBoundaryInvariants(boundaries, verseWords, maximum);
+  return boundaries;
+}
+
+function assertTimestampedBoundaryInvariants(
+  boundaries: readonly VerseBoundary[],
+  verseWords: readonly (readonly WordOccurrence[])[],
+  maximum: number,
+): void {
+  for (const [index, boundary] of boundaries.entries()) {
+    if (boundary.startMs < 0 || boundary.endMs > maximum || boundary.endMs <= boundary.startMs) throw new Error(`Impossible timestamped Quran boundary for ${boundary.verseKey}.`);
+    const words = verseWords[index]!;
+    if (!words.length) continue;
+    const earliest = Math.min(...words.map((word) => word.startMs));
+    const latest = Math.max(...words.map((word) => word.endMs));
+    if (boundary.startMs > earliest) throw new Error(`Timestamped boundary starts after canonical evidence for ${boundary.verseKey}.`);
+    const isNonFinal = index < boundaries.length - 1;
+    if (!isNonFinal && boundary.endMs < latest) throw new Error(`Timestamped boundary ends before canonical evidence for ${boundary.verseKey}.`);
+    if (isNonFinal && boundary.endMs < latest && boundaries[index + 1]!.startMs >= latest) throw new Error(`Timestamped boundary truncates canonical evidence for ${boundary.verseKey}.`);
+  }
 }
 
 /**
@@ -1446,6 +1738,16 @@ function timingRecoveryPlan(
   timestampMode: "word" | "chunk-fallback",
 ): TimingRecoveryPlan | null {
   if (!forcedAlignment?.verseTimings.length) return null;
+  // MODE A is complete timestamped lexical alignment. Missing word-one timing
+  // is constrained by adjacent aligned words in resolveTimestampedVerseBoundaries;
+  // broad VAD/micro-ASR windows are a MODE B fallback only.
+  if (timestampMode === "word") return {
+    required: false,
+    timestampMode,
+    windows: [],
+    missingVerseKeys: [],
+    firstOnsetRequired: false,
+  };
   const recoveryAttempted = forcedAlignment.verseTimings.some((item) => item.recoveryAttempted);
   const missingVerseKeys = forcedAlignment.verseTimings
     .filter((item) => item.directWordCount === 0 && item.recoveredWordCount === 0)
@@ -1972,18 +2274,38 @@ export function analyzeTranscript(
   const verses = options.corpus ?? hafsVerses;
   const timingChunks = [...primary.chunks, ...(options.timingEvidenceChunks ?? [])]
     .sort((left, right) => left.startMs - right.startMs);
+  const sourceDurationMs = options.audioAnalysis?.durationMs
+    ?? Math.max(1, ...timingChunks.map((chunk) => chunk.endMs), ...(options.speechRegions ?? []).map((region) => region.endMs));
+  const durationToleranceMs = 2;
+  if (timingChunks.some((chunk) => chunk.startMs < 0 || chunk.endMs > sourceDurationMs + durationToleranceMs)) {
+    throw new Error("Recognition timing belongs to a different source duration.");
+  }
+  if ((options.speechRegions ?? []).some((region) => region.startMs < 0 || region.endMs > sourceDurationMs + durationToleranceMs)) {
+    throw new Error("Speech-region timing belongs to a different source duration.");
+  }
   const timingCandidate = withTimingEvidence(best, timingChunks, verses);
   const reconstructed = reconstructPassage(timingCandidate, timingChunks, verses, options.audioAnalysis, options.speechRegions);
-  const rawForcedAlignment = forceAlignPassage(timingCandidate, timingChunks, verses, reconstructed.matches, options.audioAnalysis, options.speechRegions, options.timingRecoveryAttempted);
-  const durationMs = Math.max(1, options.audioAnalysis?.durationMs ?? 0, ...timingChunks.map((chunk) => chunk.endMs), ...(options.speechRegions ?? []).map((region) => region.endMs));
-  const verseBoundaries = resolveVerseBoundaries({
-    verseKeys: reconstructed.matches.map((match) => match.verseKey),
-    wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
-    speechRegions: options.speechRegions,
-    firstOnset: reconstructed.matches[0]?.startMs ?? 0,
-    finalSpeechEnd: reconstructed.matches.at(-1)?.endMs ?? durationMs,
-    durationMs,
-  });
+  const timestampedMode = primary.timestampMode === "word";
+  const rawForcedAlignment = timestampedMode
+    ? timestampedForcedAlignment(best, primary.chunks, verses)
+    : forceAlignPassage(timingCandidate, timingChunks, verses, reconstructed.matches, options.audioAnalysis, options.speechRegions, options.timingRecoveryAttempted);
+  const verseKeys = reconstructed.matches.map((match) => match.verseKey);
+  const verseBoundaries = timestampedMode
+    ? resolveTimestampedVerseBoundaries({
+      verseKeys,
+      wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
+      speechRegions: options.speechRegions,
+      finalSpeechEnd: reconstructed.matches.at(-1)?.endMs ?? sourceDurationMs,
+      durationMs: sourceDurationMs,
+    })
+    : resolveVerseBoundaries({
+      verseKeys,
+      wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
+      speechRegions: options.speechRegions,
+      firstOnset: reconstructed.matches[0]?.startMs ?? 0,
+      finalSpeechEnd: reconstructed.matches.at(-1)?.endMs ?? sourceDurationMs,
+      durationMs: sourceDurationMs,
+    });
   const boundaryByVerse = new Map(verseBoundaries.map((boundary) => [boundary.verseKey, boundary]));
   const matches = reconstructed.matches.map((match, index) => {
     const boundary = boundaryByVerse.get(match.verseKey);

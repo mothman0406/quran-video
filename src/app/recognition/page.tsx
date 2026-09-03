@@ -11,7 +11,7 @@ import {
   localTranscriptionSupport,
   localWhisperTranscriber,
 } from "@/lib/recognition/local-whisper";
-import type { LocalTranscriptionResult, TranscriptionProgress } from "@/lib/recognition/transcriber";
+import type { LocalTranscriptionResult, RecognitionRunSnapshot, TranscriptionProgress } from "@/lib/recognition/transcriber";
 import { QURAN_CTC_SHADOW_MODEL, QURAN_CTC_SHADOW_MODEL_ARTIFACT, QURAN_CTC_SHADOW_MODEL_BYTES, QURAN_CTC_SHADOW_MODEL_LICENSE, QURAN_CTC_SHADOW_RUNTIME } from "@/lib/recognition/local-ctc";
 
 function formatMilliseconds(value: number) {
@@ -54,6 +54,7 @@ export default function RecognitionSpikePage() {
   const [editingMarkId, setEditingMarkId] = useState<string | null>(null);
   const [previewActivations, setPreviewActivations] = useState<PreviewActivation[]>([]);
   const lastPreviewSegmentId = useRef<string | null>(null);
+  const activeAnalysisRunId = useRef<string | null>(null);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => setSupport(localTranscriptionSupport()));
@@ -62,6 +63,9 @@ export default function RecognitionSpikePage() {
 
   function selectFile(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0] ?? null;
+    // Invalidate every outstanding Whisper/VAD/recovery/CTC completion before
+    // clearing the source-derived UI state.
+    activeAnalysisRunId.current = crypto.randomUUID();
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setFile(next);
     setVideoUrl(next ? URL.createObjectURL(next) : null);
@@ -82,12 +86,21 @@ export default function RecognitionSpikePage() {
 
   async function transcribe() {
     if (!file || !support.supported) return;
+    const run: RecognitionRunSnapshot = {
+      analysisRunId: crypto.randomUUID(),
+      sourceIdentity: `${file.name}:${file.size}:${file.lastModified}`,
+      sourceObjectUrl: videoUrl,
+    };
+    activeAnalysisRunId.current = run.analysisRunId;
+    const isActive = () => activeAnalysisRunId.current === run.analysisRunId;
+    const updateProgress = (next: TranscriptionProgress) => { if (isActive()) setProgress(next); };
     setError(null);
     setResult(null);
     setMatches([]);
     setIsRunning(true);
     try {
-      const output = await localWhisperTranscriber.transcribe(file, setProgress);
+      const output = await localWhisperTranscriber.transcribe(file, updateProgress, run);
+      if (!isActive() || output.run.analysisRunId !== run.analysisRunId) return;
       setResult(output);
       const primaryTranscript = createPrimaryTranscript(output.chunks, output.timestampMode);
       let recovery: Awaited<ReturnType<NonNullable<typeof output.recoverTiming>>> | null = null;
@@ -96,7 +109,8 @@ export default function RecognitionSpikePage() {
         speechRegions: output.speechRegions,
       });
       if (nextAnalysis.timingRecoveryPlan?.required && output.recoverTiming) {
-        recovery = await output.recoverTiming(nextAnalysis.timingRecoveryPlan, setProgress);
+        recovery = await output.recoverTiming(nextAnalysis.timingRecoveryPlan, updateProgress);
+        if (!isActive() || recovery.analysisRunId !== run.analysisRunId) return;
         nextAnalysis = analyzeTranscript(primaryTranscript, {
           audioAnalysis: output.audioAnalysis,
           speechRegions: output.speechRegions,
@@ -107,8 +121,10 @@ export default function RecognitionSpikePage() {
       if (nextAnalysis.matches.length && output.runCtcShadow) {
         const keys = new Set(nextAnalysis.matches.map((match) => match.verseKey));
         const ctcShadow = await output.runCtcShadow(hafsVerses.filter((verse) => keys.has(verse.verseKey)), nextAnalysis.matches);
+        if (!isActive() || ctcShadow.analysisRunId !== run.analysisRunId) return;
         nextAnalysis = { ...nextAnalysis, ctcShadow };
       }
+      if (!isActive()) return;
       setAnalysis(nextAnalysis);
       setMatches(nextAnalysis.matches);
       const nextAlignments = recognitionToVerseAlignments(nextAnalysis.matches);
@@ -118,7 +134,8 @@ export default function RecognitionSpikePage() {
       assertDerivedTimingMatchesCaptions(nextSegments, nextAnalysis.forcedAlignment?.verseTimings ?? []);
       setSegments(nextSegments);
       (window as Window & { __QURAN_ALIGNMENT_DEBUG__?: unknown }).__QURAN_ALIGNMENT_DEBUG__ = {
-        source: { durationMs: output.audioAnalysis.durationMs, sampleRate: output.audioAnalysis.sampleRate },
+        analysisRunId: run.analysisRunId,
+        source: { identity: output.run.sourceIdentity, objectUrl: output.run.sourceObjectUrl, durationMs: output.run.sourceDurationMs, sampleRate: output.run.sampleRate, pcmIdentity: output.run.pcmIdentity },
         speechRegions: output.speechRegions,
         transcriber: { model: LOCAL_WHISPER_MODEL, backend: output.backend, timestampMode: output.timestampMode, runtimes: { modelLoadMs: output.modelLoadMs, transcriptionMs: output.transcriptionMs, totalMs: output.durationMs } },
         passage: nextAnalysis.passage,
@@ -154,9 +171,9 @@ export default function RecognitionSpikePage() {
         forcedAlignmentShadow: nextAnalysis.ctcShadow,
       };
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Local transcription failed.");
+      if (isActive()) setError(caught instanceof Error ? caught.message : "Local transcription failed.");
     } finally {
-      setIsRunning(false);
+      if (isActive()) setIsRunning(false);
     }
   }
 
@@ -197,7 +214,8 @@ export default function RecognitionSpikePage() {
     const segmentByVerse = new Map(segments.map((segment) => [segment.verseKeys[0], segment]));
     const markFor = (segment: CaptionSegment | undefined, kinds: readonly GroundTruthKind[]) => marks.find((mark) => kinds.includes(mark.kind) && (!segment || mark.segmentId === segment.id));
     return {
-      source: { durationMs: result?.durationMs ?? durationMs },
+      analysisRunId: result?.run.analysisRunId ?? null,
+      source: { durationMs: result?.run.sourceDurationMs ?? durationMs },
       transcriber: result ? { model: LOCAL_WHISPER_MODEL, backend: result.backend, timestampMode: result.timestampMode } : null,
       timestampQuality: {
         wordTimestampsAvailable: result?.timestampMode === "word",
@@ -235,10 +253,11 @@ export default function RecognitionSpikePage() {
     const ctcPerformance = ctc?.performance;
     const value = (item: number | null | undefined) => item === null || item === undefined ? "—" : `${item} ms`;
     return [
-      "SOURCE", `duration: ${value(debug.source.durationMs)}`,
+      "SOURCE", `analysis run: ${debug.analysisRunId ?? "—"}`, `duration: ${value(debug.source.durationMs)}`,
       "", "TRANSCRIBER", `model: ${debug.transcriber?.model ?? "—"}`, `backend: ${debug.transcriber?.backend ?? "—"}`, `timestamp mode: ${debug.transcriber?.timestampMode ?? "—"}`,
       "", "TIMESTAMP QUALITY", `word timestamps available: ${debug.timestampQuality.wordTimestampsAvailable ? "yes" : "no"}`, `micro-ASR fallback used: ${debug.timestampQuality.microAsrFallbackUsed ? "yes" : "no"}`,
       "", "DIRECT WORD COVERAGE BY VERSE", ...debug.directWordCoverageByVerse.map((item) => `${item.verseKey}: ${item.direct}/${item.total} direct; ${item.recovered}/${item.total} recovered; recovery attempted: ${item.recoveryAttempted ? "yes" : "no"}`),
+      "", "TIMESTAMP ALIGNMENT", ...(debug.forcedAlignment?.canonicalWordAlignments?.filter((word) => word.directMatch).map((word) => `${word.verseKey} | word ${word.canonicalWordIndex} | ${word.canonicalText} | ASR ${word.asrTokenStartIndex}–${word.asrTokenEndIndex} | ${value(word.startMs)}–${value(word.endMs)} | group ${word.mappingGroupId ?? "—"} | confidence ${word.confidence}`) ?? []),
       "", "DETECTED PASSAGE", `verse range: ${debug.detectedPassage.verseRange.join("–") || "—"}`, `canonical word span: ${debug.detectedPassage.canonicalSpan ? `${debug.detectedPassage.canonicalSpan.firstVerseKey} word ${debug.detectedPassage.canonicalSpan.firstWordIndex} → ${debug.detectedPassage.canonicalSpan.lastVerseKey} word ${debug.detectedPassage.canonicalSpan.lastWordIndex}` : "—"}`,
       "", "FIRST START TRACE", `first VAD speech region: ${value(first?.firstVadSpeechRegionMs)}`, `Quran VAD speech region: ${first?.firstQuranVadSpeechRegion ? `${value(first.firstQuranVadSpeechRegion.startMs)}–${value(first.firstQuranVadSpeechRegion.endMs)} (confidence ${first.firstQuranVadSpeechRegion.confidence})` : "—"}`, `first ASR chunk start: ${value(first?.firstAsrChunkStartMs)}`, `first ASR timestamped word: ${value(first?.firstAsrTimestampedWordMs)}`, `first ASR word aligned to detected Quran: ${value(first?.firstAsrWordAlignedToDetectedQuranMs)}`, `first canonical Quran word supported: ${first?.firstCanonicalQuranWordSupported ?? "—"}`, `first strong alignment anchor: ${value(first?.firstStrongAlignmentAnchorMs)}`, `PCM local onset candidate: ${value(first?.pcmLocalOnsetCandidateMs)}`, `raw VerseAlignment start: ${value(first?.rawVerseAlignmentStartMs)}`, `generated CaptionSegment start: ${value(debug.verses[0]?.captionSegmentStartMs)}`,
       ...debug.verses.flatMap((verse) => ["", `VERSE ${verse.verseKey}`, `first aligned ASR evidence: ${value(verse.firstAlignedAsrEvidenceMs)}`, `alignment timestamp: ${value(verse.firstStrongAlignmentAnchorMs)}`, `PCM-refined start: ${value(verse.pcmLocalOnsetCandidateMs)}`, `VerseAlignment start: ${value(verse.verseAlignmentStartMs)}`, `CaptionSegment start: ${value(verse.captionSegmentStartMs)}`, `manual start: ${value(verse.manualStartMs)}`, `signed error: ${value(verse.signedErrorMs)}`]),

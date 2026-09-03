@@ -207,13 +207,21 @@ export function splitPcmAudio(audio: Float32Array, sampleRate = TARGET_SAMPLE_RA
 }
 
 export const localWhisperTranscriber: RecognitionTranscriber = {
-  async transcribe(source, onProgress) {
+  async transcribe(source, onProgress, requestedRun) {
     if (typeof window === "undefined") {
       throw new Error("Local transcription can only run in a browser.");
     }
 
     const startedAt = performance.now();
     const audio = await decodeAudio(source, onProgress);
+    const run = {
+      analysisRunId: requestedRun?.analysisRunId ?? crypto.randomUUID(),
+      sourceIdentity: requestedRun?.sourceIdentity ?? `${source.name}:${source.size}:${source.lastModified}`,
+      sourceObjectUrl: requestedRun?.sourceObjectUrl ?? null,
+      sourceDurationMs: Math.round(audio.length / TARGET_SAMPLE_RATE * 1_000),
+      sampleRate: TARGET_SAMPLE_RATE,
+      pcmIdentity: crypto.randomUUID(),
+    };
     const audioAnalysis = analyzeMonoPcm(audio, TARGET_SAMPLE_RATE);
     onProgress?.({ phase: "detecting-speech", message: "Checking for local human speech with Silero VAD…" });
     let speechRegions;
@@ -300,7 +308,7 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
     }
 
     async function recoverTiming(plan: import("./core").TimingRecoveryPlan, recoveryProgress?: (progress: TranscriptionProgress) => void): Promise<LocalTimingRecoveryResult> {
-      if (!plan.required || !plan.windows.length) return { chunks: [], windowsRun: 0, transcriptionMs: 0 };
+      if (!plan.required || !plan.windows.length) return { analysisRunId: run.analysisRunId, chunks: [], windowsRun: 0, transcriptionMs: 0 };
       const recoveryStartedAt = performance.now();
       const recovered: TranscriptChunk[] = [];
       for (const [index, window] of plan.windows.entries()) {
@@ -335,6 +343,7 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       }
       recoveryProgress?.({ phase: "transcribing", message: "Known-passage timing recovery complete.", completed: plan.windows.length, total: plan.windows.length });
       return {
+        analysisRunId: run.analysisRunId,
         chunks: stitchTimestampedChunks(recovered),
         windowsRun: plan.windows.length,
         transcriptionMs: Math.round(performance.now() - recoveryStartedAt),
@@ -343,6 +352,7 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
 
     onProgress?.({ phase: "transcribing", message: "Local transcription complete.", completed: audioChunks.length, total: audioChunks.length });
     return {
+      run,
       chunks: transcription.chunks,
       rawTranscript: transcription.chunks.map((chunk) => chunk.text).join(" "),
       backend,
@@ -354,7 +364,7 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       audioAnalysis,
       speechRegions,
       recoverTiming,
-      runCtcShadow: createCtcShadowRunner(audio, speechRegions),
+      runCtcShadow: createCtcShadowRunner(audio, speechRegions, run.analysisRunId),
     };
   },
 };

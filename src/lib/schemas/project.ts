@@ -32,8 +32,8 @@ export const VerseAlignmentSchema = VerseKeySchema.extend({
   endMs: PositiveNumber,
   confidence: z.number().finite().min(0).max(1),
   timingEvidence: z.strictObject({
-    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown"]) }),
-    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown"]) }),
+    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "merged-token-word1", "bounded-recovery", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown"]) }),
+    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "merged-token-word1", "bounded-recovery", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown"]) }),
     matchedText: z.string(),
   }).optional(),
 });
@@ -50,8 +50,8 @@ export const CaptionSegmentSchema = z.strictObject({
   wordEnd: z.number().int().positive(),
   wordCount: z.number().int().positive(),
   timingEvidence: z.strictObject({
-    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown", "forced-alignment", "derived"]) }),
-    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown", "forced-alignment", "derived"]) }),
+    start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "merged-token-word1", "bounded-recovery", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown", "forced-alignment", "derived"]) }),
+    end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["word-audio-refined", "word-timestamp", "merged-token-word1", "bounded-recovery", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown", "forced-alignment", "derived"]) }),
     derived: z.boolean(),
   }).optional(),
 });

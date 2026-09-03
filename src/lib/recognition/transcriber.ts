@@ -8,7 +8,15 @@ export type RecognitionTranscriber = {
   transcribe(
     source: File,
     onProgress?: (progress: TranscriptionProgress) => void,
+    run?: RecognitionRunSnapshot,
   ): Promise<LocalTranscriptionResult>;
+};
+
+/** Immutable identity carried by every asynchronous recognition product. */
+export type RecognitionRunSnapshot = {
+  analysisRunId: string;
+  sourceIdentity: string;
+  sourceObjectUrl: string | null;
 };
 
 export type TranscriptionProgress = {
@@ -21,6 +29,11 @@ export type TranscriptionProgress = {
 };
 
 export type LocalTranscriptionResult = {
+  run: RecognitionRunSnapshot & {
+    sourceDurationMs: number;
+    sampleRate: number;
+    pcmIdentity: string;
+  };
   chunks: TranscriptChunk[];
   rawTranscript: string;
   backend: "webgpu" | "wasm";
@@ -45,6 +58,7 @@ export type LocalTranscriptionResult = {
 };
 
 export type LocalTimingRecoveryResult = {
+  analysisRunId: string;
   chunks: TranscriptChunk[];
   windowsRun: number;
   transcriptionMs: number;
