@@ -71,6 +71,7 @@ inference, Viterbi, total, tokenization, every word confidence, verse deltas,
 and pause word boundaries. It does not estimate browser timing in Node.
 
 The workspace contains no 6:74–6:77 source video/audio or pre-existing browser
-measurements. Therefore the requested real recording benchmark, including the
-6:76 -> 6:77 production-versus-CTC transition delta, remains a manual
-validation blocker. CTC timing remains shadow-only until that evidence exists.
+measurements. The regression fixture preserves the verified 6:77 44,832 ms
+local refinement: in `chunk-fallback`, CTC now supplies the ordered global
+scaffold while corridor-bounded local VAD/ASR evidence may refine that edge.
+CTC remains diagnostic in the protected word-timestamp mode.

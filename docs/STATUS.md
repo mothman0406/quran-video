@@ -1,5 +1,28 @@
 # Status
 
+## Current milestone: Global chunk-fallback Quran boundary solver
+
+Complete:
+
+- Replaced independent chunk-fallback ayah transition selection and its
+  `previous + 1 ms` collision repair with the pure deterministic
+  `resolveGlobalAyahBoundaries` solver. It produces one ordered boundary
+  vector, then the existing single `CaptionSegment[]` authority consumes it.
+- A completed same-source CTC result is now re-analysed as the global scaffold
+  only when Whisper lacks word offsets. CTC stays diagnostic for the protected
+  word-timestamp mode.
+- Micro-ASR is interval-only evidence. It can refine a CTC boundary only via a
+  corroborating VAD onset within both its interval and the hard transition
+  corridor; duplicate recovered coverage is deduplicated by canonical word.
+- Added the permanent Surah 69:19–32 regression with duplicate micro-ASR
+  evidence and an out-of-corridor candidate. It verifies deterministic,
+  contiguous, non-collapsed boundaries and CTC-span containment. The existing
+  6:76–77 44,832 ms early-boundary fixture and the 93:1–5 / 3:33–35 timestamp
+  regressions remain green.
+
+Verification: focused recognition/boundary tests, full `npm test`, `npx tsc
+--noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass.
+
 ## Current milestone: Deterministic Quran passage-boundary completion
 
 Complete:

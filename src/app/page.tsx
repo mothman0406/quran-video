@@ -778,7 +778,17 @@ export default function Home() {
       if (analysis.matches.length && result.runCtcShadow) {
         const keys = new Set(analysis.matches.map((match) => match.verseKey));
         const ctcShadow = await result.runCtcShadow(hafsVerses.filter((verse) => keys.has(verse.verseKey)), analysis.matches);
-        analysis = { ...analysis, ctcShadow };
+        // CTC is a global scaffold only when Whisper has no word offsets. The
+        // timestamped alignment remains its own protected timing mode.
+        analysis = result.timestampMode === "chunk-fallback"
+          ? analyzeTranscript(primaryTranscript, {
+            audioAnalysis: result.audioAnalysis,
+            speechRegions: result.speechRegions,
+            timingEvidenceChunks: recovery?.chunks,
+            timingRecoveryAttempted: recovery !== null,
+            ctcAlignment: ctcShadow,
+          })
+          : { ...analysis, ctcShadow };
         setCtcShadowCompleted(ctcShadow.status === "complete");
       }
       if (result.timestampMode === "chunk-fallback") {
@@ -831,6 +841,7 @@ export default function Home() {
           recoveryPlan: analysis.timingRecoveryPlan,
         },
         directWordCoverageByVerse: analysis.forcedAlignment?.verseTimings.map((item) => ({ verseKey: item.verseKey, direct: item.directWordCount, recovered: item.recoveredWordCount, total: item.lastCanonicalWordIndex })) ?? [],
+        globalBoundarySolver: analysis.globalBoundarySolver,
         firstOnsetTrace: analysis.timingTrace,
         canonicalWordAlignment: analysis.forcedAlignment?.canonicalWordAlignments ?? [],
         wordAlignment: analysis.forcedAlignment?.wordOccurrences ?? [],

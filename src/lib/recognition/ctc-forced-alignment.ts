@@ -67,7 +67,7 @@ export type CtcPause = {
 };
 
 export type CtcForcedAlignmentResult = {
-  /** Source-run identity; CTC remains shadow-only but is never cross-run. */
+  /** Source-run identity; CTC is never allowed to cross source runs. */
   analysisRunId?: string;
   status: "complete" | "unavailable" | "failed";
   reason?: string;

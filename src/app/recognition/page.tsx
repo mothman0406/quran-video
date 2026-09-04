@@ -122,7 +122,15 @@ export default function RecognitionSpikePage() {
         const keys = new Set(nextAnalysis.matches.map((match) => match.verseKey));
         const ctcShadow = await output.runCtcShadow(hafsVerses.filter((verse) => keys.has(verse.verseKey)), nextAnalysis.matches);
         if (!isActive() || ctcShadow.analysisRunId !== run.analysisRunId) return;
-        nextAnalysis = { ...nextAnalysis, ctcShadow };
+        nextAnalysis = output.timestampMode === "chunk-fallback"
+          ? analyzeTranscript(primaryTranscript, {
+            audioAnalysis: output.audioAnalysis,
+            speechRegions: output.speechRegions,
+            timingEvidenceChunks: recovery?.chunks,
+            timingRecoveryAttempted: recovery !== null,
+            ctcAlignment: ctcShadow,
+          })
+          : { ...nextAnalysis, ctcShadow };
       }
       if (!isActive()) return;
       setAnalysis(nextAnalysis);
@@ -162,6 +170,7 @@ export default function RecognitionSpikePage() {
           recoveryPlan: nextAnalysis.timingRecoveryPlan,
         },
         directWordCoverageByVerse: nextAnalysis.forcedAlignment?.verseTimings.map((item) => ({ verseKey: item.verseKey, direct: item.directWordCount, recovered: item.recoveredWordCount, total: item.lastCanonicalWordIndex })) ?? [],
+        globalBoundarySolver: nextAnalysis.globalBoundarySolver,
         firstOnsetTrace: nextAnalysis.timingTrace,
         canonicalWordAlignment: nextAnalysis.forcedAlignment?.canonicalWordAlignments ?? [],
         wordAlignment: nextAnalysis.forcedAlignment?.wordOccurrences ?? [],
