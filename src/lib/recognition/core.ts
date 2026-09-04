@@ -231,11 +231,23 @@ export type VerseBoundary = {
 
 export type GlobalAyahBoundaryTrace = {
   verseKey: string;
-  ctcBaselineStartMs: number | null;
+  /** The raw CTC proposal remains diagnostic when a valid local refinement wins. */
+  ctcBaselineMs: number | null;
   allowedCorridor: { startMs: number; endMs: number } | null;
-  acceptedCandidateMs: number | null;
   finalStartMs: number;
-  reason: string;
+  finalSource: "ctc" | "direct-word-timestamp" | "coherent-local-asr" | "vad-corroborated-local-asr" | "bounded-recovery" | "verified-first-onset";
+  acceptedEvidence: Array<{
+    source: GlobalAyahBoundaryTrace["finalSource"];
+    status: "accepted";
+    timestampMs: number;
+    reason: string;
+  }>;
+  rejectedEvidence: Array<{
+    source: "ctc" | "local-asr";
+    status: "overridden" | "rejected";
+    timestampMs: number;
+    reason: string;
+  }>;
   uniqueRecoveredWordCount: number;
   canonicalWordCount: number;
 };
@@ -1371,13 +1383,39 @@ export function resolveGlobalAyahBoundaries({
       };
     });
     const canonicalWordCount = canonicalCountFor(verseKeys[index]!, all);
+    const finalSource = chosenCandidate
+      ? chosenCandidate.occurrence.evidence === "micro-asr" ? "vad-corroborated-local-asr" : "direct-word-timestamp"
+      : useCtc ? "ctc" : "bounded-recovery";
     trace.push({
       verseKey: verseKeys[index]!,
-      ctcBaselineStartMs: useCtc ? nextBaseline : null,
+      ctcBaselineMs: useCtc ? nextBaseline : null,
       allowedCorridor: { startMs: corridorStart, endMs: corridorEnd },
-      acceptedCandidateMs: chosenCandidate?.timestampMs ?? null,
       finalStartMs: selectedStart,
-      reason: chosenCandidate ? "local-refinement" : useCtc ? "ctc-baseline" : "safe-estimated-fallback",
+      finalSource,
+      acceptedEvidence: [{
+        source: finalSource,
+        status: "accepted",
+        timestampMs: selectedStart,
+        reason: chosenCandidate
+          ? "accepted candidate satisfies canonical order, hard corridor, and required corroboration"
+          : useCtc ? "accepted structurally valid CTC scaffold boundary" : "accepted ordered estimated fallback boundary",
+      }],
+      rejectedEvidence: [
+        ...(useCtc && chosenCandidate ? [{
+          source: "ctc" as const,
+          status: "overridden" as const,
+          timestampMs: nextBaseline,
+          reason: "overridden by stronger valid local evidence inside the hard corridor",
+        }] : []),
+        ...candidateLists[index]!
+          .filter((candidate) => !candidate.accepted)
+          .map((candidate) => ({
+            source: "local-asr" as const,
+            status: "rejected" as const,
+            timestampMs: candidate.timestampMs,
+            reason: candidate.reason,
+          })),
+      ],
       uniqueRecoveredWordCount: uniqueRecoveredWords(all, verseKeys[index]!),
       canonicalWordCount,
     });
@@ -1404,22 +1442,26 @@ export function resolveGlobalAyahBoundaries({
       },
     };
   });
-  if (useCtc) {
-    const boundaryByVerse = new Map(boundaries.map((boundary) => [boundary.verseKey, boundary]));
-    for (const word of ctcAlignment!.words) {
-      const boundary = boundaryByVerse.get(word.verseKey)!;
-      if (word.startMs < boundary.startMs || word.endMs > boundary.endMs) {
-        throw new Error(`Generated Quran caption excludes CTC acoustic evidence for ${word.verseKey}.`);
-      }
-    }
-  }
   const firstWords = wordOccurrences.filter((word) => word.verseKey === verseKeys[0]);
   trace.unshift({
-    verseKey: verseKeys[0]!, ctcBaselineStartMs: useCtc ? baselines[0]! : null, allowedCorridor: null,
-    acceptedCandidateMs: firstOnset, finalStartMs: firstOnset, reason: "verified-first-onset",
+    verseKey: verseKeys[0]!, ctcBaselineMs: useCtc ? baselines[0]! : null, allowedCorridor: null,
+    finalStartMs: firstOnset, finalSource: "verified-first-onset",
+    acceptedEvidence: [{ source: "verified-first-onset", status: "accepted", timestampMs: firstOnset, reason: "accepted verified Quran onset" }],
+    rejectedEvidence: useCtc && baselines[0]! !== firstOnset ? [{
+      source: "ctc", status: "overridden", timestampMs: baselines[0]!, reason: "overridden by verified first Quran onset",
+    }] : [],
     uniqueRecoveredWordCount: uniqueRecoveredWords(firstWords, verseKeys[0]!),
     canonicalWordCount: canonicalCountFor(verseKeys[0]!, firstWords),
   });
+  const boundaryByVerse = new Map(boundaries.map((boundary) => [boundary.verseKey, boundary]));
+  for (const item of trace) {
+    const boundary = boundaryByVerse.get(item.verseKey)!;
+    for (const evidence of item.acceptedEvidence) {
+      if (evidence.timestampMs !== item.finalStartMs || evidence.timestampMs !== boundary.startMs) {
+        throw new Error(`Generated Quran caption excludes accepted boundary evidence for ${item.verseKey}.`);
+      }
+    }
+  }
   return { boundaries, trace, usedCtcScaffold: useCtc, fallbackReason: useCtc ? null : "CTC unavailable or structurally invalid; used safe estimated monotonic timeline." };
 }
 

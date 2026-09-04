@@ -1,6 +1,25 @@
 # Status
 
-## Current milestone: Global chunk-fallback Quran boundary solver
+## Current milestone: Validate accepted Quran timing evidence
+
+Complete:
+
+- Replaced the impossible raw-CTC-span caption-containment assertion with a
+  source-aware final-boundary trace. Each ayah now records its CTC baseline,
+  final start/source, accepted evidence, and rejected or overridden evidence.
+- CTC remains structurally validated before it can serve as the chunk-fallback
+  scaffold. A local override still requires canonical order, a hard corridor,
+  and VAD corroboration; rejected CTC proposals stay diagnostic only.
+- Added the Surah 69:19–32 failure regression: a 14,148 ms CTC proposal for
+  69:20 is validly refined to 9,504 ms, records the CTC proposal as
+  overridden, keeps the raw 69:19 tail for diagnostics, and generates
+  contiguous non-collapsed captions without collision repair.
+
+Verification: `npm test` (160 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. The production build retains
+the existing ONNX Runtime dynamic-require warning.
+
+## Previous milestone: Global chunk-fallback Quran boundary solver
 
 Complete:
 
@@ -16,9 +35,9 @@ Complete:
   corridor; duplicate recovered coverage is deduplicated by canonical word.
 - Added the permanent Surah 69:19–32 regression with duplicate micro-ASR
   evidence and an out-of-corridor candidate. It verifies deterministic,
-  contiguous, non-collapsed boundaries and CTC-span containment. The existing
-  6:76–77 44,832 ms early-boundary fixture and the 93:1–5 / 3:33–35 timestamp
-  regressions remain green.
+  contiguous, non-collapsed boundaries. The existing 6:76–77 44,832 ms
+  early-boundary fixture and the 93:1–5 / 3:33–35 timestamp regressions
+  remain green.
 
 Verification: focused recognition/boundary tests, full `npm test`, `npx tsc
 --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass.
