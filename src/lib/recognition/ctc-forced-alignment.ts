@@ -80,6 +80,13 @@ export type CtcForcedAlignmentResult = {
   audibleRepetitions: readonly CtcAudibleRepetition[];
   frameCount: number;
   frameDurationMs: number;
+  /** Free CTC decode captured before any canonical target is forced through
+   * the trellis. It is diagnostic evidence for whether forced timing is safe. */
+  greedyDecode?: {
+    text: string;
+    normalizedCharacterErrorRate: number;
+    targetCharacterCoverage: number;
+  };
   performance?: {
     modelDownloadBytes?: number;
     modelArtifactBytes?: number;

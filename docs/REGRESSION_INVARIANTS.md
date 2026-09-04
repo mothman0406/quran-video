@@ -15,8 +15,9 @@ separate approved milestone intentionally changes the display contract.
 - There is exactly one authoritative automatic `CaptionSegment` timing array:
   `resolveGlobalAyahBoundaries` / `resolveVerseBoundaries` produces the generated ayah boundaries and caption
   generation consumes them once. Recognition, forced-alignment, display-set,
-  and CTC timing are evidence or diagnostics only, except that a structurally
-  valid same-source CTC result is the global scaffold in `chunk-fallback`.
+  and CTC timing are evidence or diagnostics only. Structural validity proves
+  only that a CTC path is internally well-formed; it does not prove acoustic
+  accuracy or authorize a hard timing corridor.
 - Manual timeline edits remain authoritative over generated timing.
 - The final caption remains through actual recitation completion.
 - For any proposed CTC timing, each non-final ayah ends exactly at the next
@@ -27,9 +28,10 @@ separate approved milestone intentionally changes the display contract.
   model/version, and settings. Ties prefer stay, then one-state advance, then
   blank-skipping advance.
 
-In `chunk-fallback`, local ASR is interval-only evidence: it may refine a CTC
-transition only through a corroborating VAD onset inside a valid hard corridor.
-Every accepted candidate is inside its corridor, no ayah boundary is repaired
-by adding one millisecond, and unavailable/invalid CTC uses an explicit,
+In `chunk-fallback`, local ASR is interval-only evidence: a point estimate may
+come only from a shared VAD-corroboration predicate applied to the interval
+that produced it. No unvalidated model may form a hard corridor that excludes
+strong independent lexical/VAD evidence. No ayah boundary is repaired by
+adding one millisecond, and unavailable/insufficient evidence uses an explicit,
 ordered, contiguous, non-collapsing estimated fallback. In `word` mode CTC
 remains diagnostic and cannot alter timestamped sequence alignment.

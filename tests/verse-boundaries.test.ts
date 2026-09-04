@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { resolveGlobalAyahBoundaries, resolveVerseBoundaries, type WordOccurrence } from "../src/lib/recognition/core.ts";
+import { resolveEvidenceWeightedAyahBoundaries, resolveGlobalAyahBoundaries, resolveVerseBoundaries, vadOnsetsInEvidenceInterval, type WordOccurrence } from "../src/lib/recognition/core.ts";
 import type { CtcForcedAlignmentResult } from "../src/lib/recognition/ctc-forced-alignment.ts";
 import { createCaptionSegmentsFromVerseBoundaries, getActiveCaptionSegment } from "../src/lib/editor/captions.ts";
 
@@ -89,6 +89,47 @@ test("chunk-fallback CTC scaffold still permits the verified early 6:77 local re
   assert.equal(result.boundaries[1]?.startMs, 44_832);
   assert.equal(result.boundaries[0]?.endMs, 44_832);
   assert.equal(result.usedCtcScaffold, true);
+});
+
+test("shadow resolver treats exact word-one/VAD evidence as stronger than the late Surah 6 CTC path", () => {
+  const verseKeys = ["6:74", "6:75", "6:76", "6:77"];
+  const ctcStarts = [9_760, 28_608, 40_753, 50_598];
+  const finalEndMs = 65_384;
+  const ctcAlignment: CtcForcedAlignmentResult = {
+    status: "complete",
+    canonicalWords: verseKeys.map((verseKey, index) => ({ verseKey, canonicalWordIndex: 1, globalWordIndex: index + 1, canonicalArabic: "كلمة", alignmentText: "كلمة" })),
+    targetTokens: [],
+    words: verseKeys.map((verseKey, index) => ({
+      verseKey, canonicalWordIndex: 1, globalWordIndex: index + 1, canonicalArabic: "كلمة", alignmentText: "كلمة",
+      startMs: ctcStarts[index]!, endMs: (ctcStarts[index + 1] ?? finalEndMs) - 20,
+      confidence: 0.03, alignmentScore: -3.5, lowConfidence: true,
+    })),
+    verses: verseKeys.map((verseKey, index) => ({ verseKey, startMs: ctcStarts[index]!, endMs: ctcStarts[index + 1] ?? finalEndMs, confidence: 0.03 })),
+    pauses: [], audibleRepetitions: [], frameCount: 1, frameDurationMs: 20,
+  };
+  const speechRegions = [
+    { startMs: 9_600, endMs: 16_032, durationMs: 6_432, confidence: 0.92 },
+    { startMs: 16_608, endMs: 21_024, durationMs: 4_416, confidence: 0.96 },
+    { startMs: 21_696, endMs: 30_240, durationMs: 8_544, confidence: 0.93 },
+    { startMs: 32_064, endMs: 44_256, durationMs: 12_192, confidence: 0.88 },
+    { startMs: 44_832, endMs: 55_104, durationMs: 10_272, confidence: 0.95 },
+  ];
+  assert.deepEqual(vadOnsetsInEvidenceInterval(speechRegions, 44_832, 50_432).map((region) => region.startMs), [44_832]);
+  const shadow = resolveEvidenceWeightedAyahBoundaries({
+    verseKeys,
+    wordOccurrences: [
+      occurrence("6:75", 1, 21_696, 30_176, 1), occurrence("6:76", 1, 32_064, 37_064, 0.75), occurrence("6:77", 1, 44_832, 50_432, 1),
+    ],
+    speechRegions,
+    verifiedFirstOnset: 9_660,
+    finalSpeechEnd: finalEndMs,
+    durationMs: 66_083,
+    ctcAlignment,
+  });
+  assert.deepEqual(shadow.boundaries.map((boundary) => boundary.startMs), [9_660, 21_696, 32_064, 44_832]);
+  assert.equal(shadow.trace[3]?.finalSource, "vad-corroborated-local-asr");
+  assert.equal(shadow.trace[3]?.rejectedEvidence[0]?.timestampMs, 50_598);
+  assert.ok(shadow.boundaries.every((boundary, index) => index === shadow.boundaries.length - 1 || boundary.endMs === shadow.boundaries[index + 1]!.startMs));
 });
 
 test("real-shaped Surah 69 local refinement records an overridden CTC tail without blocking caption generation", () => {

@@ -34,6 +34,7 @@ const ARABIC_CTC_VOCABULARY: Readonly<Record<string, number>> = {
   "ظ": 29, "ع": 30, "غ": 31, "ف": 33, "ق": 34, "ك": 35, "ل": 36, "م": 37,
   "ن": 38, "ه": 39, "و": 40, "ى": 41, "ي": 42,
 };
+const ARABIC_CTC_TOKENS_BY_ID = new Map(Object.entries(ARABIC_CTC_VOCABULARY).map(([token, id]) => [id, token]));
 
 export type CtcShadowRunner = (verses: readonly QuranCorpusVerse[], matches: readonly { startMs: number; endMs: number }[]) => Promise<CtcForcedAlignmentResult>;
 
@@ -138,6 +139,50 @@ export function encodeCtcWords(words: ReturnType<typeof canonicalCtcWords>): { c
   return { canonicalWords, targetTokens };
 }
 
+function editDistance(left: string, right: string) {
+  const previous = new Uint32Array(right.length + 1);
+  const current = new Uint32Array(right.length + 1);
+  for (let column = 0; column <= right.length; column += 1) previous[column] = column;
+  for (let row = 1; row <= left.length; row += 1) {
+    current[0] = row;
+    for (let column = 1; column <= right.length; column += 1) {
+      current[column] = Math.min(
+        previous[column]! + 1,
+        current[column - 1]! + 1,
+        previous[column - 1]! + (left[row - 1] === right[column - 1] ? 0 : 1),
+      );
+    }
+    previous.set(current);
+  }
+  return previous[right.length]!;
+}
+
+/** Free greedy CTC decoding, intentionally executed before forced alignment. */
+function greedyDecodeCtcLogits(values: Float32Array, frames: number, vocabularySize: number, target: readonly CtcTargetToken[]) {
+  let previousToken = -1;
+  let text = "";
+  for (let frame = 0; frame < frames; frame += 1) {
+    let tokenId = 0;
+    let best = Number.NEGATIVE_INFINITY;
+    const offset = frame * vocabularySize;
+    for (let index = 0; index < vocabularySize; index += 1) {
+      const value = values[offset + index]!;
+      if (value > best) { best = value; tokenId = index; }
+    }
+    if (tokenId !== BLANK_TOKEN_ID && tokenId !== previousToken) text += ARABIC_CTC_TOKENS_BY_ID.get(tokenId) ?? "";
+    previousToken = tokenId;
+  }
+  const normalizedText = text.replaceAll(WORD_DELIMITER, " ").replace(/\s+/g, " ").trim();
+  const normalizedTarget = target.map((token) => token.token).join("").replaceAll(WORD_DELIMITER, " ").replace(/\s+/g, " ").trim();
+  const distance = editDistance(normalizedText, normalizedTarget);
+  const errorRate = distance / Math.max(1, normalizedTarget.length);
+  return {
+    text: normalizedText,
+    normalizedCharacterErrorRate: Number(errorRate.toFixed(4)),
+    targetCharacterCoverage: Number(Math.max(0, 1 - errorRate).toFixed(4)),
+  };
+}
+
 async function fetchModelArtifact(): Promise<{ buffer: ArrayBuffer; cacheStatus: "cold-download" | "browser-cache"; modelDownloadBytes: number }> {
   const cache = typeof caches === "undefined" ? null : await caches.open(CTC_CACHE_NAME);
   const cached = cache ? await cache.match(QURAN_CTC_SHADOW_MODEL_URL) : undefined;
@@ -194,6 +239,7 @@ export function createCtcShadowRunner(audio: Float32Array, speechRegions: readon
       const [, frames, vocabularySize] = output?.dims ?? [];
       if (!output || !(output.data instanceof Float32Array) || !frames || !vocabularySize || vocabularySize <= BLANK_TOKEN_ID) throw new Error("The CTC model returned logits with an unsupported shape.");
       const inferenceMs = Math.round(performance.now() - inferenceStartedAt);
+      const greedyDecode = greedyDecodeCtcLogits(output.data, frames, vocabularySize, encoded.targetTokens);
       const aligned = forceAlignCtc(encoded.canonicalWords, encoded.targetTokens, { values: output.data, frames, vocabularySize }, {
         blankTokenId: BLANK_TOKEN_ID,
         startMs: window.startMs,
@@ -202,6 +248,7 @@ export function createCtcShadowRunner(audio: Float32Array, speechRegions: readon
       });
       return {
         ...aligned,
+        greedyDecode,
         analysisRunId,
         performance: {
           ...aligned.performance,

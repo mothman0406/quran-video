@@ -182,6 +182,10 @@ export type RecognitionAnalysis = {
   ctcShadow: CtcForcedAlignmentResult | null;
   /** Chunk-fallback-only diagnostics for the single globally ordered solver. */
   globalBoundarySolver: GlobalAyahBoundaryResult | null;
+  /** Experimental evidence-weighted resolver. It is emitted for comparison
+   * only and must not be used to generate CaptionSegment[] until the real
+   * fixture gate promotes it. */
+  shadowBoundarySolver: GlobalAyahBoundaryResult | null;
   /** A known-passage local ASR pass is required before a fallback timing
    * result may be presented as recovered timing. */
   timingRecoveryPlan: TimingRecoveryPlan | null;
@@ -1277,6 +1281,210 @@ function uniqueRecoveredWords(occurrences: readonly WordOccurrence[], verseKey: 
 }
 
 /**
+ * The sole definition of when a coarse local-ASR interval is corroborated by
+ * VAD.  A chunk timestamp is an interval, never a word timestamp: its only
+ * possible point estimate is a speech onset that occurs within that interval.
+ * Keeping this predicate shared prevents debug output and solver acceptance
+ * from disagreeing about the same evidence.
+ */
+export function vadOnsetsInEvidenceInterval(
+  speechRegions: readonly VadSpeechRegion[] | undefined,
+  startMs: number,
+  endMs: number,
+): VadSpeechRegion[] {
+  return (speechRegions ?? []).filter((region) => region.startMs >= startMs && region.startMs <= endMs);
+}
+
+type ShadowBoundaryCandidate = {
+  timestampMs: number;
+  score: number;
+  source: GlobalAyahBoundaryTrace["finalSource"];
+  occurrence: WordOccurrence | null;
+  reason: string;
+};
+
+function ctcBoundaryQuality(ctcAlignment: CtcForcedAlignmentResult | null | undefined, verseKey: string): number {
+  const words = ctcAlignment?.words.filter((word) => word.verseKey === verseKey) ?? [];
+  if (!words.length) return 0;
+  // A Viterbi path is guaranteed to exist once a target is forced through the
+  // logits. Its local posterior, rather than existence, is the usable signal.
+  return words.reduce((sum, word) => sum + word.confidence, 0) / words.length;
+}
+
+function shadowCandidatesForVerse(
+  verseKey: string,
+  occurrences: readonly WordOccurrence[],
+  speechRegions: readonly VadSpeechRegion[] | undefined,
+  ctcStartMs: number | null,
+  ctcQuality: number,
+  estimatedStartMs: number,
+): ShadowBoundaryCandidate[] {
+  const candidates: ShadowBoundaryCandidate[] = [];
+  if (ctcStartMs !== null) {
+    candidates.push({
+      timestampMs: ctcStartMs,
+      score: 0.05 + Math.min(0.35, ctcQuality * 2),
+      source: "ctc",
+      occurrence: null,
+      reason: ctcQuality >= 0.08
+        ? "CTC boundary retained as a soft hypothesis with usable local posterior"
+        : "CTC boundary retained only as a low-confidence soft hypothesis",
+    });
+  } else {
+    candidates.push({ timestampMs: estimatedStartMs, score: 0, source: "bounded-recovery", occurrence: null, reason: "ordered estimated fallback" });
+  }
+  for (const occurrence of occurrences) {
+    if (occurrence.evidence === "direct-word-alignment") {
+      candidates.push({
+        timestampMs: occurrence.startMs,
+        score: 2 + occurrence.confidence + (occurrence.canonicalWordIndex === 1 ? 0.7 : 0),
+        source: "direct-word-timestamp",
+        occurrence,
+        reason: occurrence.canonicalWordIndex === 1
+          ? "direct canonical word-one timestamp"
+          : "direct timestamped canonical lexical evidence",
+      });
+      continue;
+    }
+    if (occurrence.evidence !== "micro-asr" || occurrence.canonicalWordIndex !== 1 || occurrence.confidence < 0.62) continue;
+    for (const region of vadOnsetsInEvidenceInterval(speechRegions, occurrence.startMs, occurrence.endMs)) {
+      candidates.push({
+        timestampMs: region.startMs,
+        // A matched canonical word one plus an independently measured speech
+        // onset is more specific than a forced path from a low-quality model.
+        score: 1.4 + occurrence.confidence + Math.min(0.2, region.confidence * 0.2),
+        source: "vad-corroborated-local-asr",
+        occurrence,
+        reason: "canonical word-one interval is localized by an independent VAD speech onset",
+      });
+    }
+  }
+  const byTimestampAndSource = new Map<string, ShadowBoundaryCandidate>();
+  for (const candidate of candidates) {
+    const key = `${candidate.timestampMs}:${candidate.source}`;
+    const previous = byTimestampAndSource.get(key);
+    if (!previous || candidate.score > previous.score
+      || candidate.score === previous.score && (candidate.occurrence?.canonicalWordIndex ?? Infinity) < (previous.occurrence?.canonicalWordIndex ?? Infinity)) {
+      byTimestampAndSource.set(key, candidate);
+    }
+  }
+  return [...byTimestampAndSource.values()].sort((left, right) => left.timestampMs - right.timestampMs || right.score - left.score || left.source.localeCompare(right.source));
+}
+
+/**
+ * Shadow-only global resolver. It selects one monotonically ordered vector
+ * jointly, but deliberately treats CTC as a scored candidate rather than a
+ * corridor authority. This is the experiment used to evaluate whether direct
+ * lexical/VAD evidence beats a weak forced path on real recordings.
+ */
+export function resolveEvidenceWeightedAyahBoundaries({
+  verseKeys,
+  wordOccurrences,
+  speechRegions,
+  verifiedFirstOnset,
+  finalSpeechEnd,
+  durationMs,
+  ctcAlignment,
+}: {
+  verseKeys: readonly string[];
+  wordOccurrences: readonly WordOccurrence[];
+  speechRegions?: readonly VadSpeechRegion[];
+  verifiedFirstOnset: number;
+  finalSpeechEnd: number;
+  durationMs: number;
+  ctcAlignment?: CtcForcedAlignmentResult | null;
+}): GlobalAyahBoundaryResult {
+  if (!verseKeys.length) return { boundaries: [], trace: [], usedCtcScaffold: false, fallbackReason: null };
+  const maximum = Math.max(1, Math.round(durationMs));
+  const firstOnset = Math.max(0, Math.min(maximum - 1, Math.round(verifiedFirstOnset)));
+  const finalEnd = Math.max(firstOnset + 1, Math.min(maximum, Math.round(finalSpeechEnd)));
+  const minimum = meaningfulSegmentMs(firstOnset, finalEnd, verseKeys.length);
+  const useCtc = validCtcScaffold(verseKeys, ctcAlignment, maximum);
+  const ctcByVerse = new Map((useCtc ? ctcAlignment!.verses : []).map((verse) => [verse.verseKey, verse]));
+  const layers: ShadowBoundaryCandidate[][] = verseKeys.map((verseKey, index) => {
+    if (index === 0) return [{ timestampMs: firstOnset, score: 0, source: "verified-first-onset", occurrence: null, reason: "verified Quran onset" }];
+    const ctc = ctcByVerse.get(verseKey);
+    const estimatedStart = Math.round(firstOnset + (finalEnd - firstOnset) * index / verseKeys.length);
+    return shadowCandidatesForVerse(
+      verseKey,
+      wordOccurrences.filter((word) => word.verseKey === verseKey),
+      speechRegions,
+      ctc?.startMs ?? null,
+      ctcBoundaryQuality(ctcAlignment, verseKey),
+      estimatedStart,
+    ).filter((candidate) => candidate.timestampMs >= firstOnset + minimum
+      && candidate.timestampMs <= finalEnd - minimum * (verseKeys.length - index));
+  });
+  const scores = layers.map((layer) => new Float64Array(layer.length).fill(Number.NEGATIVE_INFINITY));
+  const previous = layers.map((layer) => new Int32Array(layer.length).fill(-1));
+  scores[0]![0] = 0;
+  for (let index = 1; index < layers.length; index += 1) {
+    for (const [candidateIndex, candidate] of layers[index]!.entries()) {
+      for (const [previousIndex, prior] of layers[index - 1]!.entries()) {
+        if (candidate.timestampMs - prior.timestampMs < minimum || !Number.isFinite(scores[index - 1]![previousIndex])) continue;
+        const score = scores[index - 1]![previousIndex]! + candidate.score;
+        if (score > scores[index]![candidateIndex]!
+          || score === scores[index]![candidateIndex]! && prior.timestampMs < (layers[index - 1]![previous[index]![candidateIndex]]?.timestampMs ?? Infinity)) {
+          scores[index]![candidateIndex] = score;
+          previous[index]![candidateIndex] = previousIndex;
+        }
+      }
+    }
+  }
+  let terminal = -1;
+  for (const [index, score] of scores.at(-1)!.entries()) if (score > (terminal < 0 ? Number.NEGATIVE_INFINITY : scores.at(-1)![terminal]!)) terminal = index;
+  if (terminal < 0) {
+    // This is intentionally explicit rather than fabricating millisecond
+    // collision repairs. The current safe resolver remains authoritative.
+    return { boundaries: [], trace: [], usedCtcScaffold: useCtc, fallbackReason: "Shadow evidence has no strictly ordered candidate path." };
+  }
+  const chosen = new Array<ShadowBoundaryCandidate>(verseKeys.length);
+  for (let index = verseKeys.length - 1, candidateIndex = terminal; index >= 0; index -= 1) {
+    chosen[index] = layers[index]![candidateIndex]!;
+    candidateIndex = previous[index]![candidateIndex]!;
+  }
+  const boundaries = verseKeys.map((verseKey, index) => ({
+    verseKey,
+    startMs: chosen[index]!.timestampMs,
+    endMs: index < verseKeys.length - 1 ? chosen[index + 1]!.timestampMs : finalEnd,
+    evidence: {
+      source: (index === 0 ? "pcm-refined" : chosen[index]!.occurrence?.evidence === "micro-asr" ? "micro-asr" : chosen[index]!.occurrence ? "word-timestamp" : "interpolated") as TimingEvidenceSource,
+      selectedWord: chosen[index]!.occurrence && {
+        canonicalWordIndex: chosen[index]!.occurrence.canonicalWordIndex,
+        startMs: chosen[index]!.occurrence.startMs,
+        confidence: chosen[index]!.occurrence.confidence,
+        evidence: chosen[index]!.occurrence.evidence,
+      },
+      candidates: layers[index]!.map((candidate) => ({
+        timestampMs: candidate.timestampMs,
+        canonicalWordIndex: candidate.occurrence?.canonicalWordIndex ?? 0,
+        confidence: candidate.occurrence?.confidence ?? ctcBoundaryQuality(ctcAlignment, verseKey),
+        evidence: candidate.occurrence?.evidence ?? "chunk-coarse",
+        accepted: candidate === chosen[index],
+        reason: candidate === chosen[index] ? `accepted: ${candidate.reason}` : `rejected: lower global evidence score than selected monotonic path (${candidate.reason})`,
+      })),
+    },
+  }));
+  if (boundaries.some((boundary) => boundary.endMs - boundary.startMs < minimum)) throw new Error("Shadow resolver produced a collapsed Quran ayah.");
+  const trace = boundaries.map((boundary, index) => {
+    const candidate = chosen[index]!;
+    const ctcStartMs = ctcByVerse.get(boundary.verseKey)?.startMs ?? null;
+    return {
+      verseKey: boundary.verseKey,
+      ctcBaselineMs: ctcStartMs,
+      allowedCorridor: null,
+      finalStartMs: boundary.startMs,
+      finalSource: candidate.source,
+      acceptedEvidence: [{ source: candidate.source, status: "accepted" as const, timestampMs: boundary.startMs, reason: `accepted by evidence-weighted global path: ${candidate.reason}` }],
+      rejectedEvidence: ctcStartMs !== null && ctcStartMs !== boundary.startMs ? [{ source: "ctc" as const, status: "overridden" as const, timestampMs: ctcStartMs, reason: "CTC was a lower-scoring soft hypothesis, not a hard corridor." }] : [],
+      uniqueRecoveredWordCount: uniqueRecoveredWords(wordOccurrences, boundary.verseKey),
+      canonicalWordCount: useCtc ? ctcAlignment!.canonicalWords.filter((word) => word.verseKey === boundary.verseKey).length : 0,
+    } satisfies GlobalAyahBoundaryTrace;
+  });
+  return { boundaries, trace, usedCtcScaffold: useCtc, fallbackReason: null };
+}
+
+/**
  * Resolves the entire fallback passage as one ordered boundary vector. CTC
  * supplies the acoustic scaffold; bounded local ASR may only select a VAD
  * onset inside its own interval and inside the transition corridor.  A coarse
@@ -1343,11 +1551,12 @@ export function resolveGlobalAyahBoundaries({
       && occurrence.confidence >= 0.62 && occurrence.canonicalWordIndex === 1
       && all.some((following) => following.canonicalWordIndex >= 2 && following.canonicalWordIndex <= 4
         && following.startMs >= occurrence.startMs && following.startMs - occurrence.startMs <= 3_000 && following.confidence >= 0.62);
+    const localVadOnset = (occurrence: WordOccurrence) => vadOnsetsInEvidenceInterval(speechRegions, occurrence.startMs, occurrence.endMs)[0]?.startMs ?? null;
     const candidateAt = (occurrence: WordOccurrence): number | null => {
       if (occurrence.evidence === "direct-word-alignment") return occurrence.startMs;
       // A local ASR chunk is interval evidence. Only an independently detected
       // VAD onset within that interval can localize its transition.
-      const onset = (speechRegions ?? []).find((region) => region.startMs >= occurrence.startMs && region.startMs <= occurrence.endMs)?.startMs;
+      const onset = localVadOnset(occurrence);
       return coherentMicro(occurrence) ? onset ?? null : null;
     };
     const candidates = all.map((occurrence) => ({ occurrence, timestampMs: candidateAt(occurrence) }));
@@ -1369,7 +1578,8 @@ export function resolveGlobalAyahBoundaries({
       const isChosen = chosenCandidate?.occurrence === occurrence;
       const reason = isChosen ? occurrence.evidence === "micro-asr" ? "accepted: local VAD onset corroborates coherent coarse interval" : "accepted: direct word timestamp in corridor"
         : candidate.timestampMs === null && occurrence.evidence === "micro-asr" && occurrence.canonicalWordIndex > 4 ? "rejected: later internal coarse interval cannot override coherent early boundary evidence"
-        : candidate.timestampMs === null ? "rejected: not-word-level timing; coarse interval has no local VAD onset"
+        : candidate.timestampMs === null && occurrence.evidence === "micro-asr" && localVadOnset(occurrence) === null ? "rejected: coarse interval has no local VAD onset"
+        : candidate.timestampMs === null ? "rejected: coarse word-one evidence lacks the current resolver's required coherent following words"
         : candidate.timestampMs < corridorStart || candidate.timestampMs > corridorEnd ? "rejected: outside-corridor"
         : candidate.timestampMs <= starts[index - 1]! ? "rejected: non-monotonic"
         : "rejected: lower deterministic priority than selected candidate";
@@ -2674,7 +2884,7 @@ export function analyzeTranscript(
     ? input
     : createPrimaryTranscript(input, options.timestampMode ?? (input.some((chunk) => chunk.words?.length) ? "word" : "chunk-fallback"));
   const { diagnostics, passage, best } = identifyPrimaryTranscript(primary, options);
-  if (!best) return { matches: [], verseBoundaries: [], diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, globalBoundarySolver: null, timingRecoveryPlan: null };
+  if (!best) return { matches: [], verseBoundaries: [], diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, globalBoundarySolver: null, shadowBoundarySolver: null, timingRecoveryPlan: null };
   const verses = options.corpus ?? hafsVerses;
   const timingChunks = [...primary.chunks, ...(options.timingEvidenceChunks ?? [])]
     .sort((left, right) => left.startMs - right.startMs);
@@ -2708,6 +2918,15 @@ export function analyzeTranscript(
     rawTimestampEvidence: firstRawTimestampEvidence,
   });
   const globalBoundarySolver = timestampedMode ? null : resolveGlobalAyahBoundaries({
+    verseKeys,
+    wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
+    speechRegions: options.speechRegions,
+    verifiedFirstOnset: firstQuranOnset.onsetMs ?? reconstructed.matches[0]?.startMs ?? 0,
+    finalSpeechEnd: reconstructed.matches.at(-1)?.endMs ?? sourceDurationMs,
+    durationMs: sourceDurationMs,
+    ctcAlignment: options.ctcAlignment,
+  });
+  const shadowBoundarySolver = timestampedMode ? null : resolveEvidenceWeightedAyahBoundaries({
     verseKeys,
     wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
     speechRegions: options.speechRegions,
@@ -2772,7 +2991,7 @@ export function analyzeTranscript(
           canonicalWordIndex: candidate.canonicalWordIndex,
           confidence: candidate.confidence,
           evidenceType: candidate.canonicalWordIndex === 1 ? "direct-word-1" as const : candidate.canonicalWordIndex <= 4 ? "coherent-early-words" as const : "backward-recovery" as const,
-          vadSpeechOnsetNearby: (options.speechRegions ?? []).some((region) => Math.abs(region.startMs - candidate.timestampMs) <= 400),
+          vadSpeechOnsetNearby: vadOnsetsInEvidenceInterval(options.speechRegions, candidate.timestampMs, candidate.timestampMs).length > 0,
           accepted: candidate.accepted,
           reason: candidate.reason,
         })),
@@ -2790,6 +3009,7 @@ export function analyzeTranscript(
     forcedAlignment,
     ctcShadow: options.ctcAlignment ?? null,
     globalBoundarySolver,
+    shadowBoundarySolver,
     timingRecoveryPlan: timingRecoveryPlan(forcedAlignment, matches, options.audioAnalysis, options.speechRegions, primary.timestampMode),
   };
 }

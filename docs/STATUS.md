@@ -1,5 +1,30 @@
 # Status
 
+## Current milestone: Recognition/timing audit and evidence-weighted shadow
+
+Complete:
+
+- Audited every supplied real alignment export (6:74–77 and 69:19–32), all
+  timing evidence paths, and the upstream Darten/base-Wav2Vec2 CTC contract.
+  The CTC input/preprocessing/vocabulary/frame-rate implementation is
+  compatible with upstream; the forced path is nevertheless too low-confidence
+  to be a timing authority for these Quran recordings.
+- Isolated the Surah 6 regression: late low-confidence CTC starts became hard
+  corridors, excluding 21,696/32,064 ms lexical-VAD evidence. The 44,832 ms
+  rejection message was misleading: VAD existed; the legacy coherence rule
+  failed. Candidate acceptance and diagnostics now share one VAD-in-interval
+  predicate.
+- Added free greedy CTC decode diagnostics before target forcing, a local-only
+  label/evaluation harness, and a deterministic evidence-weighted global
+  shadow resolver. It is emitted in alignment debug but does not generate
+  production captions. Replay of the supplied Surah 6 data changes median
+  approximate boundary error from 7,608 ms to 160 ms; Surah 69 is comparison
+  only pending human labels.
+
+Verification: targeted CTC/boundary tests and `npx tsc --noEmit` pass.
+Promotion is blocked on verified labels and fresh free-decode diagnostics for
+the real recording suite; no authoritative timing behavior changed.
+
 ## Current milestone: Validate accepted Quran timing evidence
 
 Complete:

@@ -842,6 +842,21 @@ export default function Home() {
         },
         directWordCoverageByVerse: analysis.forcedAlignment?.verseTimings.map((item) => ({ verseKey: item.verseKey, direct: item.directWordCount, recovered: item.recoveredWordCount, total: item.lastCanonicalWordIndex })) ?? [],
         globalBoundarySolver: analysis.globalBoundarySolver,
+        evidenceWeightedShadow: analysis.shadowBoundarySolver && {
+          promotionState: "shadow-only",
+          note: "Not used by CaptionSegment generation. Compare this ordered evidence-weighted path with current before promotion.",
+          ...analysis.shadowBoundarySolver,
+          comparison: analysis.shadowBoundarySolver.boundaries.map((boundary) => {
+            const current = analysis.globalBoundarySolver?.boundaries.find((item) => item.verseKey === boundary.verseKey);
+            return {
+              verseKey: boundary.verseKey,
+              currentStartMs: current?.startMs ?? null,
+              shadowStartMs: boundary.startMs,
+              deltaMs: current ? boundary.startMs - current.startMs : null,
+              source: boundary.evidence.source,
+            };
+          }),
+        },
         firstOnsetTrace: analysis.timingTrace,
         canonicalWordAlignment: analysis.forcedAlignment?.canonicalWordAlignments ?? [],
         wordAlignment: analysis.forcedAlignment?.wordOccurrences ?? [],
