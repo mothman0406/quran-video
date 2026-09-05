@@ -46,8 +46,44 @@ test("FastConformer shadow preserves Tilawa table token 0 even though vocab labe
     { "0": "<unk>", "1": "ة", "10": "▁", "11": "▁واذ", "1024": "<blank>" },
   );
   assert.deepEqual(encoded.targetTokens.map((token) => token.tokenId), [10, 0, 11]);
-  assert.deepEqual(encoded.targetTokenMapping.map((token) => [token.tokenId, token.canonicalWordIndex]), [[10, null], [0, null], [11, 1]]);
+  assert.deepEqual(encoded.targetTokenMapping.map((token) => [token.tokenId, token.canonicalWordIndex]), [[10, 1], [0, 1], [11, 1]]);
   assert.deepEqual(encoded.targetValidation, [{ verseKey: "6:74", tokenCount: 3, firstTokenIds: [10, 0, 11], lastTokenIds: [10, 0, 11], invalidTokenIds: [] }]);
+});
+
+test("FastConformer shadow constructs complete 93:1–5 targets from the real pinned Tilawa assets", () => {
+  const canonical = canonicalCtcWords([
+    { verseKey: "93:1", text: "وَٱلضُّحَىٰ" },
+    { verseKey: "93:2", text: "وَٱلَّيْلِ إِذَا سَجَىٰ" },
+    { verseKey: "93:3", text: "مَا وَدَّعَكَ رَبُّكَ وَمَا قَلَىٰ" },
+    { verseKey: "93:4", text: "وَلَلْـَٔاخِرَةُ خَيْرٌ لَّكَ مِنَ ٱلْأُولَىٰ" },
+    { verseKey: "93:5", text: "وَلَسَوْفَ يُعْطِيكَ رَبُّكَ فَتَرْضَىٰٓ" },
+  ]);
+  const encoded = encodeFastConformerWords(canonical, {
+    "93:1:1": [351, 7, 59, 982, 986, 63, 47, 29, 2],
+    "93:2:2": [63, 123, 49, 186, 75, 38, 2],
+    "93:3:3": [70, 9, 15, 13, 4, 245, 4, 492, 380, 2],
+    "93:4:4": [266, 14, 512, 6, 325, 3, 769, 232, 21, 170, 96, 2],
+    "93:5:5": [266, 26, 220, 22, 13, 40, 2, 4, 245, 4, 494, 205, 2],
+  }, {
+    "2": "ي", "3": "ه", "4": "ك", "6": "ا", "7": "م", "9": "▁و", "13": "ع", "14": "ل", "15": "د", "21": "▁من", "22": "▁ي", "26": "س", "29": "ح", "38": "ج", "40": "ط", "47": "ض", "49": "▁ا", "59": "▁الله", "63": "▁وال", "70": "▁ما", "75": "▁س", "96": "ول", "123": "يل", "170": "▁الا", "186": "ذا", "205": "رض", "220": "وف", "232": "▁لك", "245": "▁رب", "266": "▁ول", "325": "خر", "351": "▁بس", "380": "▁قل", "492": "▁وما", "494": "▁فت", "512": "ء", "769": "▁خير", "982": "▁الرحمن", "986": "▁الرحيم",
+  }, {
+    "93:1": "بسم الله الرحمن الرحيم والضحي",
+    "93:2": "واليل اذا سجي",
+    "93:3": "ما ودعك ربك وما قلي",
+    "93:4": "وللءاخره خير لك من الاولي",
+    "93:5": "ولسوف يعطيك ربك فترضي",
+  });
+  const first = encoded.targetTokenMapping.filter((token) => token.verseKey === "93:1");
+  assert.equal(first.length, 9);
+  assert.equal(first[0]?.canonicalWordIndex, 1);
+  assert.equal(first.at(-1)?.canonicalWordIndex, 1);
+  assert.equal(encoded.canonicalWords.find((word) => word.verseKey === "93:1")?.alignmentText, "والضحي");
+  for (const verseKey of ["93:1", "93:2", "93:3", "93:4", "93:5"]) {
+    const wordCount = encoded.canonicalWords.filter((word) => word.verseKey === verseKey).length;
+    const owners = new Set(encoded.targetTokenMapping.filter((token) => token.verseKey === verseKey).map((token) => token.canonicalWordIndex));
+    assert.deepEqual([...owners], Array.from({ length: wordCount }, (_, index) => index + 1), verseKey);
+    assert.ok(encoded.targetTokenMapping.filter((token) => token.verseKey === verseKey).length > 0, verseKey);
+  }
 });
 
 test("FastConformer shadow uses frame-exact endpoints without one-millisecond repair", () => {

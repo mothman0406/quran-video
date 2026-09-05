@@ -1,5 +1,30 @@
 # Status
 
+## Current milestone: FastConformer Surah 93 target construction
+
+Complete:
+
+- Traced the pinned Tilawa `93:1:1` table: it intentionally begins with the
+  basmalah (`بسم الله الرحمن الرحيم والضحي`), whereas the display ayah begins
+  with `والضحي`. The lexical comparison now uses Tilawa's bundled `text_clean`
+  source, retains every published target token, and assigns the sanctioned
+  first-ayah prefix monotonically to canonical word one.
+- Used that same source field for the `93:4` standalone hamza representation
+  (`ء`), avoiding a broader application Arabic normalizer. The FastConformer
+  shadow remains diagnostic-only and does not affect production timing,
+  passage identification, `VerseAlignment`, or `CaptionSegment` generation.
+- Added pinned-asset regression vectors for 93:1–5, including complete target
+  construction, explicit 93:1 first/last word-one ownership, and non-empty
+  target coverage. The existing 6:74–77 and 69:19–32 target constructions
+  continue to succeed against the pinned assets.
+
+Verification: `npm test` (169 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. The production build retains the
+existing non-fatal VAD ONNX Runtime dynamic-require warning. The requested
+real-browser 93:1–5 rerun remains pending because this workspace contains no
+affected recording fixture; it should confirm `fastConformerShadow.status ===
+"complete"`, a positive target-token count, and a positive frame count.
+
 ## Current milestone: Quran acoustic-alignment research and FastConformer shadow
 
 Complete:
