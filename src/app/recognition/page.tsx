@@ -2,7 +2,7 @@
 
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { analyzeTranscript, createPrimaryTranscript, hafsVerses, type RecognitionAnalysis, type RecognitionResult } from "@/lib/recognition/core";
-import { assertDerivedTimingMatchesCaptions, createCaptionSegmentsFromVerseBoundaries, getActiveCaptionSegment, type CaptionSegment } from "@/lib/editor/captions";
+import { createCaptionSegmentsFromVerseBoundaries, getActiveCaptionSegment, type CaptionSegment } from "@/lib/editor/captions";
 import { recognitionToVerseAlignments, type VerseAlignment } from "@/lib/editor/recognition";
 import { getVerses } from "@/lib/quran/local";
 import {
@@ -118,9 +118,10 @@ export default function RecognitionSpikePage() {
           timingRecoveryAttempted: true,
         });
       }
+      let ctcShadow: Awaited<ReturnType<NonNullable<typeof output.runCtcShadow>>> | null = null;
       if (nextAnalysis.matches.length && output.runCtcShadow) {
         const keys = new Set(nextAnalysis.matches.map((match) => match.verseKey));
-        const ctcShadow = await output.runCtcShadow(hafsVerses.filter((verse) => keys.has(verse.verseKey)), nextAnalysis.matches);
+        ctcShadow = await output.runCtcShadow(hafsVerses.filter((verse) => keys.has(verse.verseKey)), nextAnalysis.matches);
         if (!isActive() || ctcShadow.analysisRunId !== run.analysisRunId) return;
         nextAnalysis = output.timestampMode === "chunk-fallback"
           ? analyzeTranscript(primaryTranscript, {
@@ -132,6 +133,20 @@ export default function RecognitionSpikePage() {
           })
           : { ...nextAnalysis, ctcShadow };
       }
+      const fastConformerRawAlignment = nextAnalysis.matches.length && output.runFastConformerShadow
+        ? await output.runFastConformerShadow(hafsVerses.filter((verse) => new Set(nextAnalysis.matches.map((match) => match.verseKey)).has(verse.verseKey)), nextAnalysis.matches)
+        : null;
+      if (!isActive() || (fastConformerRawAlignment && fastConformerRawAlignment.analysisRunId !== run.analysisRunId)) return;
+      if (fastConformerRawAlignment) {
+        nextAnalysis = analyzeTranscript(primaryTranscript, {
+          audioAnalysis: output.audioAnalysis,
+          speechRegions: output.speechRegions,
+          timingEvidenceChunks: recovery?.chunks,
+          timingRecoveryAttempted: recovery !== null,
+          ctcAlignment: ctcShadow,
+          fastConformerResult: fastConformerRawAlignment,
+        });
+      }
       if (!isActive()) return;
       setAnalysis(nextAnalysis);
       setMatches(nextAnalysis.matches);
@@ -139,11 +154,22 @@ export default function RecognitionSpikePage() {
       setAlignments(nextAlignments);
       const verseContent = nextAlignments.length ? Object.fromEntries(getVerses(nextAlignments[0].verseKey, nextAlignments.at(-1)!.verseKey).map((verse) => [verse.verseKey, verse])) : {};
       const nextSegments = createCaptionSegmentsFromVerseBoundaries(nextAnalysis.verseBoundaries, verseContent);
-      assertDerivedTimingMatchesCaptions(nextSegments, nextAnalysis.forcedAlignment?.verseTimings ?? []);
       setSegments(nextSegments);
       (window as Window & { __QURAN_ALIGNMENT_DEBUG__?: unknown }).__QURAN_ALIGNMENT_DEBUG__ = {
         analysisRunId: run.analysisRunId,
         source: { identity: output.run.sourceIdentity, objectUrl: output.run.sourceObjectUrl, durationMs: output.run.sourceDurationMs, sampleRate: output.run.sampleRate, pcmIdentity: output.run.pcmIdentity },
+        AUTHORITATIVE_TIMING_ENGINE: {
+          engine: nextAnalysis.authoritativeTimingEngine.engine,
+          reason: nextAnalysis.authoritativeTimingEngine.reason,
+          fastConformerStatus: fastConformerRawAlignment?.status ?? "not-run",
+          fallbackUsed: nextAnalysis.authoritativeTimingEngine.fallbackUsed,
+          fallbackReason: nextAnalysis.authoritativeTimingEngine.fallbackReason,
+          passageStartVerse: nextAnalysis.authoritativeTimingEngine.structuralValidation.expectedVerseKeys[0] ?? null,
+          passageEndVerse: nextAnalysis.authoritativeTimingEngine.structuralValidation.expectedVerseKeys.at(-1) ?? null,
+          verseTimings: nextAnalysis.authoritativeTimingEngine.verseTimings,
+          firstStartMs: nextAnalysis.authoritativeTimingEngine.verseTimings[0]?.startMs ?? null,
+          finalEndMs: nextAnalysis.authoritativeTimingEngine.verseTimings.at(-1)?.endMs ?? null,
+        },
         speechRegions: output.speechRegions,
         transcriber: { model: LOCAL_WHISPER_MODEL, backend: output.backend, timestampMode: output.timestampMode, runtimes: { modelLoadMs: output.modelLoadMs, transcriptionMs: output.transcriptionMs, totalMs: output.durationMs } },
         passage: nextAnalysis.passage,
@@ -177,7 +203,9 @@ export default function RecognitionSpikePage() {
         verseTiming: nextAnalysis.forcedAlignment?.verseTimings ?? [],
         pauses: nextAnalysis.forcedAlignment?.pauseCandidates ?? [],
         legacyDiagnosticDisplaySets: nextAnalysis.forcedAlignment?.captionSets ?? [],
-        forcedAlignmentShadow: nextAnalysis.ctcShadow,
+        FASTCONFORMER_RAW_ALIGNMENT: fastConformerRawAlignment,
+        AUTHORITATIVE_CAPTIONS: nextSegments.map((segment) => ({ verseKeys: segment.verseKeys, startMs: segment.startMs, endMs: segment.endMs })),
+        LEGACY_TIMING_DIAGNOSTIC: { forcedAlignment: nextAnalysis.forcedAlignment, ctcShadow: nextAnalysis.ctcShadow, globalBoundarySolver: nextAnalysis.globalBoundarySolver },
       };
     } catch (caught) {
       if (isActive()) setError(caught instanceof Error ? caught.message : "Local transcription failed.");

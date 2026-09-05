@@ -21,7 +21,6 @@ import {
 } from "@/lib/editor/recognition";
 import {
   clampCaptionPositioning,
-  assertDerivedTimingMatchesCaptions,
   createCaptionSegments,
   createCaptionSegmentsFromVerseBoundaries,
   generatedCaptionBoundaryTrace,
@@ -777,9 +776,10 @@ export default function Home() {
           timingRecoveryAttempted: true,
         });
       }
+      let ctcShadow: Awaited<ReturnType<NonNullable<typeof result.runCtcShadow>>> | null = null;
       if (analysis.matches.length && result.runCtcShadow) {
         const keys = new Set(analysis.matches.map((match) => match.verseKey));
-        const ctcShadow = await result.runCtcShadow(hafsVerses.filter((verse) => keys.has(verse.verseKey)), analysis.matches);
+        ctcShadow = await result.runCtcShadow(hafsVerses.filter((verse) => keys.has(verse.verseKey)), analysis.matches);
         // CTC is a global scaffold only when Whisper has no word offsets. The
         // timestamped alignment remains its own protected timing mode.
         analysis = result.timestampMode === "chunk-fallback"
@@ -793,9 +793,19 @@ export default function Home() {
           : { ...analysis, ctcShadow };
         setCtcShadowCompleted(ctcShadow.status === "complete");
       }
-      const fastConformerShadow = process.env.NODE_ENV !== "production" && analysis.matches.length && result.runFastConformerShadow
+      const fastConformerRawAlignment = analysis.matches.length && result.runFastConformerShadow
         ? await result.runFastConformerShadow(hafsVerses.filter((verse) => new Set(analysis.matches.map((match) => match.verseKey)).has(verse.verseKey)), analysis.matches)
         : null;
+      if (fastConformerRawAlignment) {
+        analysis = analyzeTranscript(primaryTranscript, {
+          audioAnalysis: result.audioAnalysis,
+          speechRegions: result.speechRegions,
+          timingEvidenceChunks: recovery?.chunks,
+          timingRecoveryAttempted: recovery !== null,
+          ctcAlignment: ctcShadow,
+          fastConformerResult: fastConformerRawAlignment,
+        });
+      }
       if (result.timestampMode === "chunk-fallback") {
         setTimingWarning("Whisper word timestamps were unavailable. Caption timing was recovered with bounded local ASR windows and remains evidence-graded for timeline adjustment.");
       }
@@ -812,7 +822,6 @@ export default function Home() {
       // One generated display authority: pure boundaries -> CaptionSegment[].
       // VerseAlignment and forced alignment remain diagnostics only.
       const nextSegments = createCaptionSegmentsFromVerseBoundaries(analysis.verseBoundaries, verseContent);
-      assertDerivedTimingMatchesCaptions(nextSegments, analysis.forcedAlignment?.verseTimings ?? []);
       const evaluationFixture = process.env.NODE_ENV !== "production" ? findRealEvaluationFixture(next.map((item) => item.verseKey)) : undefined;
       setAlignments(next);
       setSegments(nextSegments);
@@ -822,6 +831,19 @@ export default function Home() {
         source: { durationMs: result.audioAnalysis.durationMs, sampleRate: result.audioAnalysis.sampleRate },
         speechRegions: result.speechRegions,
         transcriber: { model: "onnx-community/whisper-base_timestamped", backend: result.backend, timestampMode: result.timestampMode, runtimes: { modelLoadMs: result.modelLoadMs, transcriptionMs: result.transcriptionMs, totalMs: result.durationMs } },
+        AUTHORITATIVE_TIMING_ENGINE: {
+          engine: analysis.authoritativeTimingEngine.engine,
+          reason: analysis.authoritativeTimingEngine.reason,
+          fastConformerStatus: fastConformerRawAlignment?.status ?? "not-run",
+          fallbackUsed: analysis.authoritativeTimingEngine.fallbackUsed,
+          fallbackReason: analysis.authoritativeTimingEngine.fallbackReason,
+          passageStartVerse: analysis.authoritativeTimingEngine.structuralValidation.expectedVerseKeys[0] ?? null,
+          passageEndVerse: analysis.authoritativeTimingEngine.structuralValidation.expectedVerseKeys.at(-1) ?? null,
+          verseTimings: analysis.authoritativeTimingEngine.verseTimings,
+          firstStartMs: analysis.authoritativeTimingEngine.verseTimings[0]?.startMs ?? null,
+          finalEndMs: analysis.authoritativeTimingEngine.verseTimings.at(-1)?.endMs ?? null,
+          structuralValidation: analysis.authoritativeTimingEngine.structuralValidation,
+        },
         passage: analysis.passage,
         primaryTranscript: {
           rawText: primaryTranscript.rawText,
@@ -871,7 +893,7 @@ export default function Home() {
             const manualStartMs = evaluationFixture?.manualStartsMs[current.verseKey] ?? null;
             const evidenceWeightedStartMs = analysis.shadowBoundarySolver?.boundaries.find((item) => item.verseKey === current.verseKey)?.startMs ?? null;
             const dartenStartMs = analysis.ctcShadow?.verses.find((item) => item.verseKey === current.verseKey)?.startMs ?? null;
-            const fastConformerStartMs = fastConformerShadow?.alignment.verses.find((item) => item.verseKey === current.verseKey)?.startMs ?? null;
+            const fastConformerStartMs = fastConformerRawAlignment?.alignment.verses.find((item) => item.verseKey === current.verseKey)?.startMs ?? null;
             const error = (startMs: number | null) => manualStartMs === null || startMs === null ? null : Math.abs(startMs - manualStartMs);
             return {
               verseKey: current.verseKey,
@@ -913,10 +935,11 @@ export default function Home() {
         })),
         finalAyahEnd: analysis.timingTrace?.finalAyahEnd ?? null,
         pauses: analysis.forcedAlignment?.pauseCandidates ?? [],
-        legacyDiagnosticTimings: {
+        LEGACY_TIMING_DIAGNOSTIC: {
           forcedVerseTimings: analysis.forcedAlignment?.verseTimings ?? [],
           displaySets: analysis.forcedAlignment?.captionSets ?? [],
-          note: "NON-AUTHORITATIVE: diagnostics derived from the resolver; captions render only CaptionSegment[].",
+          globalBoundarySolver: analysis.globalBoundarySolver,
+          note: "NON-AUTHORITATIVE: legacy timing is fallback/diagnostic data; captions render only the selected CaptionSegment[].",
         },
         ctcShadowStatus: {
           // `complete` is the successful CTC status in this codebase.
@@ -959,17 +982,16 @@ export default function Home() {
             wordAfter: analysis.ctcShadow?.words.find((word) => word.globalWordIndex === pause.canonicalWordAfter)?.canonicalArabic ?? null,
           })),
         },
-        fastConformerShadow: fastConformerShadow && {
-          promotionState: "development-shadow-only",
-          note: "Known canonical passage forced through FastConformer CTC. Never used by passage identification, VerseAlignment, or CaptionSegment generation.",
+        FASTCONFORMER_RAW_ALIGNMENT: fastConformerRawAlignment && {
+          note: "Raw known-canonical-passage FastConformer output. The central structural selector, not this debug object, determines authority.",
           model: FASTCONFORMER_SHADOW_MODEL,
           license: FASTCONFORMER_SHADOW_MODEL_LICENSE,
           modelSize: `${FASTCONFORMER_SHADOW_MODEL_ARTIFACT}: ${FASTCONFORMER_SHADOW_MODEL_BYTES} bytes`,
           runtime: FASTCONFORMER_SHADOW_RUNTIME,
-          ...fastConformerShadow,
-          wordAlignment: fastConformerShadow.alignment.words,
+          ...fastConformerRawAlignment,
+          wordAlignment: fastConformerRawAlignment.alignment.words,
           verseComparison: next.map((current) => {
-            const shadow = fastConformerShadow.alignment.verses.find((verse) => verse.verseKey === current.verseKey);
+            const shadow = fastConformerRawAlignment.alignment.verses.find((verse) => verse.verseKey === current.verseKey);
             return {
               verse: current.verseKey,
               currentStartMs: current.startMs,

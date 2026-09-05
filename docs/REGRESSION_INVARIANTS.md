@@ -12,16 +12,20 @@ separate approved milestone intentionally changes the display contract.
   not depend on timestamp quality.
 - VAD stays enabled and constrains acoustic timing work.
 - Timeline and preview use the same editable `CaptionSegment` interval.
-- There is exactly one authoritative automatic `CaptionSegment` timing array:
-  `resolveGlobalAyahBoundaries` / `resolveVerseBoundaries` produces the generated ayah boundaries and caption
-  generation consumes them once. Recognition, forced-alignment, display-set,
-  and CTC timing are evidence or diagnostics only. Structural validity proves
-  only that a CTC path is internally well-formed; it does not prove acoustic
-  accuracy or authorize a hard timing corridor.
+- There is exactly one authoritative automatic `CaptionSegment` timing array.
+  The central timing-engine selector promotes a completed, structurally valid
+  Tilawa FastConformer global canonical alignment; otherwise it returns the
+  existing legacy resolver as an explicit `legacy-fallback`. Caption generation
+  consumes that selected array once. Passage identification remains the
+  whole-recording Whisper matcher. Darten, Whisper word timing, the old global
+  solver, and evidence-weighted results are diagnostics/fallback infrastructure
+  and cannot veto a structurally valid FastConformer result.
 - Manual timeline edits remain authoritative over generated timing.
 - The final caption remains through actual recitation completion.
-- For any proposed CTC timing, each non-final ayah ends exactly at the next
-  ayah's start; no automatic gap or overlap is allowed after Quran onset.
+- For a promoted FastConformer timing, each non-final ayah ends exactly at the
+  next ayah's start; no automatic gap, overlap, or one-millisecond repair is
+  allowed after Quran onset. Optional prelude words never own canonical ayah
+  one's start.
 - A pause may refine a known canonical word boundary only. It never determines
   Quran identity and cannot introduce an intra-ayah caption split.
 - Forced-alignment output is deterministic for equal audio, canonical target,

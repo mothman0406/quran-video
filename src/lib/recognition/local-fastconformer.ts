@@ -9,9 +9,10 @@ import { hafsVerses, type QuranCorpusVerse } from "./core.ts";
 import type { VadSpeechRegion } from "./speech-regions.ts";
 
 /**
- * Development-only Tilawa FastConformer shadow. The public artifact is
- * CC-BY-4.0 (commercially usable with attribution); this adapter is entirely
- * separate from the production timing authority.
+ * Tilawa FastConformer known-passage timing adapter. The public artifact is
+ * CC-BY-4.0 (commercially usable with attribution); it never participates in
+ * passage identification and becomes authoritative only after structural
+ * validation in the central timing-engine selector.
  */
 export const FASTCONFORMER_SHADOW_MODEL = "acibZ/tilawa-quran-onnx";
 export const FASTCONFORMER_SHADOW_MODEL_LICENSE = "CC-BY-4.0";
@@ -681,7 +682,7 @@ async function runUpstreamTilawaOracle(
   }
 }
 
-/** Creates a lazy browser-only shadow runner over the same decoded 16 kHz PCM. */
+/** Creates a lazy browser-only known-passage runner over the same decoded 16 kHz PCM. */
 export function createFastConformerShadowRunner(audio: Float32Array, speechRegions: readonly VadSpeechRegion[], analysisRunId?: string): FastConformerShadowRunner {
   return async (verses, matches) => {
     const startedAt = performance.now();

@@ -1,5 +1,18 @@
 # Status
 
+## Current milestone: FastConformer primary Quran timing
+
+Complete:
+
+- Promoted Tilawa FastConformer from development shadow to the primary automatic timing engine after the unchanged Whisper passage matcher has produced the final canonical span. One central selector validates completed inference/alignment, exact canonical ayah coverage, finite contiguous monotonic intervals, source-duration outer boundaries, canonical ayah-one onset, and optional-prelude completion. It deliberately does not compare or vote against Darten, Whisper timestamps, evidence-weighted timing, or forced-alignment confidence scores.
+- Preserved `legacy-fallback` as the existing production timing path for model/runtime/assets/target/inference/alignment or structural failures, with the exact failure reason recorded. Darten, Whisper timing, the global solver, micro-ASR, and legacy CTC remain present as fallback/diagnostic infrastructure.
+- The browser runner applies FastConformer’s window start exactly once through forced alignment; FastConformer ayah timings remain absolute media timestamps. No legacy solver is re-run over a valid result. The selected boundaries generate exactly one whole-ayah `CaptionSegment[]`, which remains the shared and editable preview/timeline/export authority.
+- Debug now exposes `AUTHORITATIVE_TIMING_ENGINE`, `FASTCONFORMER_RAW_ALIGNMENT`, `AUTHORITATIVE_CAPTIONS`, and `LEGACY_TIMING_DIAGNOSTIC` separately. Manual edits still modify only the editable segment array and are never overwritten by a later automatic result.
+- Added production-path selector coverage for valid FastConformer promotion despite deliberately disagreeing legacy word/Darten timings, unavailable/incomplete fallback, optional absent basmalah ownership, one-time frame/crop offset behavior, contiguous no-`+1 ms` timing, and shared preview/timeline/export/manual-edit segments.
+- Real-browser validation observations retained for the promoted recordings: 6:74–77 starts were approximately 9,600 / 21,668 / 31,978 / 44,765 ms against the supplied approximate references 9,660 / 21,696 / 32,064 / 44,832; 69:19–32 followed the user-edited/acoustic boundaries without collapsed ayat; 93:1–5 selected an absent optional prelude with canonical word one at 1,631 ms; and 3:33–35 produced 2,496 / 9,194 / 14,537 ms while Tilawa independently detected that range at 0.9772. These are validation observations, not asserted human ground truth where no manual labels exist.
+
+Verification: `npm test` (174 passing), `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. The production build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Optional FastConformer leading basmalah
 
 Complete:

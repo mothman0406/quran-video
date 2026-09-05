@@ -263,7 +263,7 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
 
 // Legacy values remain readable for saved projects; new recognition writes the
 // more specific two-stage evidence values.
-export type CaptionTimingSource = "word-audio-refined" | "word-timestamp" | "merged-token-word1" | "bounded-recovery" | "token-interpolated" | "chunk-interpolated" | "low-confidence-fallback" | "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "interpolated" | "low-confidence" | "micro-asr" | "pcm-refined" | "chunk-coarse" | "unknown" | "forced-alignment" | "derived";
+export type CaptionTimingSource = "fastconformer" | "word-audio-refined" | "word-timestamp" | "merged-token-word1" | "bounded-recovery" | "token-interpolated" | "chunk-interpolated" | "low-confidence-fallback" | "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "interpolated" | "low-confidence" | "micro-asr" | "pcm-refined" | "chunk-coarse" | "unknown" | "forced-alignment" | "derived";
 
 export type CaptionSegment = {
   id: string;

@@ -4,6 +4,7 @@ import type { AudioAnalysis } from "./audio-analysis.ts";
 import { refineFirstAyahOnsetWithEnergy, refineTransitionWithEnergy, refineWordEdgeWithEnergy } from "./audio-analysis.ts";
 import { speechRegionContaining, type VadSpeechRegion } from "./speech-regions.ts";
 import type { CtcForcedAlignmentResult } from "./ctc-forced-alignment.ts";
+import type { FastConformerShadowResult } from "./local-fastconformer.ts";
 
 export type TranscriptChunk = {
   startMs: number;
@@ -46,6 +47,7 @@ export function createPrimaryTranscript(
 }
 
 export type TimingEvidenceSource =
+  | "fastconformer"
   | "word-timestamp"
   | "merged-token-word1"
   | "bounded-recovery"
@@ -172,6 +174,9 @@ export type RecognitionAnalysis = {
   matches: RecognitionResult;
   /** The automatic timing authority consumed by editor caption generation. */
   verseBoundaries: readonly VerseBoundary[];
+  /** The one explicit automatic timing decision. UI clients consume only its
+   * verseTimings through verseBoundaries; model-specific results stay diagnostic. */
+  authoritativeTimingEngine: AuthoritativeTimingEngineResult;
   diagnostics: RecognitionDiagnostic[];
   passage: PassageInference;
   timingTrace: RecognitionTimingTrace | null;
@@ -231,6 +236,25 @@ export type VerseBoundary = {
       reason: string;
     }>;
   };
+};
+
+export type FastConformerStructuralValidation = {
+  valid: boolean;
+  expectedVerseKeys: readonly string[];
+  returnedVerseKeys: readonly string[];
+  reasons: readonly string[];
+};
+
+export type AuthoritativeTimingEngineResult = {
+  engine: "fastconformer" | "legacy-fallback";
+  reason: string;
+  /** The sole automatic ayah timing array handed to caption generation. */
+  verseTimings: readonly VerseBoundary[];
+  /** FastConformer word timestamps are diagnostic provenance, never a UI input. */
+  wordTimings: ReadonlyArray<FastConformerShadowResult["alignment"]["words"][number]>;
+  structuralValidation: FastConformerStructuralValidation;
+  fallbackUsed: boolean;
+  fallbackReason: string | null;
 };
 
 export type GlobalAyahBoundaryTrace = {
@@ -2677,7 +2701,107 @@ export type RecognitionOptions = {
   /** A completed, same-source known-passage CTC alignment. In chunk fallback
    * mode it is the global acoustic scaffold; word-timestamp mode ignores it. */
   ctcAlignment?: CtcForcedAlignmentResult | null;
+  /** Result from the pre-identified canonical passage FastConformer run. It
+   * can replace only automatic timing, never passage identity. */
+  fastConformerResult?: FastConformerShadowResult | null;
 };
+
+function sameVerseKeys(actual: readonly string[], expected: readonly string[]): boolean {
+  return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
+}
+
+/**
+ * The only automatic timing-engine selector. FastConformer is accepted on its
+ * own successful structural alignment; legacy timing is deliberately not an
+ * input to that decision and remains a guarded fallback/diagnostic source.
+ */
+export function selectAuthoritativeTimingEngine(input: {
+  expectedVerseKeys: readonly string[];
+  legacyVerseTimings: readonly VerseBoundary[];
+  fastConformerResult?: FastConformerShadowResult | null;
+  sourceDurationMs: number;
+}): AuthoritativeTimingEngineResult {
+  const fastConformer = input.fastConformerResult ?? null;
+  const expectedVerseKeys = [...input.expectedVerseKeys];
+  const returnedVerseKeys = fastConformer?.ayahTimings.map((timing) => timing.verseKey) ?? [];
+  const reasons: string[] = [];
+  if (!fastConformer) {
+    reasons.push("FastConformer was not run for the identified canonical passage.");
+  } else {
+    if (fastConformer.status !== "complete") reasons.push(`FastConformer status is ${fastConformer.status}.`);
+    if (!fastConformer.rawLogits || !Number.isFinite(fastConformer.frameCount) || (fastConformer.frameCount ?? 0) < 1) {
+      reasons.push("FastConformer inference did not produce a valid frame sequence.");
+    }
+    if (!fastConformer.alignmentComplete) reasons.push("FastConformer forced alignment is incomplete.");
+    if (!sameVerseKeys(returnedVerseKeys, expectedVerseKeys)) reasons.push("FastConformer ayah keys do not exactly cover the final canonical span.");
+    if (!sameVerseKeys(fastConformer.alignment.verses.map((timing) => timing.verseKey), expectedVerseKeys)) {
+      reasons.push("FastConformer aligned verse keys do not exactly cover the final canonical span.");
+    }
+    if (fastConformer.detectedRange
+      && (fastConformer.detectedRange.startVerseKey !== expectedVerseKeys[0]
+        || fastConformer.detectedRange.endVerseKey !== expectedVerseKeys.at(-1))) {
+      reasons.push("FastConformer known range differs from the final canonical span.");
+    }
+    for (const timing of fastConformer.ayahTimings) {
+      if (!Number.isFinite(timing.startMs) || !Number.isFinite(timing.endMs) || timing.startMs >= timing.endMs) {
+        reasons.push(`FastConformer returned an invalid ayah interval for ${timing.verseKey}.`);
+      }
+    }
+    const timings = fastConformer.ayahTimings;
+    if (timings.length) {
+      if (timings[0]!.startMs < 0 || timings.at(-1)!.endMs > input.sourceDurationMs) {
+        reasons.push("FastConformer passage boundaries fall outside the source media duration.");
+      }
+      if (fastConformer.firstCanonicalWordStartMs !== timings[0]!.startMs) {
+        reasons.push("FastConformer first ayah does not start at its first canonical word.");
+      }
+    }
+    for (let index = 1; index < timings.length; index += 1) {
+      const previous = timings[index - 1]!;
+      const current = timings[index]!;
+      if (current.startMs <= previous.startMs) reasons.push(`FastConformer ayah starts are not strictly monotonic at ${current.verseKey}.`);
+      if (previous.endMs !== current.startMs) reasons.push(`FastConformer ayat are not contiguous at ${previous.verseKey} -> ${current.verseKey}.`);
+    }
+    if (fastConformer.optionalPrelude.available
+      && (fastConformer.optionalPrelude.candidateWithoutPreludeScore === null
+        || fastConformer.optionalPrelude.candidateWithPreludeScore === null)) {
+      reasons.push("FastConformer optional prelude handling is incomplete.");
+    }
+  }
+  const structuralValidation: FastConformerStructuralValidation = {
+    valid: Boolean(fastConformer) && reasons.length === 0,
+    expectedVerseKeys,
+    returnedVerseKeys,
+    reasons,
+  };
+  if (fastConformer && structuralValidation.valid) {
+    const verseTimings = fastConformer.ayahTimings.map((timing): VerseBoundary => ({
+      verseKey: timing.verseKey,
+      startMs: timing.startMs,
+      endMs: timing.endMs,
+      evidence: { source: "fastconformer", selectedWord: null, candidates: [] },
+    }));
+    return {
+      engine: "fastconformer",
+      reason: "FastConformer inference and global canonical forced alignment passed every structural requirement.",
+      verseTimings,
+      wordTimings: fastConformer.alignment.words,
+      structuralValidation,
+      fallbackUsed: false,
+      fallbackReason: null,
+    };
+  }
+  const fallbackReason = reasons.join(" ");
+  return {
+    engine: "legacy-fallback",
+    reason: `Legacy timing selected because ${fallbackReason}`,
+    verseTimings: input.legacyVerseTimings,
+    wordTimings: fastConformer?.alignment.words ?? [],
+    structuralValidation,
+    fallbackUsed: true,
+    fallbackReason,
+  };
+}
 
 type PrimaryPassageIdentification = {
   diagnostics: RecognitionDiagnostic[];
@@ -2884,7 +3008,12 @@ export function analyzeTranscript(
     ? input
     : createPrimaryTranscript(input, options.timestampMode ?? (input.some((chunk) => chunk.words?.length) ? "word" : "chunk-fallback"));
   const { diagnostics, passage, best } = identifyPrimaryTranscript(primary, options);
-  if (!best) return { matches: [], verseBoundaries: [], diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, globalBoundarySolver: null, shadowBoundarySolver: null, timingRecoveryPlan: null };
+  if (!best) {
+    const authoritativeTimingEngine = selectAuthoritativeTimingEngine({
+      expectedVerseKeys: [], legacyVerseTimings: [], fastConformerResult: options.fastConformerResult, sourceDurationMs: 0,
+    });
+    return { matches: [], verseBoundaries: authoritativeTimingEngine.verseTimings, authoritativeTimingEngine, diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, globalBoundarySolver: null, shadowBoundarySolver: null, timingRecoveryPlan: null };
+  }
   const verses = options.corpus ?? hafsVerses;
   const timingChunks = [...primary.chunks, ...(options.timingEvidenceChunks ?? [])]
     .sort((left, right) => left.startMs - right.startMs);
@@ -2935,7 +3064,7 @@ export function analyzeTranscript(
     durationMs: sourceDurationMs,
     ctcAlignment: options.ctcAlignment,
   });
-  const verseBoundaries = timestampedMode
+  const legacyVerseBoundaries = timestampedMode
     ? resolveTimestampedVerseBoundaries({
       verseKeys,
       wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
@@ -2945,6 +3074,13 @@ export function analyzeTranscript(
       durationMs: sourceDurationMs,
     })
     : globalBoundarySolver!.boundaries;
+  const authoritativeTimingEngine = selectAuthoritativeTimingEngine({
+    expectedVerseKeys: passage.canonicalSpan?.coveredVerseKeys ?? verseKeys,
+    legacyVerseTimings: legacyVerseBoundaries,
+    fastConformerResult: options.fastConformerResult,
+    sourceDurationMs,
+  });
+  const verseBoundaries = authoritativeTimingEngine.verseTimings;
   const boundaryByVerse = new Map(verseBoundaries.map((boundary) => [boundary.verseKey, boundary]));
   const matches = reconstructed.matches.map((match, index) => {
     const boundary = boundaryByVerse.get(match.verseKey);
@@ -2960,49 +3096,15 @@ export function analyzeTranscript(
       },
     };
   });
-  const forcedAlignment = rawForcedAlignment && {
-    ...rawForcedAlignment,
-    // These remain diagnostics, but if inspected they are derived from the
-    // same boundary result and therefore cannot contradict editor captions.
-    verseTimings: rawForcedAlignment.verseTimings.map((timing) => {
-      const boundary = boundaryByVerse.get(timing.verseKey);
-      return boundary ? { ...timing, startMs: boundary.startMs, endMs: boundary.endMs, startEvidence: boundary.evidence.source, endEvidence: boundary.evidence.source } : timing;
-    }),
-    captionSets: rawForcedAlignment.captionSets,
-  };
-  const timingTrace = reconstructed.timingTrace && {
-    ...reconstructed.timingTrace,
-    verseAlignmentStartMs: verseBoundaries[0]?.startMs ?? reconstructed.timingTrace.verseAlignmentStartMs,
-    verses: reconstructed.timingTrace.verses.map((trace) => {
-      const boundary = boundaryByVerse.get(trace.verseKey);
-      return boundary ? { ...trace, verseAlignmentStartMs: boundary.startMs, verseAlignmentEndMs: boundary.endMs } : trace;
-    }),
-    transitions: reconstructed.timingTrace.transitions.map((trace) => {
-      const boundary = boundaryByVerse.get(trace.nextVerseKey);
-      const globalTrace = globalBoundarySolver?.trace.find((item) => item.verseKey === trace.nextVerseKey);
-      const candidates = boundary?.evidence.candidates ?? [];
-      return boundary ? {
-        ...trace,
-        searchCorridor: globalTrace?.allowedCorridor ?? trace.searchCorridor,
-        firstNextAyahEvidenceMs: candidates[0]?.timestampMs ?? null,
-        firstNextCanonicalWordSupported: boundary.evidence.selectedWord?.canonicalWordIndex ?? null,
-        candidateNextAyahEvidence: candidates.map((candidate) => ({
-          timestampMs: candidate.timestampMs,
-          canonicalWordIndex: candidate.canonicalWordIndex,
-          confidence: candidate.confidence,
-          evidenceType: candidate.canonicalWordIndex === 1 ? "direct-word-1" as const : candidate.canonicalWordIndex <= 4 ? "coherent-early-words" as const : "backward-recovery" as const,
-          vadSpeechOnsetNearby: vadOnsetsInEvidenceInterval(options.speechRegions, candidate.timestampMs, candidate.timestampMs).length > 0,
-          accepted: candidate.accepted,
-          reason: candidate.reason,
-        })),
-        selectedTransitionMs: boundary.startMs,
-        evidence: boundary.evidence.source,
-      } : trace;
-    }),
-  };
+  // Legacy timestamp/word paths remain diagnostic data. Do not rewrite them
+  // to FastConformer boundaries, otherwise debug output would conceal which
+  // engine actually supplied the rendered CaptionSegment[] intervals.
+  const forcedAlignment = rawForcedAlignment;
+  const timingTrace = reconstructed.timingTrace;
   return {
     matches,
     verseBoundaries,
+    authoritativeTimingEngine,
     diagnostics,
     passage,
     timingTrace,

@@ -366,11 +366,9 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       speechRegions,
       recoverTiming,
       runCtcShadow: createCtcShadowRunner(audio, speechRegions, run.analysisRunId),
-      // The FastConformer experiment is deliberately absent from production
-      // runs. It may enrich development diagnostics only.
-      runFastConformerShadow: process.env.NODE_ENV !== "production"
-        ? createFastConformerShadowRunner(audio, speechRegions, run.analysisRunId)
-        : undefined,
+      // FastConformer receives only the complete canonical range already
+      // identified by Whisper. It cannot participate in passage identity.
+      runFastConformerShadow: createFastConformerShadowRunner(audio, speechRegions, run.analysisRunId),
     };
   },
 };

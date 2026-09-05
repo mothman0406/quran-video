@@ -56,7 +56,8 @@ export type LocalTranscriptionResult = {
   ) => Promise<LocalTimingRecoveryResult>;
   /** Shadow-only known-passage CTC timing. It never mutates caption timing. */
   runCtcShadow?: CtcShadowRunner;
-  /** Development-only FastConformer CTC shadow. It never mutates caption timing. */
+  /** Known-passage FastConformer timing run. Passage identity remains owned by
+   * the existing Whisper matcher; the result is structurally selected later. */
   runFastConformerShadow?: FastConformerShadowRunner;
 };
 
