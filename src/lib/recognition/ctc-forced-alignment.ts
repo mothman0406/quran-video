@@ -239,7 +239,20 @@ export function forceAlignCtc(
   canonicalWords: readonly CtcCanonicalWord[],
   tokens: readonly CtcTargetToken[],
   logits: CtcFrameLogits,
-  options: { blankTokenId: number; startMs: number; endMs: number; finalSpeechEndMs?: number; repeats?: readonly CtcRepeat[] },
+  options: {
+    blankTokenId: number;
+    startMs: number;
+    endMs: number;
+    finalSpeechEndMs?: number;
+    repeats?: readonly CtcRepeat[];
+    /**
+     * Preserve exact frame-derived endpoints. This is used by the new
+     * FastConformer shadow so no one-millisecond collision repair is applied.
+     * Existing Darten diagnostics retain their historical non-collapsing
+     * representation by leaving this unset.
+     */
+    frameExactEndpoints?: boolean;
+  },
 ): CtcForcedAlignmentResult {
   const startedAt = performance.now();
   const expanded = expandCtcTargetWithRepeats(tokens, options.repeats ?? []);
@@ -269,7 +282,16 @@ export function forceAlignCtc(
     const last = Math.max(...frames.map((item) => item.frame));
     const score = frames.reduce((sum, item) => sum + item.score, 0) / frames.length;
     const confidence = Number(Math.exp(Math.max(-20, score)).toFixed(4));
-    return { ...word, startMs: msAtFrame(first, logits.frames, options.startMs, options.endMs), endMs: Math.max(msAtFrame(last + 1, logits.frames, options.startMs, options.endMs), msAtFrame(first, logits.frames, options.startMs, options.endMs) + 1), confidence, alignmentScore: Number(score.toFixed(4)), lowConfidence: confidence < 0.08 };
+    const startMs = msAtFrame(first, logits.frames, options.startMs, options.endMs);
+    const frameEndMs = msAtFrame(last + 1, logits.frames, options.startMs, options.endMs);
+    return {
+      ...word,
+      startMs,
+      endMs: options.frameExactEndpoints ? frameEndMs : Math.max(frameEndMs, startMs + 1),
+      confidence,
+      alignmentScore: Number(score.toFixed(4)),
+      lowConfidence: confidence < 0.08,
+    };
   });
   const audibleRepetitions = (options.repeats ?? []).map((repeat) => {
     const frames = [...byWord.entries()].filter(([word]) => word >= repeat.startWordIndex && word <= repeat.endWordIndex).flatMap(([, items]) => items.filter((item) => item.repeated));

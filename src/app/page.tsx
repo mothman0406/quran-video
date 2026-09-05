@@ -12,6 +12,7 @@ import {
 } from "react";
 import { analyzeTranscript, createPrimaryTranscript, hafsSurahs, hafsVerses } from "@/lib/recognition/core";
 import { QURAN_CTC_SHADOW_MODEL, QURAN_CTC_SHADOW_MODEL_ARTIFACT, QURAN_CTC_SHADOW_MODEL_BYTES, QURAN_CTC_SHADOW_MODEL_LICENSE, QURAN_CTC_SHADOW_RUNTIME } from "@/lib/recognition/local-ctc";
+import { FASTCONFORMER_SHADOW_MODEL, FASTCONFORMER_SHADOW_MODEL_ARTIFACT, FASTCONFORMER_SHADOW_MODEL_BYTES, FASTCONFORMER_SHADOW_MODEL_LICENSE, FASTCONFORMER_SHADOW_RUNTIME } from "@/lib/recognition/local-fastconformer";
 import type { TranscriptionProgress } from "@/lib/recognition/transcriber";
 import {
   recognitionToVerseAlignments,
@@ -791,6 +792,9 @@ export default function Home() {
           : { ...analysis, ctcShadow };
         setCtcShadowCompleted(ctcShadow.status === "complete");
       }
+      const fastConformerShadow = process.env.NODE_ENV !== "production" && analysis.matches.length && result.runFastConformerShadow
+        ? await result.runFastConformerShadow(hafsVerses.filter((verse) => new Set(analysis.matches.map((match) => match.verseKey)).has(verse.verseKey)), analysis.matches)
+        : null;
       if (result.timestampMode === "chunk-fallback") {
         setTimingWarning("Whisper word timestamps were unavailable. Caption timing was recovered with bounded local ASR windows and remains evidence-graded for timeline adjustment.");
       }
@@ -928,6 +932,28 @@ export default function Home() {
             wordBefore: analysis.ctcShadow?.words.find((word) => word.globalWordIndex === pause.canonicalWordBefore)?.canonicalArabic ?? null,
             wordAfter: analysis.ctcShadow?.words.find((word) => word.globalWordIndex === pause.canonicalWordAfter)?.canonicalArabic ?? null,
           })),
+        },
+        fastConformerShadow: fastConformerShadow && {
+          promotionState: "development-shadow-only",
+          note: "Known canonical passage forced through FastConformer CTC. Never used by passage identification, VerseAlignment, or CaptionSegment generation.",
+          model: FASTCONFORMER_SHADOW_MODEL,
+          license: FASTCONFORMER_SHADOW_MODEL_LICENSE,
+          modelSize: `${FASTCONFORMER_SHADOW_MODEL_ARTIFACT}: ${FASTCONFORMER_SHADOW_MODEL_BYTES} bytes`,
+          runtime: FASTCONFORMER_SHADOW_RUNTIME,
+          ...fastConformerShadow,
+          wordAlignment: fastConformerShadow.alignment.words,
+          verseComparison: next.map((current) => {
+            const shadow = fastConformerShadow.alignment.verses.find((verse) => verse.verseKey === current.verseKey);
+            return {
+              verse: current.verseKey,
+              currentStartMs: current.startMs,
+              fastConformerStartMs: shadow?.startMs ?? null,
+              startDeltaMs: shadow ? shadow.startMs - current.startMs : null,
+              currentEndMs: current.endMs,
+              fastConformerEndMs: shadow?.endMs ?? null,
+              endDeltaMs: shadow ? shadow.endMs - current.endMs : null,
+            };
+          }),
         },
       };
       publishAlignmentDebug(alignmentDebug.current);

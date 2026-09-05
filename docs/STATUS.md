@@ -1,5 +1,31 @@
 # Status
 
+## Current milestone: Quran acoustic-alignment research and FastConformer shadow
+
+Complete:
+
+- Audited QuranCaption's noncommercial phoneme/VAD/n-gram/substring-DP
+  architecture and separately audited Tilawa's public FastConformer BPE CTC
+  contract, benchmark harness, and commercial license boundary. QuranCaption
+  application code remains study-only; no code was copied or adapted.
+- Added a lazy, cached, development-only FastConformer shadow using the public
+  CC-BY-4.0 `acibZ/tilawa-quran-onnx` 88.3 MB model plus exact public Quran BPE
+  targets. It runs against the same decoded 16 kHz mono PCM, returns logits
+  metadata/greedy transcript/known range/confidence/runtime, and forces the
+  already-known whole passage globally into frame-exact canonical word/ayah
+  timings. It cannot modify passage identity, `VerseAlignment`, or
+  `CaptionSegment` timing.
+- Added target-round-trip and no-`+1 ms` frame-exact regression coverage, and
+  expanded the real-evaluation tool to report FastConformer separately.
+- Documented the real-fixture gap honestly: no FastConformer benchmark can run
+  until the actual source audio and verified human labels are supplied.
+
+Verification: `npm test` (164 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. The production build retains the
+existing non-fatal VAD ONNX Runtime dynamic-require warning. Real-browser
+FastConformer execution and human-label evaluation remain required before any
+promotion.
+
 ## Current milestone: Recognition/timing audit and evidence-weighted shadow
 
 Complete:

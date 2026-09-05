@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { resolveEvidenceWeightedAyahBoundaries, type WordOccurrence } from "../src/lib/recognition/core.ts";
 import type { CtcForcedAlignmentResult } from "../src/lib/recognition/ctc-forced-alignment.ts";
+import type { FastConformerShadowResult } from "../src/lib/recognition/local-fastconformer.ts";
 
 type Boundary = { verseKey: string; startMs: number; endMs: number; evidence?: { source?: string } };
 type DebugRecording = {
@@ -12,6 +13,9 @@ type DebugRecording = {
   wordAlignment?: WordOccurrence[];
   speechRegions?: Array<{ startMs: number; endMs: number; durationMs: number; confidence: number }>;
   forcedAlignmentShadow?: { result?: CtcForcedAlignmentResult };
+  fastConformerShadow?: FastConformerShadowResult;
+  /** Whisper-derived word/verse evidence, present in modern debug exports. */
+  verseTiming?: Boundary[];
   AUTHORITATIVE_CAPTIONS?: Array<{ verseKeys?: string[]; startMs?: number; endMs?: number }>;
 };
 type RecordingLabels = {
@@ -85,12 +89,15 @@ async function main() {
       }).boundaries
       : [];
     const shadow = recording.evidenceWeightedShadow?.boundaries ?? replayedShadow;
+    const whisper = recording.verseTiming;
+    const darten = recording.forcedAlignmentShadow?.result?.verses;
+    const fastConformer = recording.fastConformerShadow?.alignment.verses;
     const verseKeys = recording.passage?.canonicalSpan?.coveredVerseKeys ?? current.map((boundary) => boundary.verseKey);
     const currentByVerse = boundaryMap(current);
     const shadowByVerse = boundaryMap(shadow);
     console.log(`\n## ${basename(debugPath)} (${recording.source?.durationMs ?? "unknown"} ms)`);
-    console.log(tableRow(["verse", "manual start", "current", "shadow", "Δ shadow", "current source", "shadow source"]));
-    console.log(tableRow(["---", "---:", "---:", "---:", "---:", "---", "---"]));
+    console.log(tableRow(["verse", "manual start", "production", "Whisper evidence", "Darten CTC", "FastConformer CTC", "phoneme", "shadow"]));
+    console.log(tableRow(["---", "---:", "---:", "---:", "---:", "---:", "---", "---:"]));
     for (const verseKey of verseKeys) {
       const currentBoundary = currentByVerse.get(verseKey);
       const shadowBoundary = shadowByVerse.get(verseKey);
@@ -99,14 +106,19 @@ async function main() {
         verseKey,
         manual,
         currentBoundary?.startMs,
+        boundaryMap(whisper).get(verseKey)?.startMs,
+        boundaryMap(darten).get(verseKey)?.startMs,
+        boundaryMap(fastConformer).get(verseKey)?.startMs,
+        "not prototyped",
         shadowBoundary?.startMs,
-        currentBoundary && shadowBoundary ? shadowBoundary.startMs - currentBoundary.startMs : null,
-        currentBoundary?.evidence?.source,
-        shadowBoundary?.evidence?.source,
       ]));
     }
-    console.log(reportMetrics("current", current, labels));
-    console.log(reportMetrics("shadow", shadow, labels));
+    console.log(reportMetrics("production", current, labels));
+    console.log(reportMetrics("Whisper evidence", whisper, labels));
+    console.log(reportMetrics("Darten forced alignment", darten, labels));
+    console.log(reportMetrics("FastConformer forced alignment", fastConformer, labels));
+    console.log("phoneme forced alignment: not prototyped (no commercially verified public browser phoneme CTC model)");
+    console.log(reportMetrics("evidence-weighted shadow", shadow, labels));
     if (labels?.quality === "approximate") console.log("Label quality: approximate — informative only, not a promotion gate.");
   }
 }

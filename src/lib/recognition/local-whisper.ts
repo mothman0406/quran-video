@@ -7,6 +7,7 @@ import type {
 import { analyzeMonoPcm } from "./audio-analysis.ts";
 import { detectLocalSpeechRegions } from "./vad.ts";
 import { createCtcShadowRunner } from "./local-ctc.ts";
+import { createFastConformerShadowRunner } from "./local-fastconformer.ts";
 import type { TranscriptChunk } from "./core";
 import type { TimestampValidationDiagnostics } from "./transcriber";
 
@@ -365,6 +366,11 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       speechRegions,
       recoverTiming,
       runCtcShadow: createCtcShadowRunner(audio, speechRegions, run.analysisRunId),
+      // The FastConformer experiment is deliberately absent from production
+      // runs. It may enrich development diagnostics only.
+      runFastConformerShadow: process.env.NODE_ENV !== "production"
+        ? createFastConformerShadowRunner(audio, speechRegions, run.analysisRunId)
+        : undefined,
     };
   },
 };
