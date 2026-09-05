@@ -21,3 +21,9 @@ npm run evaluate:real -- /path/to/alignment-debug.json --labels=debug/labels/sur
 ```
 
 `quality: "approximate"` prints useful diagnostics but is deliberately not a release/promotion gate.
+
+The development-only evaluation registry is
+`src/lib/recognition/real-evaluation-registry.ts`. It lists the four planned
+real-recording passages and preserves `UNKNOWN` truth until a human label is
+actually available. It is debug/evaluation metadata only and is never imported
+by recognition or timing code.

@@ -4,6 +4,17 @@
 
 Complete:
 
+- Preserved the first successful real-browser FastConformer shadow run for the
+  66,083 ms Surah 6:74–77 recording: upstream Tilawa reports 6:74–77 at
+  0.9754 and FastConformer ayah starts are 9,600 / 21,668 / 31,978 / 44,765 ms.
+  It remains development-shadow-only and does not affect identity,
+  `VerseAlignment`, `CaptionSegment`, preview, timeline, or export.
+- Added a concise `REAL ALIGNMENT COMPARISON` debug section, explicit
+  uncalibrated `forcedAlignmentMeanScore` naming, complete FastConformer run
+  quality fields, and a development-only four-recording manual-label registry.
+  Evaluation reports absolute-error and structural metrics only where manual
+  truth exists; unknown fixtures remain unknown.
+
 - Audited QuranCaption's noncommercial phoneme/VAD/n-gram/substring-DP
   architecture and separately audited Tilawa's public FastConformer BPE CTC
   contract, benchmark harness, and commercial license boundary. QuranCaption
@@ -11,7 +22,7 @@ Complete:
 - Added a lazy, cached, development-only FastConformer shadow using the public
   CC-BY-4.0 `acibZ/tilawa-quran-onnx` 88.3 MB model plus exact public Quran BPE
   targets. It runs against the same decoded 16 kHz mono PCM, returns logits
-  metadata/greedy transcript/known range/confidence/runtime, and forces the
+  metadata/greedy transcript/known range/explicit score semantics/runtime, and forces the
   already-known whole passage globally into frame-exact canonical word/ayah
   timings. It cannot modify passage identity, `VerseAlignment`, or
   `CaptionSegment` timing.
@@ -25,14 +36,15 @@ Complete:
   reached` before the Xet CDN redirect. A 429 now honors `Retry-After` when
   present, otherwise retries twice with deterministic 1 s/2 s backoff, and
   reports host/status/attempt/retry/cache/byte/time diagnostics.
-- Documented the real-fixture gap honestly: no FastConformer benchmark can run
-  until the actual source audio and verified human labels are supplied.
+- Kept the real-fixture limitation explicit: one real browser run and
+  approximate Surah 6 references do not justify promotion; the remaining
+  recordings still require source audio and verified human labels.
 
-Verification: `npm test` (166 passing), `npx tsc --noEmit`, `npm run lint`,
+Verification: `npm test` (168 passing), `npx tsc --noEmit`, `npm run lint`,
 `npm run build`, and `git diff --check` pass. The production build retains the
 existing non-fatal VAD ONNX Runtime dynamic-require warning. Real-browser
-FastConformer execution and human-label evaluation remain required before any
-promotion.
+additional FastConformer execution and human-label evaluation remain required
+before any promotion.
 
 ## Current milestone: Recognition/timing audit and evidence-weighted shadow
 

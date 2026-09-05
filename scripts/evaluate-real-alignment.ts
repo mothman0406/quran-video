@@ -48,14 +48,14 @@ function boundaryMap(boundaries: readonly Boundary[] | undefined) {
 }
 
 function reportMetrics(name: string, boundaries: readonly Boundary[] | undefined, labels: RecordingLabels | null) {
-  if (!labels) return `${name}: no labels supplied`;
+  if (!labels || !Object.keys(labels.boundaries).length) return `${name}: manual truth unavailable (medianAbsoluteErrorMs=— p90AbsoluteErrorMs=— maxAbsoluteErrorMs=— missingBoundaryCount=— structuralFailureCount=—)`;
   const predicted = boundaryMap(boundaries);
   const errors = Object.entries(labels.boundaries)
     .flatMap(([verseKey, startMs]) => predicted.get(verseKey) ? [Math.abs(predicted.get(verseKey)!.startMs - startMs)] : []);
   const missing = Object.keys(labels.boundaries).filter((verseKey) => !predicted.has(verseKey));
   const structuralInvalid = (boundaries ?? []).filter((boundary, index, all) => boundary.endMs <= boundary.startMs
     || boundary.startMs < 0 || (index < all.length - 1 && boundary.endMs !== all[index + 1]!.startMs)).length;
-  return `${name}: median=${median(errors) ?? "—"}ms p90=${percentile(errors, 0.9) ?? "—"}ms max=${errors.length ? Math.max(...errors) : "—"}ms missing=${missing.length} structural-invalid=${structuralInvalid}`;
+  return `${name}: medianAbsoluteErrorMs=${median(errors) ?? "—"} p90AbsoluteErrorMs=${percentile(errors, 0.9) ?? "—"} maxAbsoluteErrorMs=${errors.length ? Math.max(...errors) : "—"} missingBoundaryCount=${missing.length} structuralFailureCount=${structuralInvalid}`;
 }
 
 async function loadJson<T>(path: string): Promise<T> {
@@ -96,8 +96,9 @@ async function main() {
     const currentByVerse = boundaryMap(current);
     const shadowByVerse = boundaryMap(shadow);
     console.log(`\n## ${basename(debugPath)} (${recording.source?.durationMs ?? "unknown"} ms)`);
-    console.log(tableRow(["verse", "manual start", "production", "Whisper evidence", "Darten CTC", "FastConformer CTC", "phoneme", "shadow"]));
-    console.log(tableRow(["---", "---:", "---:", "---:", "---:", "---:", "---", "---:"]));
+    console.log("REAL ALIGNMENT COMPARISON");
+    console.log(tableRow(["verseKey", "manualStartMs", "productionStartMs", "productionErrorMs", "evidenceWeightedStartMs", "evidenceWeightedErrorMs", "dartenStartMs", "dartenErrorMs", "fastConformerStartMs", "fastConformerErrorMs"]));
+    console.log(tableRow(["---", "---:", "---:", "---:", "---:", "---:", "---:", "---:", "---:", "---:"]));
     for (const verseKey of verseKeys) {
       const currentBoundary = currentByVerse.get(verseKey);
       const shadowBoundary = shadowByVerse.get(verseKey);
@@ -106,11 +107,13 @@ async function main() {
         verseKey,
         manual,
         currentBoundary?.startMs,
-        boundaryMap(whisper).get(verseKey)?.startMs,
-        boundaryMap(darten).get(verseKey)?.startMs,
-        boundaryMap(fastConformer).get(verseKey)?.startMs,
-        "not prototyped",
+        manual === undefined || !currentBoundary ? null : Math.abs(currentBoundary.startMs - manual),
         shadowBoundary?.startMs,
+        manual === undefined || !shadowBoundary ? null : Math.abs(shadowBoundary.startMs - manual),
+        boundaryMap(darten).get(verseKey)?.startMs,
+        manual === undefined || !boundaryMap(darten).get(verseKey) ? null : Math.abs(boundaryMap(darten).get(verseKey)!.startMs - manual),
+        boundaryMap(fastConformer).get(verseKey)?.startMs,
+        manual === undefined || !boundaryMap(fastConformer).get(verseKey) ? null : Math.abs(boundaryMap(fastConformer).get(verseKey)!.startMs - manual),
       ]));
     }
     console.log(reportMetrics("production", current, labels));

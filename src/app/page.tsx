@@ -13,6 +13,7 @@ import {
 import { analyzeTranscript, createPrimaryTranscript, hafsSurahs, hafsVerses } from "@/lib/recognition/core";
 import { QURAN_CTC_SHADOW_MODEL, QURAN_CTC_SHADOW_MODEL_ARTIFACT, QURAN_CTC_SHADOW_MODEL_BYTES, QURAN_CTC_SHADOW_MODEL_LICENSE, QURAN_CTC_SHADOW_RUNTIME } from "@/lib/recognition/local-ctc";
 import { FASTCONFORMER_SHADOW_MODEL, FASTCONFORMER_SHADOW_MODEL_ARTIFACT, FASTCONFORMER_SHADOW_MODEL_BYTES, FASTCONFORMER_SHADOW_MODEL_LICENSE, FASTCONFORMER_SHADOW_RUNTIME } from "@/lib/recognition/local-fastconformer";
+import { findRealEvaluationFixture } from "@/lib/recognition/real-evaluation-registry";
 import type { TranscriptionProgress } from "@/lib/recognition/transcriber";
 import {
   recognitionToVerseAlignments,
@@ -812,6 +813,7 @@ export default function Home() {
       // VerseAlignment and forced alignment remain diagnostics only.
       const nextSegments = createCaptionSegmentsFromVerseBoundaries(analysis.verseBoundaries, verseContent);
       assertDerivedTimingMatchesCaptions(nextSegments, analysis.forcedAlignment?.verseTimings ?? []);
+      const evaluationFixture = process.env.NODE_ENV !== "production" ? findRealEvaluationFixture(next.map((item) => item.verseKey)) : undefined;
       setAlignments(next);
       setSegments(nextSegments);
       alignmentDebug.current = {
@@ -858,6 +860,30 @@ export default function Home() {
               shadowStartMs: boundary.startMs,
               deltaMs: current ? boundary.startMs - current.startMs : null,
               source: boundary.evidence.source,
+            };
+          }),
+        },
+        realAlignmentComparison: {
+          title: "REAL ALIGNMENT COMPARISON",
+          recordingId: evaluationFixture?.recordingId ?? null,
+          manualTruth: evaluationFixture?.truth ?? "UNKNOWN",
+          rows: next.map((current) => {
+            const manualStartMs = evaluationFixture?.manualStartsMs[current.verseKey] ?? null;
+            const evidenceWeightedStartMs = analysis.shadowBoundarySolver?.boundaries.find((item) => item.verseKey === current.verseKey)?.startMs ?? null;
+            const dartenStartMs = analysis.ctcShadow?.verses.find((item) => item.verseKey === current.verseKey)?.startMs ?? null;
+            const fastConformerStartMs = fastConformerShadow?.alignment.verses.find((item) => item.verseKey === current.verseKey)?.startMs ?? null;
+            const error = (startMs: number | null) => manualStartMs === null || startMs === null ? null : Math.abs(startMs - manualStartMs);
+            return {
+              verseKey: current.verseKey,
+              manualStartMs,
+              productionStartMs: current.startMs,
+              productionErrorMs: error(current.startMs),
+              evidenceWeightedStartMs,
+              evidenceWeightedErrorMs: error(evidenceWeightedStartMs),
+              dartenStartMs,
+              dartenErrorMs: error(dartenStartMs),
+              fastConformerStartMs,
+              fastConformerErrorMs: error(fastConformerStartMs),
             };
           }),
         },

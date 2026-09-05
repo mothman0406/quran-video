@@ -108,10 +108,20 @@ export type FastConformerShadowResult = {
   targetValidation: FastConformerTargetValidation[];
   targetTokenMapping: FastConformerTargetToken[];
   upstreamTilawaResult: UpstreamTilawaResult | null;
+  /** Upstream Tilawa passage result; this never participates in identity selection. */
+  upstreamTilawaDetectedPassage: { startVerseKey: string; endVerseKey: string } | null;
+  /** Calibrated upstream Tilawa passage score, distinct from forced-path scores. */
+  upstreamTilawaConfidence: number | null;
   /** This is the pre-identified canonical range, not a new identity authority. */
   detectedRange: { startVerseKey: string; endVerseKey: string; source: "known-canonical-passage" } | null;
-  confidence: number | null;
+  /** Mean local forced-path posterior, not a calibrated passage confidence. */
+  forcedAlignmentMeanScore: number | null;
   greedyTranscript: string;
+  frameCount: number | null;
+  frameDurationMs: number | null;
+  combinedTargetTokenCount: number;
+  alignmentComplete: boolean;
+  ayahTimings: Array<{ verseKey: string; startMs: number; endMs: number; acousticScore: number }>;
   rawLogits: { frames: number; vocabularySize: number; blankTokenId: number; frameDurationMs: number } | null;
   alignment: CtcForcedAlignmentResult;
   performance: {
@@ -471,8 +481,15 @@ function unavailable(
     targetTokenMapping: options.targetTokenMapping ?? [],
     upstreamTilawaResult: null,
     detectedRange: verses.length ? { startVerseKey: verses[0]!.verseKey, endVerseKey: verses.at(-1)!.verseKey, source: "known-canonical-passage" } : null,
-    confidence: null,
+    upstreamTilawaDetectedPassage: null,
+    upstreamTilawaConfidence: null,
+    forcedAlignmentMeanScore: null,
     greedyTranscript: "",
+    frameCount: null,
+    frameDurationMs: null,
+    combinedTargetTokenCount: 0,
+    alignmentComplete: false,
+    ayahTimings: [],
     rawLogits: null,
     alignment: { status: "unavailable", reason, canonicalWords: canonicalCtcWords(verses), targetTokens: [], words: [], verses: [], pauses: [], audibleRepetitions: [], frameCount: 0, frameDurationMs: 0 },
     performance: {
@@ -570,7 +587,7 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
       });
       const alignmentMs = Math.round(performance.now() - alignmentStartedAt);
       const greedyTranscript = greedyDecode(output.data, frames, vocabularySize, loaded.assets.vocabulary);
-      const confidence = alignment.status === "complete" && alignment.words.length
+      const forcedAlignmentMeanScore = alignment.status === "complete" && alignment.words.length
         ? Number((alignment.words.reduce((sum, word) => sum + word.confidence, 0) / alignment.words.length).toFixed(4))
         : null;
       return {
@@ -586,9 +603,19 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
         targetValidation: encoded.targetValidation,
         targetTokenMapping: encoded.targetTokenMapping,
         upstreamTilawaResult,
+        upstreamTilawaDetectedPassage: upstreamTilawaResult.detectedPassage,
+        upstreamTilawaConfidence: upstreamTilawaResult.confidence,
         detectedRange: verses.length ? { startVerseKey: verses[0]!.verseKey, endVerseKey: verses.at(-1)!.verseKey, source: "known-canonical-passage" } : null,
-        confidence,
+        forcedAlignmentMeanScore,
         greedyTranscript,
+        frameCount: frames,
+        frameDurationMs: Number(((window.endMs - window.startMs) / frames).toFixed(4)),
+        combinedTargetTokenCount: encoded.targetTokens.length,
+        alignmentComplete: alignment.status === "complete",
+        ayahTimings: alignment.verses.map((verse) => {
+          const words = alignment.words.filter((word) => word.verseKey === verse.verseKey);
+          return { verseKey: verse.verseKey, startMs: verse.startMs, endMs: verse.endMs, acousticScore: words.length ? Number((words.reduce((sum, word) => sum + word.alignmentScore, 0) / words.length).toFixed(4)) : 0 };
+        }),
         rawLogits: { frames, vocabularySize, blankTokenId: BLANK_TOKEN_ID, frameDurationMs: Number(((window.endMs - window.startMs) / frames).toFixed(4)) },
         alignment,
         performance: {

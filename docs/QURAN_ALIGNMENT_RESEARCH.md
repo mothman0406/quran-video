@@ -220,7 +220,7 @@ honestly report. `UNKNOWN` is not a pass.
 
 | Fixture | Human truth | Production / current evidence | Darten | FastConformer | Phoneme | Status |
 | --- | --- | --- | --- | --- | --- | --- |
-| 6:74–77 | approximate starts: 9,500 / 21,000 / 32,000 / 44,832 ms | supplied current: 9,660 / 28,608 / 40,753 / 50,598; existing evidence shadow: 9,660 / 21,696 / 32,064 / 44,832 | known low-confidence drift | not run: source media absent | not prototyped | approximate only |
+| 6:74–77 | approximate starts: 9,500 / 21,000 / 32,000 / 44,832 ms | supplied current: 9,660 / 28,608 / 40,753 / 50,598; existing evidence shadow: 9,660 / 21,696 / 32,064 / 44,832 | known low-confidence drift | real browser run complete: 9,600 / 21,668 / 31,978 / 44,765 ms; upstream Tilawa detects 6:74–77 at 0.9754 | not prototyped | one real fixture; approximate reference only |
 | 93:1–5 | existing manual/debug truth in test shape | starts 1,640 / 2,670 / 4,000 / 9,420 / 14,640 ms | no real export | not run: media absent | not prototyped | no external human-label artifact |
 | 3:33–35 | UNKNOWN | passage-completion regression only | no real export | not run: media absent | not prototyped | identity coverage, not timing benchmark |
 | 69:19–32 | UNKNOWN | passage correct; timing uncertain | 12/14 starts were weak CTC-derived | not run: source media absent | not prototyped | no ground truth |
@@ -230,9 +230,20 @@ median/p90/max 7,608/8,753/8,753 ms and evidence-weighted shadow
 160/696/696 ms. This must not be compared to a future FastConformer result
 until it runs on the same media with immutable human labels.
 
+The first successful real FastConformer browser run used the 66,083 ms
+Surah 6:74–77 recording. Its raw logits were 698 frames with 1,025 vocabulary
+entries, blank ID 1,024, and approximately 79.9198 ms per frame. The custom
+forced-path mean score (about 0.0347) is not a calibrated probability and must
+not be compared to the upstream Tilawa passage confidence of 0.9754.
+
 `npm run evaluate:real -- <alignment-debug.json> --labels=<labels.json>` now
-emits per-ayah rows and median/p90/max/missing/structural-invalid metrics for
-production, Whisper evidence, Darten, FastConformer, and the existing shadow.
+emits a `REAL ALIGNMENT COMPARISON` row per ayah and
+medianAbsoluteErrorMs/p90AbsoluteErrorMs/maxAbsoluteErrorMs,
+missingBoundaryCount, and structuralFailureCount for production, Darten,
+FastConformer, and the existing shadow. `src/lib/recognition/real-evaluation-registry.ts`
+keeps the four planned recording passages and their truth state separate from
+timing logic. It labels the phoneme approach as unprototyped instead of
+inventing a score.
 It labels the phoneme approach as unprototyped instead of inventing a score.
 
 ## Recommended direction and simplification gate
