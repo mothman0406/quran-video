@@ -46,6 +46,20 @@ test("CTC pause association happens after canonical word alignment", () => {
   assert.ok(result.pauses.some((pause) => pause.canonicalWordBefore === 2 && pause.canonicalWordAfter === 3 && pause.isAyahBoundary));
 });
 
+test("optional prelude tokens never own the first canonical word timing", () => {
+  const canonical = canonicalCtcWords([{ verseKey: "93:1", text: "والضحي" }]);
+  const result = forceAlignCtc(canonical, [
+    { tokenId: 1, token: "▁بس", owner: "optional-prelude" },
+    { tokenId: 2, token: "▁وال", globalWordIndex: 1, owner: "canonical" },
+    { tokenId: 3, token: "ضحي", globalWordIndex: 1, owner: "canonical" },
+  ], logitsFor([1, 2, 3], 4), { blankTokenId: 0, startMs: 0, endMs: 300, frameExactEndpoints: true });
+  assert.equal(result.status, "complete");
+  assert.equal(result.words[0]?.startMs, 100, "the canonical ayah starts at its own first acoustic token");
+  assert.deepEqual(result.optionalPreludeTiming, { startMs: 0, endMs: 100 });
+  assert.equal(result.firstCanonicalTokenFrame, 1);
+  assert.ok(Number.isFinite(result.normalizedPathScore));
+});
+
 test("connected ayat, weak edge words, long madd, and a final video cut retain complete canonical timing", () => {
   const connected = forceAlignCtc(words, tokens, logitsFor([1, 2, 3, 4, 5, 6]), { blankTokenId: 0, startMs: 4_000, endMs: 4_600, finalSpeechEndMs: 4_600 });
   assert.equal(connected.status, "complete");

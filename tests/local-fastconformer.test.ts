@@ -36,6 +36,7 @@ test("FastConformer shadow builds exact known-passage BPE targets with canonical
   );
   assert.deepEqual(encoded.canonicalWords.map((word) => word.alignmentText), ["السلام", "عليكم"]);
   assert.deepEqual(encoded.targetTokens.map((token) => [token.token, token.globalWordIndex]), [["▁السلام", 1], ["▁علي", 2], ["كم", 2]]);
+  assert.equal(encoded.optionalPreludeTokens.length, 0);
 });
 
 test("FastConformer shadow preserves Tilawa table token 0 even though vocab labels it <unk>", () => {
@@ -46,7 +47,7 @@ test("FastConformer shadow preserves Tilawa table token 0 even though vocab labe
     { "0": "<unk>", "1": "ة", "10": "▁", "11": "▁واذ", "1024": "<blank>" },
   );
   assert.deepEqual(encoded.targetTokens.map((token) => token.tokenId), [10, 0, 11]);
-  assert.deepEqual(encoded.targetTokenMapping.map((token) => [token.tokenId, token.canonicalWordIndex]), [[10, 1], [0, 1], [11, 1]]);
+  assert.deepEqual(encoded.targetTokenMapping.map((token) => [token.tokenId, token.owner, token.canonicalWordIndex]), [[10, "canonical", 1], [0, "canonical", 1], [11, "canonical", 1]]);
   assert.deepEqual(encoded.targetValidation, [{ verseKey: "6:74", tokenCount: 3, firstTokenIds: [10, 0, 11], lastTokenIds: [10, 0, 11], invalidTokenIds: [] }]);
 });
 
@@ -75,12 +76,18 @@ test("FastConformer shadow constructs complete 93:1–5 targets from the real pi
   });
   const first = encoded.targetTokenMapping.filter((token) => token.verseKey === "93:1");
   assert.equal(first.length, 9);
-  assert.equal(first[0]?.canonicalWordIndex, 1);
-  assert.equal(first.at(-1)?.canonicalWordIndex, 1);
+  assert.deepEqual(first.slice(0, 5).map((token) => [token.tokenId, token.owner, token.canonicalWordIndex]), [
+    [351, "optional-prelude", undefined], [7, "optional-prelude", undefined], [59, "optional-prelude", undefined], [982, "optional-prelude", undefined], [986, "optional-prelude", undefined],
+  ]);
+  assert.deepEqual(first.slice(5).map((token) => [token.tokenId, token.owner, token.canonicalWordIndex]), [
+    [63, "canonical", 1], [47, "canonical", 1], [29, "canonical", 1], [2, "canonical", 1],
+  ]);
+  assert.equal(encoded.optionalPreludeLexicalText, "بسم الله الرحمن الرحيم");
+  assert.deepEqual(encoded.optionalPreludeTokens.map((token) => token.tokenId), [351, 7, 59, 982, 986]);
   assert.equal(encoded.canonicalWords.find((word) => word.verseKey === "93:1")?.alignmentText, "والضحي");
   for (const verseKey of ["93:1", "93:2", "93:3", "93:4", "93:5"]) {
     const wordCount = encoded.canonicalWords.filter((word) => word.verseKey === verseKey).length;
-    const owners = new Set(encoded.targetTokenMapping.filter((token) => token.verseKey === verseKey).map((token) => token.canonicalWordIndex));
+    const owners = new Set(encoded.targetTokenMapping.filter((token) => token.verseKey === verseKey && token.owner === "canonical").map((token) => token.canonicalWordIndex));
     assert.deepEqual([...owners], Array.from({ length: wordCount }, (_, index) => index + 1), verseKey);
     assert.ok(encoded.targetTokenMapping.filter((token) => token.verseKey === verseKey).length > 0, verseKey);
   }

@@ -49,9 +49,10 @@ export type FastConformerTargetToken = {
   tokenId: number;
   token: string;
   verseKey: string;
-  /** Canonical ownership is reconstructed from lexical text, not BPE markers. */
-  canonicalWordIndex: number;
-  globalWordIndex: number;
+  owner: "canonical" | "optional-prelude";
+  /** Set only when this target token belongs to a selected Quran word. */
+  canonicalWordIndex?: number;
+  globalWordIndex?: number;
 };
 export type FastConformerTargetValidation = {
   verseKey: string;
@@ -126,6 +127,18 @@ export type FastConformerShadowResult = {
   vocabSize: number | null;
   targetValidation: FastConformerTargetValidation[];
   targetTokenMapping: FastConformerTargetToken[];
+  optionalPrelude: {
+    available: boolean;
+    lexicalText: string;
+    tokenIds: number[];
+    candidateWithoutPreludeScore: number | null;
+    candidateWithPreludeScore: number | null;
+    selected: "present" | "absent";
+    startMs: number | null;
+    endMs: number | null;
+  };
+  firstCanonicalTokenFrame: number | null;
+  firstCanonicalWordStartMs: number | null;
   /** Present only in development debug when a target could not be constructed. */
   targetConstructionFailure?: FastConformerTargetConstructionFailure;
   upstreamTilawaResult: UpstreamTilawaResult | null;
@@ -464,11 +477,13 @@ export function encodeFastConformerWords(
   tokenTable: TokenTable,
   vocabulary: Vocabulary,
   tilawaQuranText: TilawaQuranText = {},
-): { canonicalWords: CtcCanonicalWord[]; targetTokens: CtcTargetToken[]; targetTokenMapping: FastConformerTargetToken[]; targetValidation: FastConformerTargetValidation[] } {
+): { canonicalWords: CtcCanonicalWord[]; targetTokens: CtcTargetToken[]; optionalPreludeTokens: CtcTargetToken[]; targetTokenMapping: FastConformerTargetToken[]; targetValidation: FastConformerTargetValidation[]; optionalPreludeLexicalText: string } {
   const words = canonicalWords.map((word) => ({ ...word, alignmentText: normalizeTilawaArabic(word.canonicalArabic) }));
   const targetTokens: CtcTargetToken[] = [];
+  const optionalPreludeTokens: CtcTargetToken[] = [];
   const targetTokenMapping: FastConformerTargetToken[] = [];
   const targetValidation: FastConformerTargetValidation[] = [];
+  let optionalPreludeLexicalText = "";
   const vocabSize = vocabularySize(vocabulary);
   for (const verseKey of [...new Set(words.map((word) => word.verseKey))]) {
     const verseWords = words.filter((word) => word.verseKey === verseKey);
@@ -524,22 +539,34 @@ export function encodeFastConformerWords(
     if (observedWords.size !== verseWords.length || verseWords.some((_, index) => !observedWords.has(index + 1))) {
       throw new Error(`Tilawa BPE target has incomplete canonical coverage for ${verseKey}.`);
     }
+    // Non-lexical BPE pieces (including Tilawa's published token 0) belong to
+    // the canonical target when there is no lexical prefix. Only a real
+    // lexical span before the selected Quran text forms an optional prelude.
+    const firstCanonicalPieceIndex = canonicalOffset > 0 ? lexicalOwners.findIndex((owner) => owner !== null) : 0;
+    if (firstCanonicalPieceIndex > 0) {
+      optionalPreludeLexicalText += `${normalizeTilawaArabic(pieces.slice(0, firstCanonicalPieceIndex).map((piece) => piece.token).join("").replaceAll(WORD_PREFIX, " "))} `;
+    }
     const verseMapping = pieces.map((piece, index) => {
+      if (index < firstCanonicalPieceIndex) {
+        return { tokenId: piece.tokenId, token: piece.token, verseKey, owner: "optional-prelude" as const };
+      }
       const canonicalWordIndex = lexicalOwners[index]
         ?? lexicalOwners.slice(index + 1).find((owner): owner is number => owner !== null)
-        ?? [...lexicalOwners.slice(0, index)].reverse().find((owner): owner is number => owner !== null);
+        ?? [...lexicalOwners.slice(firstCanonicalPieceIndex, index)].reverse().find((owner): owner is number => owner !== null);
       if (canonicalWordIndex === undefined) throw new Error(`Tilawa BPE target has no canonical word owner for ${verseKey}.`);
-      return { tokenId: piece.tokenId, token: piece.token, verseKey, canonicalWordIndex, globalWordIndex: verseWords[canonicalWordIndex - 1]!.globalWordIndex };
+      return { tokenId: piece.tokenId, token: piece.token, verseKey, owner: "canonical" as const, canonicalWordIndex, globalWordIndex: verseWords[canonicalWordIndex - 1]!.globalWordIndex };
     });
-    if (verseMapping.some((mapped, index) => index > 0 && mapped.canonicalWordIndex < verseMapping[index - 1]!.canonicalWordIndex)) {
+    const canonicalMapping = verseMapping.filter((mapped) => mapped.owner === "canonical");
+    if (canonicalMapping.some((mapped, index) => index > 0 && mapped.canonicalWordIndex! < canonicalMapping[index - 1]!.canonicalWordIndex!)) {
       throw new Error(`Tilawa BPE target has non-monotonic canonical word ownership for ${verseKey}.`);
     }
     for (const mapped of verseMapping) {
       targetTokenMapping.push(mapped);
-      targetTokens.push({ tokenId: mapped.tokenId, token: mapped.token, globalWordIndex: mapped.globalWordIndex });
+      if (mapped.owner === "optional-prelude") optionalPreludeTokens.push({ tokenId: mapped.tokenId, token: mapped.token, owner: "optional-prelude" });
+      else targetTokens.push({ tokenId: mapped.tokenId, token: mapped.token, globalWordIndex: mapped.globalWordIndex, owner: "canonical" });
     }
   }
-  return { canonicalWords: words, targetTokens, targetTokenMapping, targetValidation };
+  return { canonicalWords: words, targetTokens, optionalPreludeTokens, targetTokenMapping, targetValidation, optionalPreludeLexicalText: optionalPreludeLexicalText.trim() };
 }
 
 function greedyDecode(values: Float32Array, frames: number, vocabularySize: number, vocabulary: Vocabulary) {
@@ -583,6 +610,9 @@ function unavailable(
     vocabSize: options.vocabSize ?? null,
     targetValidation: options.targetValidation ?? [],
     targetTokenMapping: options.targetTokenMapping ?? [],
+    optionalPrelude: { available: false, lexicalText: "", tokenIds: [], candidateWithoutPreludeScore: null, candidateWithPreludeScore: null, selected: "absent", startMs: null, endMs: null },
+    firstCanonicalTokenFrame: null,
+    firstCanonicalWordStartMs: null,
     targetConstructionFailure: options.targetConstructionFailure,
     upstreamTilawaResult: null,
     detectedRange: verses.length ? { startVerseKey: verses[0]!.verseKey, endVerseKey: verses.at(-1)!.verseKey, source: "known-canonical-passage" } : null,
@@ -683,13 +713,29 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
       const upstreamTilawaResult = await runUpstreamTilawaOracle(window.audio, output.data, frames, vocabularySize, loaded.assets);
       failureStage = "forced-alignment";
       const alignmentStartedAt = performance.now();
-      const alignment = forceAlignCtc(encoded.canonicalWords, encoded.targetTokens, { values: output.data, frames, vocabularySize }, {
+      const alignmentWithoutPrelude = forceAlignCtc(encoded.canonicalWords, encoded.targetTokens, { values: output.data, frames, vocabularySize }, {
         blankTokenId: BLANK_TOKEN_ID,
         startMs: window.startMs,
         endMs: window.endMs,
         finalSpeechEndMs: window.endMs,
         frameExactEndpoints: true,
       });
+      const alignmentWithPrelude = encoded.optionalPreludeTokens.length
+        ? forceAlignCtc(encoded.canonicalWords, [...encoded.optionalPreludeTokens, ...encoded.targetTokens], { values: output.data, frames, vocabularySize }, {
+          blankTokenId: BLANK_TOKEN_ID,
+          startMs: window.startMs,
+          endMs: window.endMs,
+          finalSpeechEndMs: window.endMs,
+          frameExactEndpoints: true,
+        })
+        : null;
+      // A CTC path score is a sum over every frame. Compare its mean log
+      // posterior per frame so adding optional target labels cannot win merely
+      // because it changes the raw path length.
+      const withoutPreludeScore = alignmentWithoutPrelude.status === "complete" ? alignmentWithoutPrelude.normalizedPathScore ?? null : null;
+      const withPreludeScore = alignmentWithPrelude?.status === "complete" ? alignmentWithPrelude.normalizedPathScore ?? null : null;
+      const preludePresent = withPreludeScore !== null && (withoutPreludeScore === null || withPreludeScore > withoutPreludeScore);
+      const alignment = preludePresent ? alignmentWithPrelude! : alignmentWithoutPrelude;
       const alignmentMs = Math.round(performance.now() - alignmentStartedAt);
       const greedyTranscript = greedyDecode(output.data, frames, vocabularySize, loaded.assets.vocabulary);
       const forcedAlignmentMeanScore = alignment.status === "complete" && alignment.words.length
@@ -707,6 +753,18 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
         vocabSize: vocabularySize,
         targetValidation: encoded.targetValidation,
         targetTokenMapping: encoded.targetTokenMapping,
+        optionalPrelude: {
+          available: encoded.optionalPreludeTokens.length > 0,
+          lexicalText: encoded.optionalPreludeLexicalText,
+          tokenIds: encoded.optionalPreludeTokens.map((token) => token.tokenId),
+          candidateWithoutPreludeScore: withoutPreludeScore,
+          candidateWithPreludeScore: withPreludeScore,
+          selected: preludePresent ? "present" : "absent",
+          startMs: preludePresent ? alignment.optionalPreludeTiming?.startMs ?? null : null,
+          endMs: preludePresent ? alignment.optionalPreludeTiming?.endMs ?? null : null,
+        },
+        firstCanonicalTokenFrame: alignment.status === "complete" ? alignment.firstCanonicalTokenFrame ?? null : null,
+        firstCanonicalWordStartMs: alignment.status === "complete" ? alignment.words[0]?.startMs ?? null : null,
         upstreamTilawaResult,
         upstreamTilawaDetectedPassage: upstreamTilawaResult.detectedPassage,
         upstreamTilawaConfidence: upstreamTilawaResult.confidence,

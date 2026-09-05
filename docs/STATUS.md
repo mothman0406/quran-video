@@ -1,5 +1,27 @@
 # Status
 
+## Current milestone: Optional FastConformer leading basmalah
+
+Complete:
+
+- Reclassified any lexical Tilawa-table prefix before the selected canonical
+  Quran span as an explicit optional, non-canonical prelude. In the pinned
+  93:1 table this is `بسم الله الرحمن الرحيم`; its five BPE tokens no longer
+  receive canonical-word-one ownership.
+- After one FastConformer inference, the shadow now evaluates canonical-only
+  and prelude-plus-canonical forced targets. It compares their mean CTC
+  forced-path log posterior per acoustic frame, rather than a raw summed path
+  score, and exposes both diagnostics plus the selected prelude timing.
+- Canonical ayah timing remains diagnostic-only and starts at the first
+  canonical token in either candidate. No production timing, passage identity,
+  Whisper, Darten, VAD, `VerseAlignment`, or `CaptionSegment` code changed.
+- Added regression coverage for the pinned 93:1 token ownership and for a
+  forced prelude path whose Quran word one begins after the prelude.
+
+Verification: `npm test` (170 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. The production build retains the
+existing non-fatal VAD ONNX Runtime dynamic-require warning.
+
 ## Current milestone: FastConformer Surah 93 target construction
 
 Complete:

@@ -18,7 +18,9 @@ export type CtcCanonicalWord = {
 export type CtcTargetToken = {
   tokenId: number;
   token: string;
-  globalWordIndex: number;
+  /** Required for canonical tokens; omitted for an optional non-Quran prelude. */
+  globalWordIndex?: number;
+  owner?: "canonical" | "optional-prelude";
 };
 
 export type CtcRepeat = {
@@ -80,6 +82,11 @@ export type CtcForcedAlignmentResult = {
   audibleRepetitions: readonly CtcAudibleRepetition[];
   frameCount: number;
   frameDurationMs: number;
+  /** Mean forced-path log posterior per acoustic frame. Unlike a raw summed
+   * path score, this is comparable across targets of different lengths. */
+  normalizedPathScore?: number;
+  firstCanonicalTokenFrame?: number;
+  optionalPreludeTiming?: { startMs: number; endMs: number };
   /** Free CTC decode captured before any canonical target is forced through
    * the trellis. It is diagnostic evidence for whether forced timing is safe. */
   greedyDecode?: {
@@ -148,7 +155,7 @@ export function expandCtcTargetWithRepeats(
     const nextWordIndex = tokens[tokenIndex + 1]?.globalWordIndex;
     // Insert only after the final character token of the canonical word.
     for (const repeat of valid.filter((item) => item.afterWordIndex === token.globalWordIndex && nextWordIndex !== token.globalWordIndex)) {
-      for (const repeated of tokens.filter((item) => item.globalWordIndex >= repeat.startWordIndex && item.globalWordIndex <= repeat.endWordIndex)) {
+      for (const repeated of tokens.filter((item) => item.owner !== "optional-prelude" && item.globalWordIndex !== undefined && item.globalWordIndex >= repeat.startWordIndex && item.globalWordIndex <= repeat.endWordIndex)) {
         repeatedTokenIndexes.add(expanded.length);
         expanded.push(repeated);
       }
@@ -193,7 +200,8 @@ export function viterbiCtcPath(
 ): ViterbiPath | null {
   if (!tokens.length || logits.frames < tokens.length || logits.values.length < logits.frames * logits.vocabularySize) return null;
   if (!finiteInteger(blankTokenId) || blankTokenId < 0 || blankTokenId >= logits.vocabularySize) return null;
-  if (tokens.some((token) => !finiteInteger(token.tokenId) || token.tokenId < 0 || token.tokenId >= logits.vocabularySize)) return null;
+  if (tokens.some((token) => !finiteInteger(token.tokenId) || token.tokenId < 0 || token.tokenId >= logits.vocabularySize
+    || (token.owner !== "optional-prelude" && (!finiteInteger(token.globalWordIndex ?? NaN) || (token.globalWordIndex ?? 0) < 1)))) return null;
   const { labels } = expandTarget(tokens, blankTokenId);
   const stateCount = labels.length;
   let previous = new Float64Array(stateCount).fill(NEGATIVE_INFINITY);
@@ -269,8 +277,14 @@ export function forceAlignCtc(
   }
   if (occurrenceFrames.size !== expanded.tokens.length) return { status: "failed", reason: "At least one canonical CTC token received no acoustic frame.", canonicalWords, targetTokens: tokens, words: [], verses: [], pauses: [], audibleRepetitions: [], frameCount: logits.frames, frameDurationMs: 0 };
   const byWord = new Map<number, Array<{ frame: number; score: number; repeated: boolean }>>();
+  const preludeFrames: number[] = [];
   for (const [tokenIndex, frames] of occurrenceFrames) {
     const token = expanded.tokens[tokenIndex]!;
+    if (token.owner === "optional-prelude") {
+      preludeFrames.push(...frames);
+      continue;
+    }
+    if (token.globalWordIndex === undefined) throw new Error("Canonical CTC token has no canonical word owner.");
     const items = byWord.get(token.globalWordIndex) ?? [];
     for (const frame of frames) items.push({ frame, score: logProbability(logits, frame, token.tokenId), repeated: expanded.repeatedTokenIndexes.has(tokenIndex) });
     byWord.set(token.globalWordIndex, items);
@@ -312,7 +326,12 @@ export function forceAlignCtc(
     if (after.startMs - before.endMs < 80) continue;
     pauses.push({ startMs: before.endMs, endMs: after.startMs, durationMs: after.startMs - before.endMs, canonicalWordBefore: before.globalWordIndex, canonicalWordAfter: after.globalWordIndex, verseKey: before.verseKey, isAyahBoundary: before.verseKey !== after.verseKey });
   }
-  return { status: "complete", canonicalWords, targetTokens: tokens, words, verses, pauses, audibleRepetitions, frameCount: logits.frames, frameDurationMs: Number(((options.endMs - options.startMs) / Math.max(1, logits.frames)).toFixed(4)), performance: { viterbiMs: Math.round(performance.now() - startedAt) } };
+  const firstCanonicalTokenFrame = Math.min(...[...byWord.values()].flatMap((items) => items.filter((item) => !item.repeated).map((item) => item.frame)));
+  const optionalPreludeTiming = preludeFrames.length ? {
+    startMs: msAtFrame(Math.min(...preludeFrames), logits.frames, options.startMs, options.endMs),
+    endMs: msAtFrame(Math.max(...preludeFrames) + 1, logits.frames, options.startMs, options.endMs),
+  } : undefined;
+  return { status: "complete", canonicalWords, targetTokens: tokens, words, verses, pauses, audibleRepetitions, frameCount: logits.frames, frameDurationMs: Number(((options.endMs - options.startMs) / Math.max(1, logits.frames)).toFixed(4)), normalizedPathScore: Number((path.score / logits.frames).toFixed(6)), firstCanonicalTokenFrame, optionalPreludeTiming, performance: { viterbiMs: Math.round(performance.now() - startedAt) } };
 }
 
 /** Builds complete display words from the fixed identified verse range. */
