@@ -26,15 +26,35 @@ const FASTCONFORMER_BASE_URL = `https://huggingface.co/${FASTCONFORMER_SHADOW_MO
 export const FASTCONFORMER_SHADOW_MODEL_URL = `${FASTCONFORMER_BASE_URL}/${FASTCONFORMER_SHADOW_MODEL_ARTIFACT}`;
 const VOCAB_URL = `${FASTCONFORMER_BASE_URL}/vocab.json`;
 const TOKEN_TABLE_URL = `${FASTCONFORMER_BASE_URL}/quran_ctc_tokens.json`;
-const CACHE_NAME = "quran-video-fastconformer-shadow-v1";
+const CACHE_NAME = "quran-video-fastconformer-shadow-v2";
 const SAMPLE_RATE = 16_000;
 const BLANK_TOKEN_ID = 1_024;
 const WORD_PREFIX = "▁";
+const MAX_DOWNLOAD_ATTEMPTS = 3;
+const RETRY_BASE_MS = 1_000;
 
 type OrtTensor = { data: unknown; dims: readonly number[] };
 type TokenTable = Record<string, number[]>;
 type Vocabulary = Record<string, string>;
-type FastConformerAssets = { model: ArrayBuffer; vocabulary: Vocabulary; tokenTable: TokenTable; cacheStatus: "cold-download" | "browser-cache"; downloadBytes: number };
+export type FastConformerAssetDiagnostic = {
+  assetUrlHost: string;
+  httpStatus: number | null;
+  attemptCount: number;
+  retryAfterMs: number | null;
+  cacheStatus: "cold-download" | "browser-cache" | "cache-unavailable";
+  downloadBytes: number;
+  downloadMs: number;
+};
+export type FastConformerAsset = { buffer: ArrayBuffer; diagnostic: FastConformerAssetDiagnostic };
+type FastConformerAssets = {
+  model: ArrayBuffer;
+  vocabulary: Vocabulary;
+  tokenTable: TokenTable;
+  cacheStatus: FastConformerAssetDiagnostic["cacheStatus"];
+  downloadBytes: number;
+  downloadMs: number;
+  modelDiagnostic: FastConformerAssetDiagnostic;
+};
 type LoadedFastConformer = {
   session: { inputNames: readonly string[]; outputNames: readonly string[]; run(input: Record<string, unknown>): Promise<Record<string, OrtTensor>> };
   ort: { Tensor: new (type: "float32" | "int64", data: Float32Array | BigInt64Array, dims: readonly number[]) => unknown };
@@ -56,7 +76,13 @@ export type FastConformerShadowResult = {
     modelArtifactBytes: number;
     supportingAssetBytes: number;
     modelDownloadBytes: number;
-    cacheStatus: "cold-download" | "browser-cache" | "memory" | "unavailable";
+    cacheStatus: "cold-download" | "browser-cache" | "cache-unavailable" | "memory" | "unavailable";
+    assetUrlHost?: string;
+    httpStatus?: number | null;
+    attemptCount?: number;
+    retryAfterMs?: number | null;
+    downloadBytes?: number;
+    downloadMs?: number;
     backend?: "webgpu" | "wasm";
     coldModelLoadMs?: number;
     warmModelLoadMs?: number;
@@ -68,6 +94,7 @@ export type FastConformerShadowResult = {
 export type FastConformerShadowRunner = (verses: readonly QuranCorpusVerse[], matches: readonly { startMs: number; endMs: number }[]) => Promise<FastConformerShadowResult>;
 
 let sharedModelPromise: Promise<LoadedFastConformer> | null = null;
+const sharedAssetPromises = new Map<string, Promise<FastConformerAsset>>();
 
 function passageWindow(audio: Float32Array, speechRegions: readonly VadSpeechRegion[], matches: readonly { startMs: number; endMs: number }[]) {
   const first = matches[0];
@@ -82,25 +109,136 @@ function passageWindow(audio: Float32Array, speechRegions: readonly VadSpeechReg
   return endSample > startSample ? { audio: audio.slice(startSample, endSample), startMs, endMs } : null;
 }
 
-async function fetchCached(url: string): Promise<{ buffer: ArrayBuffer; cacheHit: boolean }> {
-  const cache = typeof caches === "undefined" ? null : await caches.open(CACHE_NAME);
+class FastConformerAssetError extends Error {
+  readonly diagnostic: FastConformerAssetDiagnostic;
+
+  constructor(message: string, diagnostic: FastConformerAssetDiagnostic) {
+    super(message);
+    this.diagnostic = diagnostic;
+  }
+}
+
+function retryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.round(seconds * 1_000);
+  const dateMs = Date.parse(value);
+  return Number.isNaN(dateMs) ? null : Math.max(0, dateMs - Date.now());
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+async function browserCache(): Promise<Cache | null> {
+  if (typeof caches === "undefined") return null;
+  try {
+    return await caches.open(CACHE_NAME);
+  } catch {
+    return null;
+  }
+}
+
+function assetDiagnostic(url: string, overrides: Partial<FastConformerAssetDiagnostic> = {}): FastConformerAssetDiagnostic {
+  return {
+    assetUrlHost: new URL(url).host,
+    httpStatus: null,
+    attemptCount: 0,
+    retryAfterMs: null,
+    cacheStatus: "cold-download",
+    downloadBytes: 0,
+    downloadMs: 0,
+    ...overrides,
+  };
+}
+
+async function loadPinnedAsset(url: string, expectedBytes: number): Promise<FastConformerAsset> {
+  const cache = await browserCache();
   const cached = cache ? await cache.match(url) : undefined;
-  if (cached) return { buffer: await cached.arrayBuffer(), cacheHit: true };
-  const response = await fetch(url, { cache: "no-store" });
-  if (!response.ok) throw new Error(`FastConformer asset download failed (${response.status} ${response.statusText}).`);
-  if (cache) await cache.put(url, response.clone());
-  return { buffer: await response.arrayBuffer(), cacheHit: false };
+  if (cached) {
+    const buffer = await cached.arrayBuffer();
+    if (buffer.byteLength === expectedBytes) {
+      return { buffer, diagnostic: assetDiagnostic(url, { cacheStatus: "browser-cache" }) };
+    }
+    await cache?.delete(url);
+  }
+
+  const downloadStartedAt = performance.now();
+  let lastStatus: number | null = null;
+  let lastRetryAfterMs: number | null = null;
+  let attempts = 0;
+  for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt += 1) {
+    attempts = attempt;
+    const response = await fetch(url, { cache: "no-store" });
+    lastStatus = response.status;
+    if (response.status === 429) lastRetryAfterMs = retryAfterMs(response.headers.get("Retry-After"));
+    if (response.ok) {
+      const buffer = await response.arrayBuffer();
+      const diagnostic = assetDiagnostic(url, {
+        assetUrlHost: new URL(response.url || url).host,
+        httpStatus: response.status,
+        attemptCount: attempt,
+        retryAfterMs: lastRetryAfterMs,
+        cacheStatus: cache ? "cold-download" : "cache-unavailable",
+        downloadBytes: buffer.byteLength,
+        downloadMs: Math.round(performance.now() - downloadStartedAt),
+      });
+      if (buffer.byteLength !== expectedBytes) {
+        throw new FastConformerAssetError(`FastConformer asset size validation failed for ${url}: expected ${expectedBytes} bytes, received ${buffer.byteLength}.`, diagnostic);
+      }
+      if (cache) {
+        try {
+          await cache.put(url, new Response(buffer.slice(0), { headers: { "content-type": response.headers.get("content-type") ?? "application/octet-stream" } }));
+        } catch {
+          diagnostic.cacheStatus = "cache-unavailable";
+        }
+      }
+      return { buffer, diagnostic };
+    }
+    if (response.status !== 429 || attempt === MAX_DOWNLOAD_ATTEMPTS) break;
+    await wait(lastRetryAfterMs ?? RETRY_BASE_MS * 2 ** (attempt - 1));
+  }
+  const diagnostic = assetDiagnostic(url, {
+    httpStatus: lastStatus,
+    attemptCount: attempts,
+    retryAfterMs: lastRetryAfterMs,
+    cacheStatus: cache ? "cold-download" : "cache-unavailable",
+    downloadMs: Math.round(performance.now() - downloadStartedAt),
+  });
+  throw new FastConformerAssetError(`FastConformer asset download failed (${lastStatus ?? "network"}).`, diagnostic);
+}
+
+/** Loads one immutable public Tilawa artifact with a cache-first, module-single-flight request. */
+export function loadFastConformerAsset(url: string, expectedBytes: number): Promise<FastConformerAsset> {
+  const existing = sharedAssetPromises.get(url);
+  if (existing) return existing;
+  const loading = loadPinnedAsset(url, expectedBytes).catch((error) => {
+    sharedAssetPromises.delete(url);
+    throw error;
+  });
+  sharedAssetPromises.set(url, loading);
+  return loading;
 }
 
 async function loadAssets(): Promise<FastConformerAssets> {
-  const [model, vocabulary, tokenTable] = await Promise.all([fetchCached(FASTCONFORMER_SHADOW_MODEL_URL), fetchCached(VOCAB_URL), fetchCached(TOKEN_TABLE_URL)]);
-  const cacheHit = model.cacheHit && vocabulary.cacheHit && tokenTable.cacheHit;
+  // Hugging Face's unauthenticated resolver can reject bursts while its queue
+  // is full. Keep cold resolver traffic to one pinned asset at a time.
+  const model = await loadFastConformerAsset(FASTCONFORMER_SHADOW_MODEL_URL, FASTCONFORMER_SHADOW_MODEL_BYTES);
+  const vocabulary = await loadFastConformerAsset(VOCAB_URL, FASTCONFORMER_SHADOW_VOCAB_BYTES);
+  const tokenTable = await loadFastConformerAsset(TOKEN_TABLE_URL, FASTCONFORMER_SHADOW_TOKEN_TABLE_BYTES);
+  const cacheStatus = model.diagnostic.cacheStatus === "browser-cache" && vocabulary.diagnostic.cacheStatus === "browser-cache" && tokenTable.diagnostic.cacheStatus === "browser-cache"
+    ? "browser-cache"
+    : model.diagnostic.cacheStatus === "cache-unavailable" || vocabulary.diagnostic.cacheStatus === "cache-unavailable" || tokenTable.diagnostic.cacheStatus === "cache-unavailable"
+      ? "cache-unavailable"
+      : "cold-download";
   return {
     model: model.buffer,
     vocabulary: JSON.parse(new TextDecoder().decode(vocabulary.buffer)) as Vocabulary,
     tokenTable: JSON.parse(new TextDecoder().decode(tokenTable.buffer)) as TokenTable,
-    cacheStatus: cacheHit ? "browser-cache" : "cold-download",
-    downloadBytes: (model.cacheHit ? 0 : model.buffer.byteLength) + (vocabulary.cacheHit ? 0 : vocabulary.buffer.byteLength) + (tokenTable.cacheHit ? 0 : tokenTable.buffer.byteLength),
+    cacheStatus,
+    downloadBytes: model.diagnostic.downloadBytes + vocabulary.diagnostic.downloadBytes + tokenTable.diagnostic.downloadBytes,
+    downloadMs: Math.max(model.diagnostic.downloadMs, vocabulary.diagnostic.downloadMs, tokenTable.diagnostic.downloadMs),
+    modelDiagnostic: model.diagnostic,
   };
 }
 
@@ -185,7 +323,7 @@ function greedyDecode(values: Float32Array, frames: number, vocabularySize: numb
   return ids.map((id) => vocabulary[String(id)] ?? "").join("").replaceAll(WORD_PREFIX, " ").replace(/\s+/g, " ").trim();
 }
 
-function unavailable(reason: string, verses: readonly QuranCorpusVerse[], startedAt: number, analysisRunId?: string): FastConformerShadowResult {
+function unavailable(reason: string, verses: readonly QuranCorpusVerse[], startedAt: number, analysisRunId?: string, diagnostic?: FastConformerAssetDiagnostic): FastConformerShadowResult {
   return {
     status: "unavailable",
     reason,
@@ -195,7 +333,19 @@ function unavailable(reason: string, verses: readonly QuranCorpusVerse[], starte
     greedyTranscript: "",
     rawLogits: null,
     alignment: { status: "unavailable", reason, canonicalWords: canonicalCtcWords(verses), targetTokens: [], words: [], verses: [], pauses: [], audibleRepetitions: [], frameCount: 0, frameDurationMs: 0 },
-    performance: { modelArtifactBytes: FASTCONFORMER_SHADOW_MODEL_BYTES, supportingAssetBytes: FASTCONFORMER_SHADOW_TOKEN_TABLE_BYTES + FASTCONFORMER_SHADOW_VOCAB_BYTES, modelDownloadBytes: 0, cacheStatus: "unavailable", totalMs: Math.round(performance.now() - startedAt) },
+    performance: {
+      modelArtifactBytes: FASTCONFORMER_SHADOW_MODEL_BYTES,
+      supportingAssetBytes: FASTCONFORMER_SHADOW_TOKEN_TABLE_BYTES + FASTCONFORMER_SHADOW_VOCAB_BYTES,
+      modelDownloadBytes: diagnostic?.downloadBytes ?? 0,
+      cacheStatus: "unavailable",
+      assetUrlHost: diagnostic?.assetUrlHost,
+      httpStatus: diagnostic?.httpStatus,
+      attemptCount: diagnostic?.attemptCount,
+      retryAfterMs: diagnostic?.retryAfterMs,
+      downloadBytes: diagnostic?.downloadBytes ?? 0,
+      downloadMs: diagnostic?.downloadMs ?? 0,
+      totalMs: Math.round(performance.now() - startedAt),
+    },
   };
 }
 
@@ -247,6 +397,12 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
           supportingAssetBytes: FASTCONFORMER_SHADOW_TOKEN_TABLE_BYTES + FASTCONFORMER_SHADOW_VOCAB_BYTES,
           modelDownloadBytes: memoryWarm ? 0 : loaded.assets.downloadBytes,
           cacheStatus: memoryWarm ? "memory" : loaded.assets.cacheStatus,
+          assetUrlHost: loaded.assets.modelDiagnostic.assetUrlHost,
+          httpStatus: loaded.assets.modelDiagnostic.httpStatus,
+          attemptCount: loaded.assets.modelDiagnostic.attemptCount,
+          retryAfterMs: loaded.assets.modelDiagnostic.retryAfterMs,
+          downloadBytes: memoryWarm ? 0 : loaded.assets.downloadBytes,
+          downloadMs: memoryWarm ? 0 : loaded.assets.downloadMs,
           backend: loaded.backend,
           coldModelLoadMs: memoryWarm ? undefined : loadMs,
           warmModelLoadMs: memoryWarm ? loadMs : undefined,
@@ -255,7 +411,13 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
         },
       };
     } catch (error) {
-      return unavailable(error instanceof Error ? error.message : String(error), verses, startedAt, analysisRunId);
+      return unavailable(
+        error instanceof Error ? error.message : String(error),
+        verses,
+        startedAt,
+        analysisRunId,
+        error instanceof FastConformerAssetError ? error.diagnostic : undefined,
+      );
     }
   };
 }

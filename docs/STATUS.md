@@ -17,10 +17,18 @@ Complete:
   `CaptionSegment` timing.
 - Added target-round-trip and no-`+1 ms` frame-exact regression coverage, and
   expanded the real-evaluation tool to report FastConformer separately.
+- Hardened the development-only FastConformer asset path: all public assets
+  remain pinned to commit `0cd79471524bc9cfa1c9296055242a935a1873e4`, are
+  byte-validated and stored under pinned Cache API keys, and use module-level
+  single-flight loading. Cold resolver requests are serialized because a live
+  Hugging Face resolver trace returned HTTP 429 with `maximum queue size
+  reached` before the Xet CDN redirect. A 429 now honors `Retry-After` when
+  present, otherwise retries twice with deterministic 1 s/2 s backoff, and
+  reports host/status/attempt/retry/cache/byte/time diagnostics.
 - Documented the real-fixture gap honestly: no FastConformer benchmark can run
   until the actual source audio and verified human labels are supplied.
 
-Verification: `npm test` (164 passing), `npx tsc --noEmit`, `npm run lint`,
+Verification: `npm test` (166 passing), `npx tsc --noEmit`, `npm run lint`,
 `npm run build`, and `git diff --check` pass. The production build retains the
 existing non-fatal VAD ONNX Runtime dynamic-require warning. Real-browser
 FastConformer execution and human-label evaluation remain required before any
