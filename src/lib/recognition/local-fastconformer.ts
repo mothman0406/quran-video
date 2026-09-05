@@ -5,8 +5,7 @@ import {
   type CtcForcedAlignmentResult,
   type CtcTargetToken,
 } from "./ctc-forced-alignment.ts";
-import { normalizeArabic, type QuranCorpusVerse } from "./core.ts";
-import { configureVadRuntime } from "./vad.ts";
+import { hafsVerses, type QuranCorpusVerse } from "./core.ts";
 import type { VadSpeechRegion } from "./speech-regions.ts";
 
 /**
@@ -21,7 +20,13 @@ export const FASTCONFORMER_SHADOW_MODEL_ARTIFACT = "fastconformer_full_mixed.onn
 export const FASTCONFORMER_SHADOW_MODEL_BYTES = 88_307_366;
 export const FASTCONFORMER_SHADOW_TOKEN_TABLE_BYTES = 12_211_783;
 export const FASTCONFORMER_SHADOW_VOCAB_BYTES = 21_062;
-export const FASTCONFORMER_SHADOW_RUNTIME = "ONNX Runtime Web (WebGPU, then WASM fallback)";
+export const FASTCONFORMER_SHADOW_RUNTIME = "ONNX Runtime Web 1.24.2 (WASM only; Tilawa-compatible)";
+export const FASTCONFORMER_SHADOW_ORT_IMPORT = "fastconformer-onnxruntime-web/wasm";
+export const FASTCONFORMER_SHADOW_ORT_VERSION = "1.24.2";
+/** Public Tilawa release whose browser assets and core contract were audited. */
+export const FASTCONFORMER_TILAWA_RELEASE = "v0.2.0";
+export const FASTCONFORMER_SHADOW_VOCAB_REVISION = FASTCONFORMER_SHADOW_MODEL_REVISION;
+export const FASTCONFORMER_SHADOW_TOKEN_TABLE_REVISION = FASTCONFORMER_SHADOW_MODEL_REVISION;
 const FASTCONFORMER_BASE_URL = `https://huggingface.co/${FASTCONFORMER_SHADOW_MODEL}/resolve/${FASTCONFORMER_SHADOW_MODEL_REVISION}`;
 export const FASTCONFORMER_SHADOW_MODEL_URL = `${FASTCONFORMER_BASE_URL}/${FASTCONFORMER_SHADOW_MODEL_ARTIFACT}`;
 const VOCAB_URL = `${FASTCONFORMER_BASE_URL}/vocab.json`;
@@ -36,6 +41,30 @@ const RETRY_BASE_MS = 1_000;
 type OrtTensor = { data: unknown; dims: readonly number[] };
 type TokenTable = Record<string, number[]>;
 type Vocabulary = Record<string, string>;
+export type FastConformerTargetToken = {
+  tokenId: number;
+  token: string;
+  verseKey: string;
+  /** Null for upstream non-lexical entries such as the table's `<unk>` ID. */
+  canonicalWordIndex: number | null;
+  globalWordIndex: number | null;
+};
+export type FastConformerTargetValidation = {
+  verseKey: string;
+  tokenCount: number;
+  firstTokenIds: number[];
+  lastTokenIds: number[];
+  invalidTokenIds: number[];
+};
+type FastConformerFailureStage = "asset" | "target-construction" | "session-create" | "inference" | "forced-alignment";
+type UpstreamTilawaResult = {
+  status: "complete" | "unavailable";
+  transcript: string;
+  detectedPassage: { startVerseKey: string; endVerseKey: string } | null;
+  confidence: number | null;
+  tokenCount: number;
+  reason?: string;
+};
 export type FastConformerAssetDiagnostic = {
   assetUrlHost: string;
   httpStatus: number | null;
@@ -48,6 +77,7 @@ export type FastConformerAssetDiagnostic = {
 export type FastConformerAsset = { buffer: ArrayBuffer; diagnostic: FastConformerAssetDiagnostic };
 type FastConformerAssets = {
   model: ArrayBuffer;
+  modelSha256: string;
   vocabulary: Vocabulary;
   tokenTable: TokenTable;
   cacheStatus: FastConformerAssetDiagnostic["cacheStatus"];
@@ -58,14 +88,26 @@ type FastConformerAssets = {
 type LoadedFastConformer = {
   session: { inputNames: readonly string[]; outputNames: readonly string[]; run(input: Record<string, unknown>): Promise<Record<string, OrtTensor>> };
   ort: { Tensor: new (type: "float32" | "int64", data: Float32Array | BigInt64Array, dims: readonly number[]) => unknown };
-  backend: "webgpu" | "wasm";
+  backend: "wasm";
+  sessionCreateMs: number;
+  modelLoadMs: number;
   assets: FastConformerAssets;
 };
 
 export type FastConformerShadowResult = {
   status: "complete" | "unavailable" | "failed";
   reason?: string;
+  failureStage?: FastConformerFailureStage;
   analysisRunId?: string;
+  tilawaRelease: string;
+  modelRevision: string;
+  vocabRevision: string;
+  tokenTableRevision: string;
+  blankId: number;
+  vocabSize: number | null;
+  targetValidation: FastConformerTargetValidation[];
+  targetTokenMapping: FastConformerTargetToken[];
+  upstreamTilawaResult: UpstreamTilawaResult | null;
   /** This is the pre-identified canonical range, not a new identity authority. */
   detectedRange: { startVerseKey: string; endVerseKey: string; source: "known-canonical-passage" } | null;
   confidence: number | null;
@@ -84,6 +126,16 @@ export type FastConformerShadowResult = {
     downloadBytes?: number;
     downloadMs?: number;
     backend?: "webgpu" | "wasm";
+    ortImport?: string;
+    ortVersion?: string;
+    executionProvider?: "wasm";
+    wasmNumThreads?: number;
+    wasmSimd?: boolean;
+    sessionCreateMs?: number;
+    modelLoadMs?: number;
+    alignmentMs?: number;
+    modelBytes?: number;
+    modelSha256?: string;
     coldModelLoadMs?: number;
     warmModelLoadMs?: number;
     inferenceMs?: number;
@@ -115,6 +167,17 @@ class FastConformerAssetError extends Error {
   constructor(message: string, diagnostic: FastConformerAssetDiagnostic) {
     super(message);
     this.diagnostic = diagnostic;
+  }
+}
+
+class FastConformerStageError extends Error {
+  readonly stage: FastConformerFailureStage;
+  readonly diagnostic?: FastConformerAssetDiagnostic;
+
+  constructor(stage: FastConformerFailureStage, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.stage = stage;
+    this.diagnostic = cause instanceof FastConformerAssetError ? cause.diagnostic : undefined;
   }
 }
 
@@ -231,10 +294,14 @@ async function loadAssets(): Promise<FastConformerAssets> {
     : model.diagnostic.cacheStatus === "cache-unavailable" || vocabulary.diagnostic.cacheStatus === "cache-unavailable" || tokenTable.diagnostic.cacheStatus === "cache-unavailable"
       ? "cache-unavailable"
       : "cold-download";
+  const parsedVocabulary = JSON.parse(new TextDecoder().decode(vocabulary.buffer)) as Vocabulary;
+  const parsedTokenTable = JSON.parse(new TextDecoder().decode(tokenTable.buffer)) as TokenTable;
+  validateSupportingAssets(parsedVocabulary, parsedTokenTable);
   return {
     model: model.buffer,
-    vocabulary: JSON.parse(new TextDecoder().decode(vocabulary.buffer)) as Vocabulary,
-    tokenTable: JSON.parse(new TextDecoder().decode(tokenTable.buffer)) as TokenTable,
+    modelSha256: await sha256Hex(model.buffer),
+    vocabulary: parsedVocabulary,
+    tokenTable: parsedTokenTable,
     cacheStatus,
     downloadBytes: model.diagnostic.downloadBytes + vocabulary.diagnostic.downloadBytes + tokenTable.diagnostic.downloadBytes,
     downloadMs: Math.max(model.diagnostic.downloadMs, vocabulary.diagnostic.downloadMs, tokenTable.diagnostic.downloadMs),
@@ -242,19 +309,49 @@ async function loadAssets(): Promise<FastConformerAssets> {
   };
 }
 
-async function loadModel(): Promise<LoadedFastConformer> {
-  const assets = await loadAssets();
-  const ort = await import("onnxruntime-web");
-  configureVadRuntime(ort);
-  const create = async (backend: "webgpu" | "wasm") => ({ session: await ort.InferenceSession.create(assets.model, { executionProviders: [backend] }), backend });
-  let loaded: { session: LoadedFastConformer["session"]; backend: "webgpu" | "wasm" };
-  try {
-    loaded = typeof navigator !== "undefined" && "gpu" in navigator ? await create("webgpu") : await create("wasm");
-  } catch (error) {
-    if (typeof navigator === "undefined" || !("gpu" in navigator)) throw error;
-    loaded = await create("wasm");
+function validateSupportingAssets(vocabulary: Vocabulary, tokenTable: TokenTable) {
+  const ids = Object.keys(vocabulary).map(Number);
+  const vocabSize = ids.length;
+  if (vocabSize !== BLANK_TOKEN_ID + 1 || ids.some((id) => !Number.isInteger(id) || id < 0 || id >= vocabSize) || vocabulary[String(BLANK_TOKEN_ID)] !== "<blank>") {
+    throw new Error("Tilawa supporting assets have an unsupported vocabulary/blank-id contract.");
   }
-  return { ...loaded, ort, assets };
+  if (!Object.keys(tokenTable).length || Object.values(tokenTable).some((ids) => !Array.isArray(ids))) {
+    throw new Error("Tilawa quran_ctc_tokens.json has an unsupported token-table schema.");
+  }
+}
+
+async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
+  if (!globalThis.crypto?.subtle) throw new Error("FastConformer model integrity validation requires Web Crypto SHA-256 support.");
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", buffer);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function loadModel(): Promise<LoadedFastConformer> {
+  const modelLoadStartedAt = performance.now();
+  let assets: FastConformerAssets;
+  try {
+    assets = await loadAssets();
+  } catch (error) {
+    throw new FastConformerStageError("asset", error);
+  }
+  const modelLoadMs = Math.round(performance.now() - modelLoadStartedAt);
+  try {
+    const ort = await import("fastconformer-onnxruntime-web/wasm") as typeof import("onnxruntime-web");
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.simd = true;
+    const sessionStartedAt = performance.now();
+    const session = await ort.InferenceSession.create(assets.model, { executionProviders: ["wasm"] });
+    return {
+      session,
+      ort,
+      backend: "wasm",
+      sessionCreateMs: Math.round(performance.now() - sessionStartedAt),
+      modelLoadMs,
+      assets,
+    };
+  } catch (error) {
+    throw new FastConformerStageError("session-create", error);
+  }
 }
 
 function verseTableKey(verseKey: string) {
@@ -262,8 +359,27 @@ function verseTableKey(verseKey: string) {
   return `${surah}:${ayah}:${ayah}`;
 }
 
-function normalizeWord(value: string) {
-  return normalizeArabic(value).replace(/\s+/g, "");
+/**
+ * Exact semantic equivalent of Tilawa's public core normalizer. This is used
+ * only for shadow diagnostics; target IDs always come directly from
+ * quran_ctc_tokens.json.
+ */
+function normalizeTilawaArabic(value: string) {
+  return value
+    .replace(/\ufeff/g, "")
+    .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06DE\u06DF-\u06ED\u0640]/g, "")
+    .replace(/[\u0623\u0625\u0622\u0671\u0629\u0649]/g, (character) => ({ "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي" })[character] ?? character)
+    .split(/\s+/)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function vocabularySize(vocabulary: Vocabulary) {
+  return Math.max(-1, ...Object.keys(vocabulary).map(Number)) + 1;
+}
+
+function isLexicalToken(tokenId: number, token: string) {
+  return tokenId !== BLANK_TOKEN_ID && token !== "" && token !== "<unk>" && token !== "<blank>" && token !== WORD_PREFIX;
 }
 
 /** Builds exact BPE target ids from Tilawa's published canonical token table. */
@@ -271,39 +387,45 @@ export function encodeFastConformerWords(
   canonicalWords: readonly CtcCanonicalWord[],
   tokenTable: TokenTable,
   vocabulary: Vocabulary,
-): { canonicalWords: CtcCanonicalWord[]; targetTokens: CtcTargetToken[] } {
-  const words = canonicalWords.map((word) => ({ ...word, alignmentText: normalizeWord(word.canonicalArabic) }));
+): { canonicalWords: CtcCanonicalWord[]; targetTokens: CtcTargetToken[]; targetTokenMapping: FastConformerTargetToken[]; targetValidation: FastConformerTargetValidation[] } {
+  const words = canonicalWords.map((word) => ({ ...word, alignmentText: normalizeTilawaArabic(word.canonicalArabic) }));
   const targetTokens: CtcTargetToken[] = [];
+  const targetTokenMapping: FastConformerTargetToken[] = [];
+  const targetValidation: FastConformerTargetValidation[] = [];
+  const vocabSize = vocabularySize(vocabulary);
   for (const verseKey of [...new Set(words.map((word) => word.verseKey))]) {
     const verseWords = words.filter((word) => word.verseKey === verseKey);
     const ids = tokenTable[verseTableKey(verseKey)];
     if (!ids?.length) throw new Error(`Tilawa's token table has no canonical target for ${verseKey}.`);
-    let wordIndex = 0;
-    let accumulated = "";
-    const finishWord = () => {
-      const expected = verseWords[wordIndex];
-      if (!expected || normalizeWord(accumulated) !== expected.alignmentText) {
-        throw new Error(`Tilawa BPE target does not round-trip to the selected canonical ${verseKey} word ${wordIndex + 1}.`);
-      }
-      wordIndex += 1;
-      accumulated = "";
-    };
-    for (const tokenId of ids) {
+    const invalidTokenIds = ids.filter((tokenId) => !Number.isInteger(tokenId) || tokenId < 0 || tokenId >= vocabSize || tokenId === BLANK_TOKEN_ID);
+    targetValidation.push({ verseKey, tokenCount: ids.length, firstTokenIds: ids.slice(0, 12), lastTokenIds: ids.slice(-12), invalidTokenIds });
+    if (invalidTokenIds.length) throw new Error(`Tilawa's token table has invalid CTC ids for ${verseKey}: ${invalidTokenIds.join(", ")}.`);
+    let wordIndex = -1;
+    let pendingWordBoundary = false;
+    const verseMapping = ids.map((tokenId) => {
       const token = vocabulary[String(tokenId)];
-      if (!token || token === "<unk>" || token === "<blank>") throw new Error(`Tilawa BPE vocabulary is missing a usable token id ${tokenId} for ${verseKey}.`);
-      const beginsWord = token.includes(WORD_PREFIX);
-      if (beginsWord && accumulated) finishWord();
-      const fragment = token.replaceAll(WORD_PREFIX, "");
-      if (!fragment) continue;
-      const word = verseWords[wordIndex];
-      if (!word) throw new Error(`Tilawa BPE target exceeds the selected canonical words for ${verseKey}.`);
-      accumulated += fragment;
-      targetTokens.push({ tokenId, token, globalWordIndex: word.globalWordIndex });
+      if (typeof token !== "string") throw new Error(`Tilawa's vocabulary has no entry for token id ${tokenId} in ${verseKey}.`);
+      let canonicalWordIndex: number | null = null;
+      if (token === WORD_PREFIX) pendingWordBoundary = true;
+      if (isLexicalToken(tokenId, token)) {
+        if (pendingWordBoundary || token.startsWith(WORD_PREFIX)) wordIndex += 1;
+        pendingWordBoundary = false;
+        if (wordIndex < 0 || wordIndex >= verseWords.length) throw new Error(`Tilawa BPE word boundaries exceed the selected canonical words for ${verseKey}.`);
+        canonicalWordIndex = wordIndex + 1;
+      }
+      return { tokenId, token, verseKey, canonicalWordIndex, globalWordIndex: canonicalWordIndex === null ? null : verseWords[canonicalWordIndex - 1]!.globalWordIndex };
+    });
+    if (wordIndex + 1 !== verseWords.length) throw new Error(`Tilawa BPE word boundaries have incomplete canonical coverage for ${verseKey}.`);
+    for (const [index, mapped] of verseMapping.entries()) {
+      targetTokenMapping.push(mapped);
+      const owner = mapped.globalWordIndex
+        ?? verseMapping.slice(index + 1).find((candidate) => candidate.globalWordIndex !== null)?.globalWordIndex
+        ?? [...verseMapping.slice(0, index)].reverse().find((candidate) => candidate.globalWordIndex !== null)?.globalWordIndex;
+      if (owner === null || owner === undefined) throw new Error(`Tilawa BPE target has no canonical word owner for ${verseKey}.`);
+      targetTokens.push({ tokenId: mapped.tokenId, token: mapped.token, globalWordIndex: owner });
     }
-    if (accumulated) finishWord();
-    if (wordIndex !== verseWords.length) throw new Error(`Tilawa BPE target has incomplete canonical word coverage for ${verseKey}.`);
   }
-  return { canonicalWords: words, targetTokens };
+  return { canonicalWords: words, targetTokens, targetTokenMapping, targetValidation };
 }
 
 function greedyDecode(values: Float32Array, frames: number, vocabularySize: number, vocabulary: Vocabulary) {
@@ -320,14 +442,34 @@ function greedyDecode(values: Float32Array, frames: number, vocabularySize: numb
     if (bestId !== previous && bestId !== BLANK_TOKEN_ID) ids.push(bestId);
     previous = bestId;
   }
-  return ids.map((id) => vocabulary[String(id)] ?? "").join("").replaceAll(WORD_PREFIX, " ").replace(/\s+/g, " ").trim();
+  return normalizeTilawaArabic(ids
+    .map((id) => vocabulary[String(id)] ?? "")
+    .filter((token) => token && token !== "<unk>" && token !== "<blank>")
+    .join("")
+    .replaceAll(WORD_PREFIX, " "));
 }
 
-function unavailable(reason: string, verses: readonly QuranCorpusVerse[], startedAt: number, analysisRunId?: string, diagnostic?: FastConformerAssetDiagnostic): FastConformerShadowResult {
+function unavailable(
+  reason: string,
+  verses: readonly QuranCorpusVerse[],
+  startedAt: number,
+  analysisRunId?: string,
+  options: { failureStage?: FastConformerFailureStage; diagnostic?: FastConformerAssetDiagnostic; vocabSize?: number | null; targetValidation?: FastConformerTargetValidation[]; targetTokenMapping?: FastConformerTargetToken[] } = {},
+): FastConformerShadowResult {
   return {
     status: "unavailable",
     reason,
+    failureStage: options.failureStage,
     analysisRunId,
+    tilawaRelease: FASTCONFORMER_TILAWA_RELEASE,
+    modelRevision: FASTCONFORMER_SHADOW_MODEL_REVISION,
+    vocabRevision: FASTCONFORMER_SHADOW_VOCAB_REVISION,
+    tokenTableRevision: FASTCONFORMER_SHADOW_TOKEN_TABLE_REVISION,
+    blankId: BLANK_TOKEN_ID,
+    vocabSize: options.vocabSize ?? null,
+    targetValidation: options.targetValidation ?? [],
+    targetTokenMapping: options.targetTokenMapping ?? [],
+    upstreamTilawaResult: null,
     detectedRange: verses.length ? { startVerseKey: verses[0]!.verseKey, endVerseKey: verses.at(-1)!.verseKey, source: "known-canonical-passage" } : null,
     confidence: null,
     greedyTranscript: "",
@@ -336,17 +478,55 @@ function unavailable(reason: string, verses: readonly QuranCorpusVerse[], starte
     performance: {
       modelArtifactBytes: FASTCONFORMER_SHADOW_MODEL_BYTES,
       supportingAssetBytes: FASTCONFORMER_SHADOW_TOKEN_TABLE_BYTES + FASTCONFORMER_SHADOW_VOCAB_BYTES,
-      modelDownloadBytes: diagnostic?.downloadBytes ?? 0,
+      modelDownloadBytes: options.diagnostic?.downloadBytes ?? 0,
       cacheStatus: "unavailable",
-      assetUrlHost: diagnostic?.assetUrlHost,
-      httpStatus: diagnostic?.httpStatus,
-      attemptCount: diagnostic?.attemptCount,
-      retryAfterMs: diagnostic?.retryAfterMs,
-      downloadBytes: diagnostic?.downloadBytes ?? 0,
-      downloadMs: diagnostic?.downloadMs ?? 0,
+      assetUrlHost: options.diagnostic?.assetUrlHost,
+      httpStatus: options.diagnostic?.httpStatus,
+      attemptCount: options.diagnostic?.attemptCount,
+      retryAfterMs: options.diagnostic?.retryAfterMs,
+      downloadBytes: options.diagnostic?.downloadBytes ?? 0,
+      downloadMs: options.diagnostic?.downloadMs ?? 0,
+      ortImport: FASTCONFORMER_SHADOW_ORT_IMPORT,
+      ortVersion: FASTCONFORMER_SHADOW_ORT_VERSION,
+      executionProvider: "wasm",
+      wasmNumThreads: 1,
+      wasmSimd: true,
+      modelBytes: FASTCONFORMER_SHADOW_MODEL_BYTES,
       totalMs: Math.round(performance.now() - startedAt),
     },
   };
+}
+
+async function runUpstreamTilawaOracle(
+  audio: Float32Array,
+  logits: Float32Array,
+  frames: number,
+  vocabSize: number,
+  assets: FastConformerAssets,
+): Promise<UpstreamTilawaResult> {
+  try {
+    const { createTilawaSession } = await import("@tilawa/core");
+    const quran = hafsVerses.map((verse) => {
+      const [surah, ayah] = verse.verseKey.split(":").map(Number);
+      return { surah, ayah, text_uthmani: verse.text, surah_name: "", surah_name_en: "" };
+    });
+    const session = createTilawaSession(
+      { run: async () => ({ logprobs: logits, timeSteps: frames, vocabSize }) },
+      { vocab: assets.vocabulary, quranCtcTokens: assets.tokenTable, quran, blankId: BLANK_TOKEN_ID },
+    );
+    const result = await session.transcribeRaw(audio);
+    return {
+      status: "complete",
+      transcript: result.text,
+      detectedPassage: result.championMatch
+        ? { startVerseKey: `${result.championMatch.surah}:${result.championMatch.ayah}`, endVerseKey: `${result.championMatch.surah}:${result.championMatch.ayah_end ?? result.championMatch.ayah}` }
+        : null,
+      confidence: result.championMatch?.score ?? null,
+      tokenCount: result.tokenIds?.length ?? 0,
+    };
+  } catch (error) {
+    return { status: "unavailable", transcript: "", detectedPassage: null, confidence: null, tokenCount: 0, reason: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 /** Creates a lazy browser-only shadow runner over the same decoded 16 kHz PCM. */
@@ -354,15 +534,21 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
   return async (verses, matches) => {
     const startedAt = performance.now();
     const window = passageWindow(audio, speechRegions, matches);
-    if (!window) return unavailable("No VAD-constrained Quran interval was available for FastConformer shadow alignment.", verses, startedAt, analysisRunId);
+    if (!window) return unavailable("No VAD-constrained Quran interval was available for FastConformer shadow alignment.", verses, startedAt, analysisRunId, { failureStage: "target-construction" });
     const memoryWarm = sharedModelPromise !== null;
+    let encoded: ReturnType<typeof encodeFastConformerWords> | null = null;
+    let loaded: LoadedFastConformer | null = null;
+    let failureStage: FastConformerFailureStage = "asset";
     try {
       const loadingStartedAt = performance.now();
       sharedModelPromise ??= loadModel().catch((error) => { sharedModelPromise = null; throw error; });
-      const loaded = await sharedModelPromise;
+      loaded = await sharedModelPromise;
       const loadMs = Math.round(performance.now() - loadingStartedAt);
-      const encoded = encodeFastConformerWords(canonicalCtcWords(verses), loaded.assets.tokenTable, loaded.assets.vocabulary);
+      failureStage = "target-construction";
+      encoded = encodeFastConformerWords(canonicalCtcWords(verses), loaded.assets.tokenTable, loaded.assets.vocabulary);
+      failureStage = "session-create";
       if (!loaded.session.inputNames.includes("audio_signal") || !loaded.session.inputNames.includes("length")) throw new Error(`FastConformer has an unsupported input contract: ${loaded.session.inputNames.join(", ")}.`);
+      failureStage = "inference";
       const inferenceStartedAt = performance.now();
       const outputs = await loaded.session.run({
         audio_signal: new loaded.ort.Tensor("float32", window.audio, [1, window.audio.length]),
@@ -372,6 +558,9 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
       const [, frames, vocabularySize] = output?.dims ?? [];
       if (!output || !(output.data instanceof Float32Array) || !frames || !vocabularySize || vocabularySize <= BLANK_TOKEN_ID) throw new Error("FastConformer returned an unsupported CTC log-probability shape.");
       const inferenceMs = Math.round(performance.now() - inferenceStartedAt);
+      const upstreamTilawaResult = await runUpstreamTilawaOracle(window.audio, output.data, frames, vocabularySize, loaded.assets);
+      failureStage = "forced-alignment";
+      const alignmentStartedAt = performance.now();
       const alignment = forceAlignCtc(encoded.canonicalWords, encoded.targetTokens, { values: output.data, frames, vocabularySize }, {
         blankTokenId: BLANK_TOKEN_ID,
         startMs: window.startMs,
@@ -379,6 +568,7 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
         finalSpeechEndMs: window.endMs,
         frameExactEndpoints: true,
       });
+      const alignmentMs = Math.round(performance.now() - alignmentStartedAt);
       const greedyTranscript = greedyDecode(output.data, frames, vocabularySize, loaded.assets.vocabulary);
       const confidence = alignment.status === "complete" && alignment.words.length
         ? Number((alignment.words.reduce((sum, word) => sum + word.confidence, 0) / alignment.words.length).toFixed(4))
@@ -387,6 +577,15 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
         status: alignment.status,
         reason: alignment.reason,
         analysisRunId,
+        tilawaRelease: FASTCONFORMER_TILAWA_RELEASE,
+        modelRevision: FASTCONFORMER_SHADOW_MODEL_REVISION,
+        vocabRevision: FASTCONFORMER_SHADOW_VOCAB_REVISION,
+        tokenTableRevision: FASTCONFORMER_SHADOW_TOKEN_TABLE_REVISION,
+        blankId: BLANK_TOKEN_ID,
+        vocabSize: vocabularySize,
+        targetValidation: encoded.targetValidation,
+        targetTokenMapping: encoded.targetTokenMapping,
+        upstreamTilawaResult,
         detectedRange: verses.length ? { startVerseKey: verses[0]!.verseKey, endVerseKey: verses.at(-1)!.verseKey, source: "known-canonical-passage" } : null,
         confidence,
         greedyTranscript,
@@ -404,6 +603,16 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
           downloadBytes: memoryWarm ? 0 : loaded.assets.downloadBytes,
           downloadMs: memoryWarm ? 0 : loaded.assets.downloadMs,
           backend: loaded.backend,
+          ortImport: FASTCONFORMER_SHADOW_ORT_IMPORT,
+          ortVersion: FASTCONFORMER_SHADOW_ORT_VERSION,
+          executionProvider: "wasm",
+          wasmNumThreads: 1,
+          wasmSimd: true,
+          sessionCreateMs: loaded.sessionCreateMs,
+          modelLoadMs: loaded.modelLoadMs,
+          alignmentMs,
+          modelBytes: loaded.assets.model.byteLength,
+          modelSha256: loaded.assets.modelSha256,
           coldModelLoadMs: memoryWarm ? undefined : loadMs,
           warmModelLoadMs: memoryWarm ? loadMs : undefined,
           inferenceMs,
@@ -416,7 +625,13 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
         verses,
         startedAt,
         analysisRunId,
-        error instanceof FastConformerAssetError ? error.diagnostic : undefined,
+        {
+          failureStage: error instanceof FastConformerStageError ? error.stage : failureStage,
+          diagnostic: error instanceof FastConformerStageError ? error.diagnostic : error instanceof FastConformerAssetError ? error.diagnostic : undefined,
+          vocabSize: loaded ? vocabularySize(loaded.assets.vocabulary) : null,
+          targetValidation: encoded?.targetValidation,
+          targetTokenMapping: encoded?.targetTokenMapping,
+        },
       );
     }
   };
