@@ -1,6 +1,30 @@
 # Status
 
-## Current milestone: FastConformer primary Quran timing
+## Current milestone: Remove legacy Quran timing pipeline
+
+Complete:
+
+- Removed the Darten CTC browser runner, its 355 MB model URL/cache path, the
+  micro-ASR timing recovery runner, the timing-lab CTC debug path, and their
+  dedicated tests. Shared CTC forced-alignment code remains because the live
+  Tilawa FastConformer target/alignment path uses it.
+- The editor now identifies the canonical passage with the unchanged
+  whole-recording Whisper matcher, then runs FastConformer directly. Its
+  structurally valid ayah timings are the only automatic `CaptionSegment[]`
+  source. Whisper timestamps do not take part in authoritative timing.
+- FastConformer failure now yields a typed recoverable `quran-timing` failure;
+  the editor retains the selected video and existing manual state, generates no
+  fallback or synthetic captions, and allows retry. Production debug contains
+  `AUTHORITATIVE_TIMING_ENGINE`, `FASTCONFORMER_ALIGNMENT`,
+  `AUTHORITATIVE_CAPTIONS`, and `ACTUAL_PREVIEW` only.
+- Retained VAD for the FastConformer source-window constraint and retained the
+  generic optional-prelude handling unchanged.
+
+Verification: `npm test` (123 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. The build retains the existing
+non-fatal VAD ONNX Runtime dynamic-require warning.
+
+## Previous milestone: FastConformer primary Quran timing
 
 Complete:
 

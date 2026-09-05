@@ -4,7 +4,7 @@ import type { AudioAnalysis } from "./audio-analysis.ts";
 import { refineFirstAyahOnsetWithEnergy, refineTransitionWithEnergy, refineWordEdgeWithEnergy } from "./audio-analysis.ts";
 import { speechRegionContaining, type VadSpeechRegion } from "./speech-regions.ts";
 import type { CtcForcedAlignmentResult } from "./ctc-forced-alignment.ts";
-import type { FastConformerShadowResult } from "./local-fastconformer.ts";
+import type { FastConformerResult } from "./local-fastconformer.ts";
 
 export type TranscriptChunk = {
   startMs: number;
@@ -176,7 +176,10 @@ export type RecognitionAnalysis = {
   verseBoundaries: readonly VerseBoundary[];
   /** The one explicit automatic timing decision. UI clients consume only its
    * verseTimings through verseBoundaries; model-specific results stay diagnostic. */
-  authoritativeTimingEngine: AuthoritativeTimingEngineResult;
+  authoritativeTimingEngine: AuthoritativeTimingEngineResult | null;
+  /** A failed FastConformer run is recoverable and never falls back to a
+   * second automatic timing engine. */
+  timingFailure: QuranTimingFailure | null;
   diagnostics: RecognitionDiagnostic[];
   passage: PassageInference;
   timingTrace: RecognitionTimingTrace | null;
@@ -246,16 +249,26 @@ export type FastConformerStructuralValidation = {
 };
 
 export type AuthoritativeTimingEngineResult = {
-  engine: "fastconformer" | "legacy-fallback";
+  engine: "fastconformer";
   reason: string;
   /** The sole automatic ayah timing array handed to caption generation. */
   verseTimings: readonly VerseBoundary[];
   /** FastConformer word timestamps are diagnostic provenance, never a UI input. */
-  wordTimings: ReadonlyArray<FastConformerShadowResult["alignment"]["words"][number]>;
+  wordTimings: ReadonlyArray<FastConformerResult["alignment"]["words"][number]>;
   structuralValidation: FastConformerStructuralValidation;
-  fallbackUsed: boolean;
-  fallbackReason: string | null;
 };
+
+export type QuranTimingFailure = {
+  stage: "quran-timing";
+  engine: "fastconformer";
+  recoverable: true;
+  reason: string;
+  structuralValidation: FastConformerStructuralValidation;
+};
+
+export type AuthoritativeTimingSelection =
+  | { authoritativeTimingEngine: AuthoritativeTimingEngineResult; timingFailure: null }
+  | { authoritativeTimingEngine: null; timingFailure: QuranTimingFailure };
 
 export type GlobalAyahBoundaryTrace = {
   verseKey: string;
@@ -2703,7 +2716,7 @@ export type RecognitionOptions = {
   ctcAlignment?: CtcForcedAlignmentResult | null;
   /** Result from the pre-identified canonical passage FastConformer run. It
    * can replace only automatic timing, never passage identity. */
-  fastConformerResult?: FastConformerShadowResult | null;
+  fastConformerResult?: FastConformerResult | null;
 };
 
 function sameVerseKeys(actual: readonly string[], expected: readonly string[]): boolean {
@@ -2717,10 +2730,9 @@ function sameVerseKeys(actual: readonly string[], expected: readonly string[]): 
  */
 export function selectAuthoritativeTimingEngine(input: {
   expectedVerseKeys: readonly string[];
-  legacyVerseTimings: readonly VerseBoundary[];
-  fastConformerResult?: FastConformerShadowResult | null;
+  fastConformerResult?: FastConformerResult | null;
   sourceDurationMs: number;
-}): AuthoritativeTimingEngineResult {
+}): AuthoritativeTimingSelection {
   const fastConformer = input.fastConformerResult ?? null;
   const expectedVerseKeys = [...input.expectedVerseKeys];
   const returnedVerseKeys = fastConformer?.ayahTimings.map((timing) => timing.verseKey) ?? [];
@@ -2782,24 +2794,25 @@ export function selectAuthoritativeTimingEngine(input: {
       evidence: { source: "fastconformer", selectedWord: null, candidates: [] },
     }));
     return {
+      authoritativeTimingEngine: {
       engine: "fastconformer",
       reason: "FastConformer inference and global canonical forced alignment passed every structural requirement.",
       verseTimings,
       wordTimings: fastConformer.alignment.words,
       structuralValidation,
-      fallbackUsed: false,
-      fallbackReason: null,
+      },
+      timingFailure: null,
     };
   }
-  const fallbackReason = reasons.join(" ");
   return {
-    engine: "legacy-fallback",
-    reason: `Legacy timing selected because ${fallbackReason}`,
-    verseTimings: input.legacyVerseTimings,
-    wordTimings: fastConformer?.alignment.words ?? [],
-    structuralValidation,
-    fallbackUsed: true,
-    fallbackReason,
+    authoritativeTimingEngine: null,
+    timingFailure: {
+      stage: "quran-timing",
+      engine: "fastconformer",
+      recoverable: true,
+      reason: reasons.join(" ") || "FastConformer did not produce a timing result.",
+      structuralValidation,
+    },
   };
 }
 
@@ -3009,10 +3022,10 @@ export function analyzeTranscript(
     : createPrimaryTranscript(input, options.timestampMode ?? (input.some((chunk) => chunk.words?.length) ? "word" : "chunk-fallback"));
   const { diagnostics, passage, best } = identifyPrimaryTranscript(primary, options);
   if (!best) {
-    const authoritativeTimingEngine = selectAuthoritativeTimingEngine({
-      expectedVerseKeys: [], legacyVerseTimings: [], fastConformerResult: options.fastConformerResult, sourceDurationMs: 0,
+    const timing = selectAuthoritativeTimingEngine({
+      expectedVerseKeys: [], fastConformerResult: options.fastConformerResult, sourceDurationMs: 0,
     });
-    return { matches: [], verseBoundaries: authoritativeTimingEngine.verseTimings, authoritativeTimingEngine, diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, globalBoundarySolver: null, shadowBoundarySolver: null, timingRecoveryPlan: null };
+    return { matches: [], verseBoundaries: [], ...timing, diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, globalBoundarySolver: null, shadowBoundarySolver: null, timingRecoveryPlan: null };
   }
   const verses = options.corpus ?? hafsVerses;
   const timingChunks = [...primary.chunks, ...(options.timingEvidenceChunks ?? [])]
@@ -3028,59 +3041,13 @@ export function analyzeTranscript(
   }
   const timingCandidate = withTimingEvidence(best, timingChunks, verses);
   const reconstructed = reconstructPassage(timingCandidate, timingChunks, verses, options.audioAnalysis, options.speechRegions);
-  const timestampedMode = primary.timestampMode === "word";
-  const rawForcedAlignment = timestampedMode
-    ? timestampedForcedAlignment(best, primary.chunks, verses)
-    : forceAlignPassage(timingCandidate, timingChunks, verses, reconstructed.matches, options.audioAnalysis, options.speechRegions, options.timingRecoveryAttempted);
   const verseKeys = reconstructed.matches.map((match) => match.verseKey);
-  const firstRawTimestampEvidence = rawForcedAlignment?.wordOccurrences
-    .find((word) => word.verseKey === verseKeys[0] && word.canonicalWordIndex === 1)?.startMs
-    ?? rawForcedAlignment?.wordOccurrences.find((word) => word.verseKey === verseKeys[0])?.startMs
-    ?? null;
-  const firstQuranOnset = resolveFirstQuranOnset({
-    lexicalEvidence: {
-      firstAlignedMs: reconstructed.timingTrace.firstAsrWordAlignedToDetectedQuranMs,
-      strongAnchorMs: reconstructed.timingTrace.firstStrongAlignmentAnchorMs,
-    },
-    speechRegions: options.speechRegions,
-    pcmEvidence: reconstructed.timingTrace.pcmLocalOnsetCandidateMs,
-    rawTimestampEvidence: firstRawTimestampEvidence,
-  });
-  const globalBoundarySolver = timestampedMode ? null : resolveGlobalAyahBoundaries({
-    verseKeys,
-    wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
-    speechRegions: options.speechRegions,
-    verifiedFirstOnset: firstQuranOnset.onsetMs ?? reconstructed.matches[0]?.startMs ?? 0,
-    finalSpeechEnd: reconstructed.matches.at(-1)?.endMs ?? sourceDurationMs,
-    durationMs: sourceDurationMs,
-    ctcAlignment: options.ctcAlignment,
-  });
-  const shadowBoundarySolver = timestampedMode ? null : resolveEvidenceWeightedAyahBoundaries({
-    verseKeys,
-    wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
-    speechRegions: options.speechRegions,
-    verifiedFirstOnset: firstQuranOnset.onsetMs ?? reconstructed.matches[0]?.startMs ?? 0,
-    finalSpeechEnd: reconstructed.matches.at(-1)?.endMs ?? sourceDurationMs,
-    durationMs: sourceDurationMs,
-    ctcAlignment: options.ctcAlignment,
-  });
-  const legacyVerseBoundaries = timestampedMode
-    ? resolveTimestampedVerseBoundaries({
-      verseKeys,
-      wordOccurrences: rawForcedAlignment?.wordOccurrences ?? [],
-      speechRegions: options.speechRegions,
-      firstOnset: firstQuranOnset,
-      finalSpeechEnd: reconstructed.matches.at(-1)?.endMs ?? sourceDurationMs,
-      durationMs: sourceDurationMs,
-    })
-    : globalBoundarySolver!.boundaries;
-  const authoritativeTimingEngine = selectAuthoritativeTimingEngine({
+  const timing = selectAuthoritativeTimingEngine({
     expectedVerseKeys: passage.canonicalSpan?.coveredVerseKeys ?? verseKeys,
-    legacyVerseTimings: legacyVerseBoundaries,
     fastConformerResult: options.fastConformerResult,
     sourceDurationMs,
   });
-  const verseBoundaries = authoritativeTimingEngine.verseTimings;
+  const verseBoundaries = timing.authoritativeTimingEngine?.verseTimings ?? [];
   const boundaryByVerse = new Map(verseBoundaries.map((boundary) => [boundary.verseKey, boundary]));
   const matches = reconstructed.matches.map((match, index) => {
     const boundary = boundaryByVerse.get(match.verseKey);
@@ -3096,23 +3063,21 @@ export function analyzeTranscript(
       },
     };
   });
-  // Legacy timestamp/word paths remain diagnostic data. Do not rewrite them
-  // to FastConformer boundaries, otherwise debug output would conceal which
-  // engine actually supplied the rendered CaptionSegment[] intervals.
-  const forcedAlignment = rawForcedAlignment;
   const timingTrace = reconstructed.timingTrace;
   return {
-    matches,
+    // Before FastConformer has completed, these are identity/window hints
+    // only. They must never be turned into captions.
+    matches: timing.timingFailure ? reconstructed.matches : matches,
     verseBoundaries,
-    authoritativeTimingEngine,
+    ...timing,
     diagnostics,
     passage,
     timingTrace,
-    forcedAlignment,
-    ctcShadow: options.ctcAlignment ?? null,
-    globalBoundarySolver,
-    shadowBoundarySolver,
-    timingRecoveryPlan: timingRecoveryPlan(forcedAlignment, matches, options.audioAnalysis, options.speechRegions, primary.timestampMode),
+    forcedAlignment: null,
+    ctcShadow: null,
+    globalBoundarySolver: null,
+    shadowBoundarySolver: null,
+    timingRecoveryPlan: null,
   };
 }
 

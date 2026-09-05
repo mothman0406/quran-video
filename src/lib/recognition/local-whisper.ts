@@ -1,14 +1,11 @@
 import type {
-  LocalTimingRecoveryResult,
   LocalTranscriptionResult,
   RecognitionTranscriber,
   TranscriptionProgress,
 } from "./transcriber";
 import { analyzeMonoPcm } from "./audio-analysis.ts";
 import { detectLocalSpeechRegions } from "./vad.ts";
-import { createCtcShadowRunner } from "./local-ctc.ts";
-import { createFastConformerShadowRunner } from "./local-fastconformer.ts";
-import type { TranscriptChunk } from "./core";
+import { createFastConformerRunner } from "./local-fastconformer.ts";
 import type { TimestampValidationDiagnostics } from "./transcriber";
 
 /** This export retains the decoder cross-attentions Transformers.js needs for word timestamps. */
@@ -308,49 +305,6 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       };
     }
 
-    async function recoverTiming(plan: import("./core").TimingRecoveryPlan, recoveryProgress?: (progress: TranscriptionProgress) => void): Promise<LocalTimingRecoveryResult> {
-      if (!plan.required || !plan.windows.length) return { analysisRunId: run.analysisRunId, chunks: [], windowsRun: 0, transcriptionMs: 0 };
-      const recoveryStartedAt = performance.now();
-      const recovered: TranscriptChunk[] = [];
-      for (const [index, window] of plan.windows.entries()) {
-        const startFrame = Math.max(0, Math.floor(window.startMs * TARGET_SAMPLE_RATE / 1_000));
-        const endFrame = Math.min(audio.length, Math.ceil(window.endMs * TARGET_SAMPLE_RATE / 1_000));
-        if (endFrame <= startFrame) continue;
-        recoveryProgress?.({
-          phase: "transcribing",
-          message: `Recovering known Quran timing window ${index + 1} of ${plan.windows.length}…`,
-          completed: index,
-          total: plan.windows.length,
-        });
-        const output = await transcriber(audio.slice(startFrame, endFrame), {
-          language: "arabic",
-          task: "transcribe",
-          return_timestamps: timestampMode === "word" ? "word" : true,
-        });
-        const units = output.chunks ?? (output.text ? [{ text: output.text, timestamp: [0, (endFrame - startFrame) / TARGET_SAMPLE_RATE] as [number, number] }] : []);
-        for (const item of units) {
-          const text = item.text.trim();
-          if (!text) continue;
-          const startMs = Math.round(window.startMs + item.timestamp[0] * 1_000);
-          const endMs = Math.round(window.startMs + item.timestamp[1] * 1_000);
-          recovered.push({
-            text,
-            startMs,
-            endMs: Math.max(startMs + 1, endMs),
-            words: timestampMode === "word" ? [{ text, startMs, endMs: Math.max(startMs + 1, endMs) }] : undefined,
-            timingSource: "micro-asr",
-          });
-        }
-      }
-      recoveryProgress?.({ phase: "transcribing", message: "Known-passage timing recovery complete.", completed: plan.windows.length, total: plan.windows.length });
-      return {
-        analysisRunId: run.analysisRunId,
-        chunks: stitchTimestampedChunks(recovered),
-        windowsRun: plan.windows.length,
-        transcriptionMs: Math.round(performance.now() - recoveryStartedAt),
-      };
-    }
-
     onProgress?.({ phase: "transcribing", message: "Local transcription complete.", completed: audioChunks.length, total: audioChunks.length });
     return {
       run,
@@ -364,11 +318,9 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       durationMs: Math.round(performance.now() - startedAt),
       audioAnalysis,
       speechRegions,
-      recoverTiming,
-      runCtcShadow: createCtcShadowRunner(audio, speechRegions, run.analysisRunId),
       // FastConformer receives only the complete canonical range already
       // identified by Whisper. It cannot participate in passage identity.
-      runFastConformerShadow: createFastConformerShadowRunner(audio, speechRegions, run.analysisRunId),
+      runFastConformer: createFastConformerRunner(audio, speechRegions, run.analysisRunId),
     };
   },
 };

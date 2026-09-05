@@ -254,10 +254,8 @@ export function forceAlignCtc(
     finalSpeechEndMs?: number;
     repeats?: readonly CtcRepeat[];
     /**
-     * Preserve exact frame-derived endpoints. This is used by the new
-     * FastConformer shadow so no one-millisecond collision repair is applied.
-     * Existing Darten diagnostics retain their historical non-collapsing
-     * representation by leaving this unset.
+     * Preserve exact frame-derived endpoints for FastConformer; no
+     * one-millisecond collision repair is applied.
      */
     frameExactEndpoints?: boolean;
   },

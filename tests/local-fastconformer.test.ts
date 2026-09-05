@@ -3,12 +3,12 @@ import test from "node:test";
 import { canonicalCtcWords, forceAlignCtc } from "../src/lib/recognition/ctc-forced-alignment.ts";
 import {
   encodeFastConformerWords,
-  FASTCONFORMER_SHADOW_MODEL_ARTIFACT,
-  FASTCONFORMER_SHADOW_MODEL_BYTES,
-  FASTCONFORMER_SHADOW_MODEL_URL,
-  FASTCONFORMER_SHADOW_ORT_IMPORT,
-  FASTCONFORMER_SHADOW_ORT_VERSION,
-  FASTCONFORMER_SHADOW_RUNTIME,
+  FASTCONFORMER_MODEL_ARTIFACT,
+  FASTCONFORMER_MODEL_BYTES,
+  FASTCONFORMER_MODEL_URL,
+  FASTCONFORMER_ORT_IMPORT,
+  FASTCONFORMER_ORT_VERSION,
+  FASTCONFORMER_RUNTIME,
   loadFastConformerAsset,
 } from "../src/lib/recognition/local-fastconformer.ts";
 
@@ -27,7 +27,7 @@ function installAssetCache() {
   };
 }
 
-test("FastConformer shadow builds exact known-passage BPE targets with canonical word ownership", () => {
+test("FastConformer builds exact known-passage BPE targets with canonical word ownership", () => {
   const canonical = canonicalCtcWords([{ verseKey: "1:1", text: "السَّلَامُ عَلَيْكُمْ" }]);
   const encoded = encodeFastConformerWords(
     canonical,
@@ -39,7 +39,7 @@ test("FastConformer shadow builds exact known-passage BPE targets with canonical
   assert.equal(encoded.optionalPreludeTokens.length, 0);
 });
 
-test("FastConformer shadow preserves Tilawa table token 0 even though vocab labels it <unk>", () => {
+test("FastConformer preserves Tilawa table token 0 even though vocab labels it <unk>", () => {
   const canonical = canonicalCtcWords([{ verseKey: "6:74", text: "وَإِذْ" }]);
   const encoded = encodeFastConformerWords(
     canonical,
@@ -51,7 +51,7 @@ test("FastConformer shadow preserves Tilawa table token 0 even though vocab labe
   assert.deepEqual(encoded.targetValidation, [{ verseKey: "6:74", tokenCount: 3, firstTokenIds: [10, 0, 11], lastTokenIds: [10, 0, 11], invalidTokenIds: [] }]);
 });
 
-test("FastConformer shadow constructs complete 93:1–5 targets from the real pinned Tilawa assets", () => {
+test("FastConformer constructs complete 93:1–5 targets from the real pinned Tilawa assets", () => {
   const canonical = canonicalCtcWords([
     { verseKey: "93:1", text: "وَٱلضُّحَىٰ" },
     { verseKey: "93:2", text: "وَٱلَّيْلِ إِذَا سَجَىٰ" },
@@ -93,7 +93,7 @@ test("FastConformer shadow constructs complete 93:1–5 targets from the real pi
   }
 });
 
-test("FastConformer shadow uses frame-exact endpoints without one-millisecond repair", () => {
+test("FastConformer uses frame-exact endpoints without one-millisecond repair", () => {
   const canonical = canonicalCtcWords([{ verseKey: "1:1", text: "ا ب" }]);
   const target = [{ tokenId: 1, token: "▁ا", globalWordIndex: 1 }, { tokenId: 2, token: "▁ب", globalWordIndex: 2 }];
   const logits = new Float32Array([
@@ -110,17 +110,17 @@ test("FastConformer shadow uses frame-exact endpoints without one-millisecond re
   assert.deepEqual(result.words.map((word) => [word.startMs, word.endMs]), [[0, 1], [1, 1]]);
 });
 
-test("FastConformer shadow pins the public CC-BY artifact revision and measured size", () => {
-  assert.equal(FASTCONFORMER_SHADOW_MODEL_ARTIFACT, "fastconformer_full_mixed.onnx");
-  assert.equal(FASTCONFORMER_SHADOW_MODEL_BYTES, 88_307_366);
-  assert.match(FASTCONFORMER_SHADOW_MODEL_URL, /acibZ\/tilawa-quran-onnx\/resolve\/0cd79471524bc9cfa1c9296055242a935a1873e4\/fastconformer_full_mixed\.onnx$/);
+test("FastConformer pins the public CC-BY artifact revision and measured size", () => {
+  assert.equal(FASTCONFORMER_MODEL_ARTIFACT, "fastconformer_full_mixed.onnx");
+  assert.equal(FASTCONFORMER_MODEL_BYTES, 88_307_366);
+  assert.match(FASTCONFORMER_MODEL_URL, /acibZ\/tilawa-quran-onnx\/resolve\/0cd79471524bc9cfa1c9296055242a935a1873e4\/fastconformer_full_mixed\.onnx$/);
 });
 
-test("FastConformer shadow uses Tilawa's isolated WASM-only runtime", () => {
-  assert.equal(FASTCONFORMER_SHADOW_ORT_IMPORT, "fastconformer-onnxruntime-web/wasm");
-  assert.equal(FASTCONFORMER_SHADOW_ORT_VERSION, "1.24.2");
-  assert.match(FASTCONFORMER_SHADOW_RUNTIME, /WASM only/);
-  assert.doesNotMatch(FASTCONFORMER_SHADOW_RUNTIME, /WebGPU/);
+test("FastConformer uses Tilawa's isolated WASM-only runtime", () => {
+  assert.equal(FASTCONFORMER_ORT_IMPORT, "fastconformer-onnxruntime-web/wasm");
+  assert.equal(FASTCONFORMER_ORT_VERSION, "1.24.2");
+  assert.match(FASTCONFORMER_RUNTIME, /WASM only/);
+  assert.doesNotMatch(FASTCONFORMER_RUNTIME, /WebGPU/);
 });
 
 test("FastConformer asset loading is cache-first and validates the pinned bytes", async () => {

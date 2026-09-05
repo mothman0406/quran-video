@@ -11,9 +11,7 @@ import {
   useState,
 } from "react";
 import { analyzeTranscript, createPrimaryTranscript, hafsSurahs, hafsVerses } from "@/lib/recognition/core";
-import { QURAN_CTC_SHADOW_MODEL, QURAN_CTC_SHADOW_MODEL_ARTIFACT, QURAN_CTC_SHADOW_MODEL_BYTES, QURAN_CTC_SHADOW_MODEL_LICENSE, QURAN_CTC_SHADOW_RUNTIME } from "@/lib/recognition/local-ctc";
-import { FASTCONFORMER_SHADOW_MODEL, FASTCONFORMER_SHADOW_MODEL_ARTIFACT, FASTCONFORMER_SHADOW_MODEL_BYTES, FASTCONFORMER_SHADOW_MODEL_LICENSE, FASTCONFORMER_SHADOW_RUNTIME } from "@/lib/recognition/local-fastconformer";
-import { findRealEvaluationFixture } from "@/lib/recognition/real-evaluation-registry";
+import { FASTCONFORMER_MODEL, FASTCONFORMER_MODEL_ARTIFACT, FASTCONFORMER_MODEL_BYTES, FASTCONFORMER_MODEL_LICENSE, FASTCONFORMER_RUNTIME } from "@/lib/recognition/local-fastconformer";
 import type { TranscriptionProgress } from "@/lib/recognition/transcriber";
 import {
   recognitionToVerseAlignments,
@@ -161,7 +159,6 @@ export default function Home() {
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [timingWarning, setTimingWarning] = useState<string | null>(null);
-  const [ctcShadowCompleted, setCtcShadowCompleted] = useState(false);
   const [support, setSupport] = useState<{
     supported: boolean;
     reason: string;
@@ -437,7 +434,6 @@ export default function Home() {
     setVideoUrl(null);
     setVideoMetadata(null);
     setAlignments([]);
-    setCtcShadowCompleted(false);
     setSegments([]);
     setContent({});
     setCurrentTimeMs(0);
@@ -738,7 +734,6 @@ export default function Home() {
     setErrorMessage(null);
     setProgress(null);
     setAlignments([]);
-    setCtcShadowCompleted(false);
     setSegments([]);
     setContent({});
     setStage("preparing");
@@ -756,63 +751,26 @@ export default function Home() {
       if (job !== generation.current) return;
       setStage("matching");
       const primaryTranscript = createPrimaryTranscript(result.chunks, result.timestampMode);
-      let recovery: Awaited<ReturnType<NonNullable<typeof result.recoverTiming>>> | null = null;
       let analysis = analyzeTranscript(primaryTranscript, {
         audioAnalysis: result.audioAnalysis,
         speechRegions: result.speechRegions,
       });
-      const initialTimingRecoveryPlan = analysis.timingRecoveryPlan;
-      if (analysis.timingRecoveryPlan?.required && result.recoverTiming) {
-        setStage("transcribing");
-        recovery = await result.recoverTiming(analysis.timingRecoveryPlan, (next) => {
-          if (job !== generation.current) return;
-          setProgress(next);
-        });
-        if (job !== generation.current) return;
-        analysis = analyzeTranscript(primaryTranscript, {
-          audioAnalysis: result.audioAnalysis,
-          speechRegions: result.speechRegions,
-          timingEvidenceChunks: recovery.chunks,
-          timingRecoveryAttempted: true,
-        });
-      }
-      let ctcShadow: Awaited<ReturnType<NonNullable<typeof result.runCtcShadow>>> | null = null;
-      if (analysis.matches.length && result.runCtcShadow) {
-        const keys = new Set(analysis.matches.map((match) => match.verseKey));
-        ctcShadow = await result.runCtcShadow(hafsVerses.filter((verse) => keys.has(verse.verseKey)), analysis.matches);
-        // CTC is a global scaffold only when Whisper has no word offsets. The
-        // timestamped alignment remains its own protected timing mode.
-        analysis = result.timestampMode === "chunk-fallback"
-          ? analyzeTranscript(primaryTranscript, {
-            audioAnalysis: result.audioAnalysis,
-            speechRegions: result.speechRegions,
-            timingEvidenceChunks: recovery?.chunks,
-            timingRecoveryAttempted: recovery !== null,
-            ctcAlignment: ctcShadow,
-          })
-          : { ...analysis, ctcShadow };
-        setCtcShadowCompleted(ctcShadow.status === "complete");
-      }
-      const fastConformerRawAlignment = analysis.matches.length && result.runFastConformerShadow
-        ? await result.runFastConformerShadow(hafsVerses.filter((verse) => new Set(analysis.matches.map((match) => match.verseKey)).has(verse.verseKey)), analysis.matches)
+      const fastConformerAlignment = analysis.matches.length && result.runFastConformer
+        ? await result.runFastConformer(hafsVerses.filter((verse) => new Set(analysis.matches.map((match) => match.verseKey)).has(verse.verseKey)), analysis.matches)
         : null;
-      if (fastConformerRawAlignment) {
+      if (fastConformerAlignment) {
         analysis = analyzeTranscript(primaryTranscript, {
           audioAnalysis: result.audioAnalysis,
           speechRegions: result.speechRegions,
-          timingEvidenceChunks: recovery?.chunks,
-          timingRecoveryAttempted: recovery !== null,
-          ctcAlignment: ctcShadow,
-          fastConformerResult: fastConformerRawAlignment,
+          fastConformerResult: fastConformerAlignment,
         });
-      }
-      if (result.timestampMode === "chunk-fallback") {
-        setTimingWarning("Whisper word timestamps were unavailable. Caption timing was recovered with bounded local ASR windows and remains evidence-graded for timeline adjustment.");
       }
       if (analysis.matches.length === 0)
         throw new Error(
           "No confident Quran passage was detected. You can try again or correct it manually.",
         );
+      if (analysis.timingFailure) throw new Error(`Quran timing could not be completed. ${analysis.timingFailure.reason} Please retry.`);
+      if (!analysis.authoritativeTimingEngine) throw new Error("Quran timing could not be completed. Please retry.");
       const next = recognitionToVerseAlignments(analysis.matches);
       const first = next[0];
       const last = next.at(-1)!;
@@ -822,7 +780,6 @@ export default function Home() {
       // One generated display authority: pure boundaries -> CaptionSegment[].
       // VerseAlignment and forced alignment remain diagnostics only.
       const nextSegments = createCaptionSegmentsFromVerseBoundaries(analysis.verseBoundaries, verseContent);
-      const evaluationFixture = process.env.NODE_ENV !== "production" ? findRealEvaluationFixture(next.map((item) => item.verseKey)) : undefined;
       setAlignments(next);
       setSegments(nextSegments);
       alignmentDebug.current = {
@@ -834,9 +791,7 @@ export default function Home() {
         AUTHORITATIVE_TIMING_ENGINE: {
           engine: analysis.authoritativeTimingEngine.engine,
           reason: analysis.authoritativeTimingEngine.reason,
-          fastConformerStatus: fastConformerRawAlignment?.status ?? "not-run",
-          fallbackUsed: analysis.authoritativeTimingEngine.fallbackUsed,
-          fallbackReason: analysis.authoritativeTimingEngine.fallbackReason,
+          fastConformerStatus: fastConformerAlignment?.status ?? "not-run",
           passageStartVerse: analysis.authoritativeTimingEngine.structuralValidation.expectedVerseKeys[0] ?? null,
           passageEndVerse: analysis.authoritativeTimingEngine.structuralValidation.expectedVerseKeys.at(-1) ?? null,
           verseTimings: analysis.authoritativeTimingEngine.verseTimings,
@@ -856,63 +811,6 @@ export default function Home() {
           resultState: analysis.passage.state,
           shadowComparison: analysis.passage.shadowComparison,
         },
-        timingRecovery: {
-          ran: recovery !== null,
-          windowsRun: recovery?.windowsRun ?? 0,
-          microAsrChunks: recovery?.chunks.map((chunk) => ({ startMs: chunk.startMs, endMs: chunk.endMs, text: chunk.text })) ?? [],
-          localAsrWindows: initialTimingRecoveryPlan?.windows ?? [],
-          attemptedPassageIdentityChange: false,
-        },
-        timestampQuality: {
-          wordTimestampsAvailable: result.timestampMode === "word",
-          microAsrFallbackUsed: Boolean(analysis.forcedAlignment?.verseTimings.some((item) => item.recoveryAttempted)),
-          recoveryPlan: analysis.timingRecoveryPlan,
-        },
-        directWordCoverageByVerse: analysis.forcedAlignment?.verseTimings.map((item) => ({ verseKey: item.verseKey, direct: item.directWordCount, recovered: item.recoveredWordCount, total: item.lastCanonicalWordIndex })) ?? [],
-        globalBoundarySolver: analysis.globalBoundarySolver,
-        evidenceWeightedShadow: analysis.shadowBoundarySolver && {
-          promotionState: "shadow-only",
-          note: "Not used by CaptionSegment generation. Compare this ordered evidence-weighted path with current before promotion.",
-          ...analysis.shadowBoundarySolver,
-          comparison: analysis.shadowBoundarySolver.boundaries.map((boundary) => {
-            const current = analysis.globalBoundarySolver?.boundaries.find((item) => item.verseKey === boundary.verseKey);
-            return {
-              verseKey: boundary.verseKey,
-              currentStartMs: current?.startMs ?? null,
-              shadowStartMs: boundary.startMs,
-              deltaMs: current ? boundary.startMs - current.startMs : null,
-              source: boundary.evidence.source,
-            };
-          }),
-        },
-        realAlignmentComparison: {
-          title: "REAL ALIGNMENT COMPARISON",
-          recordingId: evaluationFixture?.recordingId ?? null,
-          manualTruth: evaluationFixture?.truth ?? "UNKNOWN",
-          rows: next.map((current) => {
-            const manualStartMs = evaluationFixture?.manualStartsMs[current.verseKey] ?? null;
-            const evidenceWeightedStartMs = analysis.shadowBoundarySolver?.boundaries.find((item) => item.verseKey === current.verseKey)?.startMs ?? null;
-            const dartenStartMs = analysis.ctcShadow?.verses.find((item) => item.verseKey === current.verseKey)?.startMs ?? null;
-            const fastConformerStartMs = fastConformerRawAlignment?.alignment.verses.find((item) => item.verseKey === current.verseKey)?.startMs ?? null;
-            const error = (startMs: number | null) => manualStartMs === null || startMs === null ? null : Math.abs(startMs - manualStartMs);
-            return {
-              verseKey: current.verseKey,
-              manualStartMs,
-              productionStartMs: current.startMs,
-              productionErrorMs: error(current.startMs),
-              evidenceWeightedStartMs,
-              evidenceWeightedErrorMs: error(evidenceWeightedStartMs),
-              dartenStartMs,
-              dartenErrorMs: error(dartenStartMs),
-              fastConformerStartMs,
-              fastConformerErrorMs: error(fastConformerStartMs),
-            };
-          }),
-        },
-        firstOnsetTrace: analysis.timingTrace,
-        canonicalWordAlignment: analysis.forcedAlignment?.canonicalWordAlignments ?? [],
-        wordAlignment: analysis.forcedAlignment?.wordOccurrences ?? [],
-        verseTiming: analysis.forcedAlignment?.verseTimings ?? [],
         verseTimingTable: next.map((item) => ({
           verse: item.verseKey,
           predictedStartMs: item.startMs,
@@ -927,81 +825,13 @@ export default function Home() {
           endMs: segment.endMs,
           revision: `${segment.id}:${segment.startMs}-${segment.endMs}`,
         })),
-        transitions: (analysis.timingTrace?.transitions ?? []).map((transition) => ({
-          ...transition,
-          localAsrWindows: (initialTimingRecoveryPlan?.windows ?? []).filter((window) => window.reason === "transition"
-            && window.verseKeys.includes(transition.previousVerseKey)
-            && window.verseKeys.includes(transition.nextVerseKey)),
-        })),
-        finalAyahEnd: analysis.timingTrace?.finalAyahEnd ?? null,
-        pauses: analysis.forcedAlignment?.pauseCandidates ?? [],
-        LEGACY_TIMING_DIAGNOSTIC: {
-          forcedVerseTimings: analysis.forcedAlignment?.verseTimings ?? [],
-          displaySets: analysis.forcedAlignment?.captionSets ?? [],
-          globalBoundarySolver: analysis.globalBoundarySolver,
-          note: "NON-AUTHORITATIVE: legacy timing is fallback/diagnostic data; captions render only the selected CaptionSegment[].",
-        },
-        ctcShadowStatus: {
-          // `complete` is the successful CTC status in this codebase.
-          status: analysis.ctcShadow?.status ?? "not-run",
-          reason: analysis.ctcShadow?.reason ?? null,
-          targetTokenCount: analysis.ctcShadow?.targetTokens.length ?? 0,
-          wordAlignmentCount: analysis.ctcShadow?.words.length ?? 0,
-          firstCtcStartMs: analysis.ctcShadow?.verses[0]?.startMs ?? null,
-        },
-        forcedAlignmentShadow: {
-          model: QURAN_CTC_SHADOW_MODEL,
-          license: QURAN_CTC_SHADOW_MODEL_LICENSE,
-          modelSize: `${QURAN_CTC_SHADOW_MODEL_ARTIFACT}: ${QURAN_CTC_SHADOW_MODEL_BYTES} bytes`,
-          runtime: QURAN_CTC_SHADOW_RUNTIME,
-          result: analysis.ctcShadow,
-          performance: analysis.ctcShadow?.performance ?? null,
-          tokenization: (analysis.ctcShadow?.canonicalWords ?? []).map((word) => ({
-            canonicalWord: word.canonicalArabic,
-            normalizedAlignmentText: word.alignmentText,
-            targetCtcTokens: (analysis.ctcShadow?.targetTokens ?? [])
-              .filter((token) => token.globalWordIndex === word.globalWordIndex)
-              .map((token) => ({ token: token.token, tokenId: token.tokenId })),
-          })),
-          wordAlignment: analysis.ctcShadow?.words ?? [],
-          verseComparison: next.map((current) => {
-            const ctc = analysis.ctcShadow?.verses.find((verse) => verse.verseKey === current.verseKey);
-            return {
-              verse: current.verseKey,
-              currentStartMs: current.startMs,
-              ctcStartMs: ctc?.startMs ?? null,
-              startDeltaMs: ctc ? ctc.startMs - current.startMs : null,
-              currentEndMs: current.endMs,
-              ctcEndMs: ctc?.endMs ?? null,
-              endDeltaMs: ctc ? ctc.endMs - current.endMs : null,
-            };
-          }),
-          pauses: (analysis.ctcShadow?.pauses ?? []).map((pause) => ({
-            ...pause,
-            wordBefore: analysis.ctcShadow?.words.find((word) => word.globalWordIndex === pause.canonicalWordBefore)?.canonicalArabic ?? null,
-            wordAfter: analysis.ctcShadow?.words.find((word) => word.globalWordIndex === pause.canonicalWordAfter)?.canonicalArabic ?? null,
-          })),
-        },
-        FASTCONFORMER_RAW_ALIGNMENT: fastConformerRawAlignment && {
-          note: "Raw known-canonical-passage FastConformer output. The central structural selector, not this debug object, determines authority.",
-          model: FASTCONFORMER_SHADOW_MODEL,
-          license: FASTCONFORMER_SHADOW_MODEL_LICENSE,
-          modelSize: `${FASTCONFORMER_SHADOW_MODEL_ARTIFACT}: ${FASTCONFORMER_SHADOW_MODEL_BYTES} bytes`,
-          runtime: FASTCONFORMER_SHADOW_RUNTIME,
-          ...fastConformerRawAlignment,
-          wordAlignment: fastConformerRawAlignment.alignment.words,
-          verseComparison: next.map((current) => {
-            const shadow = fastConformerRawAlignment.alignment.verses.find((verse) => verse.verseKey === current.verseKey);
-            return {
-              verse: current.verseKey,
-              currentStartMs: current.startMs,
-              fastConformerStartMs: shadow?.startMs ?? null,
-              startDeltaMs: shadow ? shadow.startMs - current.startMs : null,
-              currentEndMs: current.endMs,
-              fastConformerEndMs: shadow?.endMs ?? null,
-              endDeltaMs: shadow ? shadow.endMs - current.endMs : null,
-            };
-          }),
+        FASTCONFORMER_ALIGNMENT: fastConformerAlignment && {
+          model: FASTCONFORMER_MODEL,
+          license: FASTCONFORMER_MODEL_LICENSE,
+          modelSize: `${FASTCONFORMER_MODEL_ARTIFACT}: ${FASTCONFORMER_MODEL_BYTES} bytes`,
+          runtime: FASTCONFORMER_RUNTIME,
+          ...fastConformerAlignment,
+          wordAlignment: fastConformerAlignment.alignment.words,
         },
       };
       publishAlignmentDebug(alignmentDebug.current);
@@ -1064,7 +894,6 @@ export default function Home() {
     setVideoUrl(null);
     setVideoMetadata(null);
     setAlignments([]);
-    setCtcShadowCompleted(false);
     setSegments([]);
     setContent({});
     setProgress(null);
@@ -1535,7 +1364,6 @@ export default function Home() {
         exportDiagnostics={exportDiagnostics}
         errorMessage={errorMessage}
         timingWarning={timingWarning}
-        ctcShadowCompleted={ctcShadowCompleted}
         timelineTooltip={timelineTooltip}
         showCorrection={showCorrection}
         surah={surah}

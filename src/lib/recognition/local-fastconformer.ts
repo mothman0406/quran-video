@@ -14,27 +14,27 @@ import type { VadSpeechRegion } from "./speech-regions.ts";
  * passage identification and becomes authoritative only after structural
  * validation in the central timing-engine selector.
  */
-export const FASTCONFORMER_SHADOW_MODEL = "acibZ/tilawa-quran-onnx";
-export const FASTCONFORMER_SHADOW_MODEL_LICENSE = "CC-BY-4.0";
-export const FASTCONFORMER_SHADOW_MODEL_REVISION = "0cd79471524bc9cfa1c9296055242a935a1873e4";
-export const FASTCONFORMER_SHADOW_MODEL_ARTIFACT = "fastconformer_full_mixed.onnx";
-export const FASTCONFORMER_SHADOW_MODEL_BYTES = 88_307_366;
-export const FASTCONFORMER_SHADOW_TOKEN_TABLE_BYTES = 12_211_783;
-export const FASTCONFORMER_SHADOW_VOCAB_BYTES = 21_062;
-export const FASTCONFORMER_SHADOW_QURAN_BYTES = 3_186_385;
-export const FASTCONFORMER_SHADOW_RUNTIME = "ONNX Runtime Web 1.24.2 (WASM only; Tilawa-compatible)";
-export const FASTCONFORMER_SHADOW_ORT_IMPORT = "fastconformer-onnxruntime-web/wasm";
-export const FASTCONFORMER_SHADOW_ORT_VERSION = "1.24.2";
+export const FASTCONFORMER_MODEL = "acibZ/tilawa-quran-onnx";
+export const FASTCONFORMER_MODEL_LICENSE = "CC-BY-4.0";
+export const FASTCONFORMER_MODEL_REVISION = "0cd79471524bc9cfa1c9296055242a935a1873e4";
+export const FASTCONFORMER_MODEL_ARTIFACT = "fastconformer_full_mixed.onnx";
+export const FASTCONFORMER_MODEL_BYTES = 88_307_366;
+export const FASTCONFORMER_TOKEN_TABLE_BYTES = 12_211_783;
+export const FASTCONFORMER_VOCAB_BYTES = 21_062;
+export const FASTCONFORMER_QURAN_BYTES = 3_186_385;
+export const FASTCONFORMER_RUNTIME = "ONNX Runtime Web 1.24.2 (WASM only; Tilawa-compatible)";
+export const FASTCONFORMER_ORT_IMPORT = "fastconformer-onnxruntime-web/wasm";
+export const FASTCONFORMER_ORT_VERSION = "1.24.2";
 /** Public Tilawa release whose browser assets and core contract were audited. */
 export const FASTCONFORMER_TILAWA_RELEASE = "v0.2.0";
-export const FASTCONFORMER_SHADOW_VOCAB_REVISION = FASTCONFORMER_SHADOW_MODEL_REVISION;
-export const FASTCONFORMER_SHADOW_TOKEN_TABLE_REVISION = FASTCONFORMER_SHADOW_MODEL_REVISION;
-const FASTCONFORMER_BASE_URL = `https://huggingface.co/${FASTCONFORMER_SHADOW_MODEL}/resolve/${FASTCONFORMER_SHADOW_MODEL_REVISION}`;
-export const FASTCONFORMER_SHADOW_MODEL_URL = `${FASTCONFORMER_BASE_URL}/${FASTCONFORMER_SHADOW_MODEL_ARTIFACT}`;
+export const FASTCONFORMER_VOCAB_REVISION = FASTCONFORMER_MODEL_REVISION;
+export const FASTCONFORMER_TOKEN_TABLE_REVISION = FASTCONFORMER_MODEL_REVISION;
+const FASTCONFORMER_BASE_URL = `https://huggingface.co/${FASTCONFORMER_MODEL}/resolve/${FASTCONFORMER_MODEL_REVISION}`;
+export const FASTCONFORMER_MODEL_URL = `${FASTCONFORMER_BASE_URL}/${FASTCONFORMER_MODEL_ARTIFACT}`;
 const VOCAB_URL = `${FASTCONFORMER_BASE_URL}/vocab.json`;
 const TOKEN_TABLE_URL = `${FASTCONFORMER_BASE_URL}/quran_ctc_tokens.json`;
 const QURAN_URL = `${FASTCONFORMER_BASE_URL}/quran.json`;
-const CACHE_NAME = "quran-video-fastconformer-shadow-v2";
+const CACHE_NAME = "quran-video-fastconformer-v3";
 const SAMPLE_RATE = 16_000;
 const BLANK_TOKEN_ID = 1_024;
 const WORD_PREFIX = "▁";
@@ -115,7 +115,7 @@ type LoadedFastConformer = {
   assets: FastConformerAssets;
 };
 
-export type FastConformerShadowResult = {
+export type FastConformerResult = {
   status: "complete" | "unavailable" | "failed";
   reason?: string;
   failureStage?: FastConformerFailureStage;
@@ -188,7 +188,7 @@ export type FastConformerShadowResult = {
   };
 };
 
-export type FastConformerShadowRunner = (verses: readonly QuranCorpusVerse[], matches: readonly { startMs: number; endMs: number }[]) => Promise<FastConformerShadowResult>;
+export type FastConformerRunner = (verses: readonly QuranCorpusVerse[], matches: readonly { startMs: number; endMs: number }[]) => Promise<FastConformerResult>;
 
 let sharedModelPromise: Promise<LoadedFastConformer> | null = null;
 const sharedAssetPromises = new Map<string, Promise<FastConformerAsset>>();
@@ -331,10 +331,10 @@ export function loadFastConformerAsset(url: string, expectedBytes: number): Prom
 async function loadAssets(): Promise<FastConformerAssets> {
   // Hugging Face's unauthenticated resolver can reject bursts while its queue
   // is full. Keep cold resolver traffic to one pinned asset at a time.
-  const model = await loadFastConformerAsset(FASTCONFORMER_SHADOW_MODEL_URL, FASTCONFORMER_SHADOW_MODEL_BYTES);
-  const vocabulary = await loadFastConformerAsset(VOCAB_URL, FASTCONFORMER_SHADOW_VOCAB_BYTES);
-  const tokenTable = await loadFastConformerAsset(TOKEN_TABLE_URL, FASTCONFORMER_SHADOW_TOKEN_TABLE_BYTES);
-  const quran = await loadFastConformerAsset(QURAN_URL, FASTCONFORMER_SHADOW_QURAN_BYTES);
+  const model = await loadFastConformerAsset(FASTCONFORMER_MODEL_URL, FASTCONFORMER_MODEL_BYTES);
+  const vocabulary = await loadFastConformerAsset(VOCAB_URL, FASTCONFORMER_VOCAB_BYTES);
+  const tokenTable = await loadFastConformerAsset(TOKEN_TABLE_URL, FASTCONFORMER_TOKEN_TABLE_BYTES);
+  const quran = await loadFastConformerAsset(QURAN_URL, FASTCONFORMER_QURAN_BYTES);
   const cacheStatus = model.diagnostic.cacheStatus === "browser-cache" && vocabulary.diagnostic.cacheStatus === "browser-cache" && tokenTable.diagnostic.cacheStatus === "browser-cache" && quran.diagnostic.cacheStatus === "browser-cache"
     ? "browser-cache"
     : model.diagnostic.cacheStatus === "cache-unavailable" || vocabulary.diagnostic.cacheStatus === "cache-unavailable" || tokenTable.diagnostic.cacheStatus === "cache-unavailable" || quran.diagnostic.cacheStatus === "cache-unavailable"
@@ -411,7 +411,7 @@ function verseTableKey(verseKey: string) {
 
 /**
  * Exact semantic equivalent of Tilawa's public core normalizer. This is used
- * only for shadow diagnostics; target IDs always come directly from
+ * only for diagnostics; target IDs always come directly from
  * quran_ctc_tokens.json.
  */
 function normalizeTilawaArabic(value: string) {
@@ -597,16 +597,16 @@ function unavailable(
   startedAt: number,
   analysisRunId?: string,
   options: { failureStage?: FastConformerFailureStage; diagnostic?: FastConformerAssetDiagnostic; vocabSize?: number | null; targetValidation?: FastConformerTargetValidation[]; targetTokenMapping?: FastConformerTargetToken[]; targetConstructionFailure?: FastConformerTargetConstructionFailure } = {},
-): FastConformerShadowResult {
+): FastConformerResult {
   return {
     status: "unavailable",
     reason,
     failureStage: options.failureStage,
     analysisRunId,
     tilawaRelease: FASTCONFORMER_TILAWA_RELEASE,
-    modelRevision: FASTCONFORMER_SHADOW_MODEL_REVISION,
-    vocabRevision: FASTCONFORMER_SHADOW_VOCAB_REVISION,
-    tokenTableRevision: FASTCONFORMER_SHADOW_TOKEN_TABLE_REVISION,
+    modelRevision: FASTCONFORMER_MODEL_REVISION,
+    vocabRevision: FASTCONFORMER_VOCAB_REVISION,
+    tokenTableRevision: FASTCONFORMER_TOKEN_TABLE_REVISION,
     blankId: BLANK_TOKEN_ID,
     vocabSize: options.vocabSize ?? null,
     targetValidation: options.targetValidation ?? [],
@@ -629,8 +629,8 @@ function unavailable(
     rawLogits: null,
     alignment: { status: "unavailable", reason, canonicalWords: canonicalCtcWords(verses), targetTokens: [], words: [], verses: [], pauses: [], audibleRepetitions: [], frameCount: 0, frameDurationMs: 0 },
     performance: {
-      modelArtifactBytes: FASTCONFORMER_SHADOW_MODEL_BYTES,
-      supportingAssetBytes: FASTCONFORMER_SHADOW_TOKEN_TABLE_BYTES + FASTCONFORMER_SHADOW_VOCAB_BYTES + FASTCONFORMER_SHADOW_QURAN_BYTES,
+      modelArtifactBytes: FASTCONFORMER_MODEL_BYTES,
+      supportingAssetBytes: FASTCONFORMER_TOKEN_TABLE_BYTES + FASTCONFORMER_VOCAB_BYTES + FASTCONFORMER_QURAN_BYTES,
       modelDownloadBytes: options.diagnostic?.downloadBytes ?? 0,
       cacheStatus: "unavailable",
       assetUrlHost: options.diagnostic?.assetUrlHost,
@@ -639,12 +639,12 @@ function unavailable(
       retryAfterMs: options.diagnostic?.retryAfterMs,
       downloadBytes: options.diagnostic?.downloadBytes ?? 0,
       downloadMs: options.diagnostic?.downloadMs ?? 0,
-      ortImport: FASTCONFORMER_SHADOW_ORT_IMPORT,
-      ortVersion: FASTCONFORMER_SHADOW_ORT_VERSION,
+      ortImport: FASTCONFORMER_ORT_IMPORT,
+      ortVersion: FASTCONFORMER_ORT_VERSION,
       executionProvider: "wasm",
       wasmNumThreads: 1,
       wasmSimd: true,
-      modelBytes: FASTCONFORMER_SHADOW_MODEL_BYTES,
+      modelBytes: FASTCONFORMER_MODEL_BYTES,
       totalMs: Math.round(performance.now() - startedAt),
     },
   };
@@ -683,11 +683,11 @@ async function runUpstreamTilawaOracle(
 }
 
 /** Creates a lazy browser-only known-passage runner over the same decoded 16 kHz PCM. */
-export function createFastConformerShadowRunner(audio: Float32Array, speechRegions: readonly VadSpeechRegion[], analysisRunId?: string): FastConformerShadowRunner {
+export function createFastConformerRunner(audio: Float32Array, speechRegions: readonly VadSpeechRegion[], analysisRunId?: string): FastConformerRunner {
   return async (verses, matches) => {
     const startedAt = performance.now();
     const window = passageWindow(audio, speechRegions, matches);
-    if (!window) return unavailable("No VAD-constrained Quran interval was available for FastConformer shadow alignment.", verses, startedAt, analysisRunId, { failureStage: "target-construction" });
+    if (!window) return unavailable("No VAD-constrained Quran interval was available for FastConformer alignment.", verses, startedAt, analysisRunId, { failureStage: "target-construction" });
     const memoryWarm = sharedModelPromise !== null;
     let encoded: ReturnType<typeof encodeFastConformerWords> | null = null;
     let loaded: LoadedFastConformer | null = null;
@@ -747,9 +747,9 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
         reason: alignment.reason,
         analysisRunId,
         tilawaRelease: FASTCONFORMER_TILAWA_RELEASE,
-        modelRevision: FASTCONFORMER_SHADOW_MODEL_REVISION,
-        vocabRevision: FASTCONFORMER_SHADOW_VOCAB_REVISION,
-        tokenTableRevision: FASTCONFORMER_SHADOW_TOKEN_TABLE_REVISION,
+        modelRevision: FASTCONFORMER_MODEL_REVISION,
+        vocabRevision: FASTCONFORMER_VOCAB_REVISION,
+        tokenTableRevision: FASTCONFORMER_TOKEN_TABLE_REVISION,
         blankId: BLANK_TOKEN_ID,
         vocabSize: vocabularySize,
         targetValidation: encoded.targetValidation,
@@ -783,8 +783,8 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
         rawLogits: { frames, vocabularySize, blankTokenId: BLANK_TOKEN_ID, frameDurationMs: Number(((window.endMs - window.startMs) / frames).toFixed(4)) },
         alignment,
         performance: {
-          modelArtifactBytes: FASTCONFORMER_SHADOW_MODEL_BYTES,
-          supportingAssetBytes: FASTCONFORMER_SHADOW_TOKEN_TABLE_BYTES + FASTCONFORMER_SHADOW_VOCAB_BYTES + FASTCONFORMER_SHADOW_QURAN_BYTES,
+          modelArtifactBytes: FASTCONFORMER_MODEL_BYTES,
+          supportingAssetBytes: FASTCONFORMER_TOKEN_TABLE_BYTES + FASTCONFORMER_VOCAB_BYTES + FASTCONFORMER_QURAN_BYTES,
           modelDownloadBytes: memoryWarm ? 0 : loaded.assets.downloadBytes,
           cacheStatus: memoryWarm ? "memory" : loaded.assets.cacheStatus,
           assetUrlHost: loaded.assets.modelDiagnostic.assetUrlHost,
@@ -794,8 +794,8 @@ export function createFastConformerShadowRunner(audio: Float32Array, speechRegio
           downloadBytes: memoryWarm ? 0 : loaded.assets.downloadBytes,
           downloadMs: memoryWarm ? 0 : loaded.assets.downloadMs,
           backend: loaded.backend,
-          ortImport: FASTCONFORMER_SHADOW_ORT_IMPORT,
-          ortVersion: FASTCONFORMER_SHADOW_ORT_VERSION,
+          ortImport: FASTCONFORMER_ORT_IMPORT,
+          ortVersion: FASTCONFORMER_ORT_VERSION,
           executionProvider: "wasm",
           wasmNumThreads: 1,
           wasmSimd: true,

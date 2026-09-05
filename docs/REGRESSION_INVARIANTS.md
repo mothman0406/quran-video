@@ -13,13 +13,11 @@ separate approved milestone intentionally changes the display contract.
 - VAD stays enabled and constrains acoustic timing work.
 - Timeline and preview use the same editable `CaptionSegment` interval.
 - There is exactly one authoritative automatic `CaptionSegment` timing array.
-  The central timing-engine selector promotes a completed, structurally valid
-  Tilawa FastConformer global canonical alignment; otherwise it returns the
-  existing legacy resolver as an explicit `legacy-fallback`. Caption generation
-  consumes that selected array once. Passage identification remains the
-  whole-recording Whisper matcher. Darten, Whisper word timing, the old global
-  solver, and evidence-weighted results are diagnostics/fallback infrastructure
-  and cannot veto a structurally valid FastConformer result.
+  A completed, structurally valid Tilawa FastConformer global canonical
+  alignment generates it once. Passage identification remains the
+  whole-recording Whisper matcher. If FastConformer cannot produce a valid
+  result, recognition returns a typed, recoverable `quran-timing` failure and
+  generates no automatic captions.
 - Manual timeline edits remain authoritative over generated timing.
 - The final caption remains through actual recitation completion.
 - For a promoted FastConformer timing, each non-final ayah ends exactly at the
@@ -32,10 +30,6 @@ separate approved milestone intentionally changes the display contract.
   model/version, and settings. Ties prefer stay, then one-state advance, then
   blank-skipping advance.
 
-In `chunk-fallback`, local ASR is interval-only evidence: a point estimate may
-come only from a shared VAD-corroboration predicate applied to the interval
-that produced it. No unvalidated model may form a hard corridor that excludes
-strong independent lexical/VAD evidence. No ayah boundary is repaired by
-adding one millisecond, and unavailable/insufficient evidence uses an explicit,
-ordered, contiguous, non-collapsing estimated fallback. In `word` mode CTC
-remains diagnostic and cannot alter timestamped sequence alignment.
+Whisper word and chunk timestamps remain passage-identification evidence only;
+they never produce authoritative Quran caption boundaries. VAD constrains the
+FastConformer acoustic window and the absolute source offset is applied once.

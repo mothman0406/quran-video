@@ -1,8 +1,7 @@
-import type { TimingRecoveryPlan, TranscriptChunk } from "./core";
+import type { TranscriptChunk } from "./core";
 import type { AudioAnalysis } from "./audio-analysis.ts";
 import type { VadSpeechRegion } from "./speech-regions.ts";
-import type { CtcShadowRunner } from "./local-ctc.ts";
-import type { FastConformerShadowRunner } from "./local-fastconformer.ts";
+import type { FastConformerRunner } from "./local-fastconformer.ts";
 
 /** The boundary used by recognition clients; implementations never receive a server URL. */
 export type RecognitionTranscriber = {
@@ -49,23 +48,9 @@ export type LocalTranscriptionResult = {
   audioAnalysis: AudioAnalysis;
   /** Silero VAD regions in absolute source-video time. */
   speechRegions: VadSpeechRegion[];
-  /** Runs bounded ASR windows after canonical passage identity is known. */
-  recoverTiming?: (
-    plan: TimingRecoveryPlan,
-    onProgress?: (progress: TranscriptionProgress) => void,
-  ) => Promise<LocalTimingRecoveryResult>;
-  /** Shadow-only known-passage CTC timing. It never mutates caption timing. */
-  runCtcShadow?: CtcShadowRunner;
   /** Known-passage FastConformer timing run. Passage identity remains owned by
-   * the existing Whisper matcher; the result is structurally selected later. */
-  runFastConformerShadow?: FastConformerShadowRunner;
-};
-
-export type LocalTimingRecoveryResult = {
-  analysisRunId: string;
-  chunks: TranscriptChunk[];
-  windowsRun: number;
-  transcriptionMs: number;
+   * the existing Whisper matcher; successful output is the sole timing input. */
+  runFastConformer?: FastConformerRunner;
 };
 
 export type TimestampValidationDiagnostics = {
