@@ -133,26 +133,26 @@ export type PassageIdentificationCompare = {
     span: { firstVerseKey: string; lastVerseKey: string; firstWordIndex: number; lastWordIndex: number } | null;
     confidence: number | null;
   };
-  fastConformerShadow: FastConformerIdentificationResult;
+  fastConformer: FastConformerIdentificationResult;
   agreement: { sameSurah: boolean | null; overlappingAyat: boolean | null; exactSpan: boolean | null };
 };
 
 export function comparePassageIdentification(
   currentProduction: PassageIdentificationCompare["currentProduction"],
-  fastConformerShadow: FastConformerIdentificationResult,
+  fastConformer: FastConformerIdentificationResult,
 ): PassageIdentificationCompare {
-  const shadow = fastConformerShadow.span;
+  const identified = fastConformer.span;
   const production = currentProduction.span;
-  if (!shadow || !production) return { currentProduction, fastConformerShadow, agreement: { sameSurah: null, overlappingAyat: null, exactSpan: null } };
+  if (!identified || !production) return { currentProduction, fastConformer, agreement: { sameSurah: null, overlappingAyat: null, exactSpan: null } };
   const [firstSurah, firstAyah] = production.firstVerseKey.split(":").map(Number);
   const [lastSurah, lastAyah] = production.lastVerseKey.split(":").map(Number);
-  const sameSurah = shadow.start.surah === firstSurah && shadow.end.surah === lastSurah;
-  const overlappingAyat = shadow.start.surah === lastSurah && shadow.end.surah === firstSurah
-    ? shadow.start.ayah <= lastAyah! && shadow.end.ayah >= firstAyah!
+  const sameSurah = identified.start.surah === firstSurah && identified.end.surah === lastSurah;
+  const overlappingAyat = identified.start.surah === lastSurah && identified.end.surah === firstSurah
+    ? identified.start.ayah <= lastAyah! && identified.end.ayah >= firstAyah!
     : false;
-  const exactSpan = shadow.start.surah === firstSurah && shadow.start.ayah === firstAyah && shadow.start.canonicalWordIndex === production.firstWordIndex
-    && shadow.end.surah === lastSurah && shadow.end.ayah === lastAyah && shadow.end.canonicalWordIndex === production.lastWordIndex;
-  return { currentProduction, fastConformerShadow, agreement: { sameSurah, overlappingAyat, exactSpan } };
+  const exactSpan = identified.start.surah === firstSurah && identified.start.ayah === firstAyah && identified.start.canonicalWordIndex === production.firstWordIndex
+    && identified.end.surah === lastSurah && identified.end.ayah === lastAyah && identified.end.canonicalWordIndex === production.lastWordIndex;
+  return { currentProduction, fastConformer, agreement: { sameSurah, overlappingAyat, exactSpan } };
 }
 
 function ngramKey(tokens: readonly string[]) {

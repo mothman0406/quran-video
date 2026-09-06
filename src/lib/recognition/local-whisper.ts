@@ -222,7 +222,7 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
     };
     const audioAnalysis = analyzeMonoPcm(audio, TARGET_SAMPLE_RATE);
     onProgress?.({ phase: "detecting-speech", message: "Checking for local human speech with Silero VAD…" });
-    let speechRegions;
+    let speechRegions: Awaited<ReturnType<typeof detectLocalSpeechRegions>>;
     try {
       speechRegions = await detectLocalSpeechRegions(audio, TARGET_SAMPLE_RATE);
     } catch (error) {
@@ -231,6 +231,7 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
     if (!speechRegions.length) {
       throw new Error("No credible human speech was detected in this recording, so Quran captions were not timed from background audio.");
     }
+    async function runWhisperFallback(): Promise<LocalTranscriptionResult> {
     const loadingStartedAt = performance.now();
     const { transcriber, backend } = await createPipeline(supportsWebGpu(), onProgress);
     const modelLoadMs = Math.round(performance.now() - loadingStartedAt);
@@ -319,10 +320,30 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       audioAnalysis,
       speechRegions,
       // The known-passage runner remains timing-only. The independent runner
-      // is shadow evidence and cannot participate in caption authority.
+      // identifies a Quran passage but cannot emit caption timing.
       runFastConformer: createFastConformerRunner(audio, speechRegions, run.analysisRunId),
       runFastConformerIdentification: createFastConformerIdentificationRunner(audio, speechRegions),
     };
+    }
+    if (requestedRun?.deferWhisper) {
+      return {
+        run,
+        chunks: [],
+        rawTranscript: "",
+        backend: "wasm",
+        timestampMode: "chunk-fallback",
+        timestampValidation: { asrWordCount: 0, timestampedWordCount: 0, zeroDurationCount: 0, rangeMs: null },
+        modelLoadMs: 0,
+        transcriptionMs: 0,
+        durationMs: Math.round(performance.now() - startedAt),
+        audioAnalysis,
+        speechRegions,
+        runFastConformer: createFastConformerRunner(audio, speechRegions, run.analysisRunId),
+        runFastConformerIdentification: createFastConformerIdentificationRunner(audio, speechRegions),
+        runWhisperFallback,
+      };
+    }
+    return runWhisperFallback();
   },
 };
 

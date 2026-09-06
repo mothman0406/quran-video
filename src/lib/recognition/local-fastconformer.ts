@@ -198,7 +198,7 @@ export type FastConformerResult = {
 };
 
 export type FastConformerRunner = (verses: readonly QuranCorpusVerse[], matches: readonly { startMs: number; endMs: number }[]) => Promise<FastConformerResult>;
-/** Independent Quran-wide CTC identifier. Its result is shadow evidence only. */
+/** Independent Quran-wide CTC identifier used before canonical passage selection. */
 export type FastConformerIdentificationRunner = () => Promise<FastConformerIdentificationResult>;
 
 let sharedModelPromise: Promise<LoadedFastConformer> | null = null;
@@ -772,8 +772,9 @@ function unavailableIdentification(reason: string, totalMs: number): FastConform
 }
 
 /**
- * Creates a Quran-wide FastConformer CTC search runner. This deliberately has
- * no Whisper input and never yields a FinalCanonicalSpan or caption timing.
+ * Creates a Quran-wide FastConformer CTC search runner. It has no Whisper
+ * input and never yields caption timing; the production evidence gate owns its
+ * later canonical-span decision.
  */
 export function createFastConformerIdentificationRunner(audio: Float32Array, speechRegions: readonly VadSpeechRegion[]): FastConformerIdentificationRunner {
   return async () => {

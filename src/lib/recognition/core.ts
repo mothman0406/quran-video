@@ -131,8 +131,8 @@ export type PassageCandidateDiagnostic = {
 export type PassageAmbiguityState = "confident-unique" | "plausible-ambiguous" | "no-reliable-match";
 
 export type PassageInference = {
-  /** Passage identity always comes from the initial whole-recording ASR text. */
-  passageSource: "primary-transcript";
+  /** Production authority is FastConformer or the whole-recording Whisper fallback. */
+  passageSource: "primary-transcript" | "fastconformer-quran" | "whisper-fallback";
   state: PassageAmbiguityState;
   candidates: PassageCandidateDiagnostic[];
   candidateMargin: number | null;
@@ -2717,7 +2717,42 @@ export type RecognitionOptions = {
   /** Result from the pre-identified canonical passage FastConformer run. It
    * can replace only automatic timing, never passage identity. */
   fastConformerResult?: FastConformerResult | null;
+  /** A validated Quran-wide FastConformer span. It selects passage identity
+   * only; FastConformer forced alignment remains the sole timing authority. */
+  passageOverride?: { canonicalSpan: CanonicalSpan; passageSource: "fastconformer-quran" | "whisper-fallback" };
 };
+
+/** Converts Quran-wide CTC coordinates into the single downstream canonical
+ * span model. Corpus text and full-ayah completion remain canonical here. */
+export function canonicalSpanFromFastConformerIdentification(
+  span: { start: { surah: number; ayah: number; canonicalWordIndex: number }; end: { surah: number; ayah: number; canonicalWordIndex: number } } | null,
+  corpus: readonly QuranCorpusVerse[] = hafsVerses,
+): CanonicalSpan | null {
+  if (!span || span.start.surah !== span.end.surah) return null;
+  const firstVerseKey = `${span.start.surah}:${span.start.ayah}`;
+  const lastVerseKey = `${span.end.surah}:${span.end.ayah}`;
+  const firstIndex = corpus.findIndex((verse) => verse.verseKey === firstVerseKey);
+  const lastIndex = corpus.findIndex((verse) => verse.verseKey === lastVerseKey);
+  if (firstIndex < 0 || lastIndex < firstIndex) return null;
+  const firstWords = normalizedVerseWords(corpus[firstIndex]!);
+  const lastWords = normalizedVerseWords(corpus[lastIndex]!);
+  if (!Number.isInteger(span.start.canonicalWordIndex) || !Number.isInteger(span.end.canonicalWordIndex)
+    || span.start.canonicalWordIndex < 1 || span.end.canonicalWordIndex < 1
+    || span.start.canonicalWordIndex > firstWords.length || span.end.canonicalWordIndex > lastWords.length
+    || (firstIndex === lastIndex && span.start.canonicalWordIndex > span.end.canonicalWordIndex)) return null;
+  return {
+    surah: span.start.surah,
+    firstVerseKey,
+    firstWordIndex: span.start.canonicalWordIndex,
+    firstWordText: firstWords[span.start.canonicalWordIndex - 1]!,
+    firstBoundary: span.start.canonicalWordIndex === 1 ? "verse-beginning" : "mid-verse",
+    lastVerseKey,
+    lastWordIndex: span.end.canonicalWordIndex,
+    lastWordText: lastWords[span.end.canonicalWordIndex - 1]!,
+    lastBoundary: span.end.canonicalWordIndex === lastWords.length ? "verse-end" : "mid-verse",
+    coveredVerseKeys: corpus.slice(firstIndex, lastIndex + 1).map((verse) => verse.verseKey),
+  };
+}
 
 function sameVerseKeys(actual: readonly string[], expected: readonly string[]): boolean {
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
@@ -3020,18 +3055,46 @@ export function analyzeTranscript(
   const primary = isPrimaryTranscript(input)
     ? input
     : createPrimaryTranscript(input, options.timestampMode ?? (input.some((chunk) => chunk.words?.length) ? "word" : "chunk-fallback"));
-  const { diagnostics, passage, best } = identifyPrimaryTranscript(primary, options);
-  if (!best) {
-    const timing = selectAuthoritativeTimingEngine({
-      expectedVerseKeys: [], fastConformerResult: options.fastConformerResult, sourceDurationMs: 0,
-    });
-    return { matches: [], verseBoundaries: [], ...timing, diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, globalBoundarySolver: null, shadowBoundarySolver: null, timingRecoveryPlan: null };
-  }
+  const { diagnostics, passage: whisperPassage, best } = identifyPrimaryTranscript(primary, options);
+  const passage: PassageInference = options.passageOverride ? {
+    ...whisperPassage,
+    passageSource: options.passageOverride.passageSource,
+    state: "confident-unique",
+    canonicalSpan: options.passageOverride.canonicalSpan,
+    boundaryCompletion: { extendedBackward: false, extendedForward: false },
+  } : whisperPassage;
   const verses = options.corpus ?? hafsVerses;
   const timingChunks = [...primary.chunks, ...(options.timingEvidenceChunks ?? [])]
     .sort((left, right) => left.startMs - right.startMs);
   const sourceDurationMs = options.audioAnalysis?.durationMs
     ?? Math.max(1, ...timingChunks.map((chunk) => chunk.endMs), ...(options.speechRegions ?? []).map((region) => region.endMs));
+  if (!best || options.passageOverride) {
+    if (options.passageOverride) {
+      const timing = selectAuthoritativeTimingEngine({
+        expectedVerseKeys: passage.canonicalSpan!.coveredVerseKeys,
+        fastConformerResult: options.fastConformerResult,
+        sourceDurationMs,
+      });
+      const boundaries = new Map((timing.authoritativeTimingEngine?.verseTimings ?? []).map((boundary) => [boundary.verseKey, boundary]));
+      const provisionalMatches: RecognitionMatch[] = passage.canonicalSpan!.coveredVerseKeys.map((verseKey) => {
+        const verse = verses.find((item) => item.verseKey === verseKey)!;
+        const boundary = boundaries.get(verseKey);
+        const wordCount = normalizedVerseWords(verse).length;
+        const startMs = boundary?.startMs ?? 0;
+        const endMs = boundary?.endMs ?? sourceDurationMs;
+        return {
+          verseKey, startMs, endMs, confidence: 1,
+          timing: { start: { timestampMs: startMs, source: "fastconformer" }, end: { timestampMs: endMs, source: "fastconformer" }, matchedText: verse.text },
+          wordSupport: { canonicalStartWordIndex: 1, canonicalEndWordIndex: wordCount, matchedCanonicalWordCount: wordCount, canonicalWordCount: wordCount, coverage: 1, evidenceQuality: 1 },
+        };
+      });
+      return { matches: timing.timingFailure ? [] : provisionalMatches, verseBoundaries: timing.authoritativeTimingEngine?.verseTimings ?? [], ...timing, diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, globalBoundarySolver: null, shadowBoundarySolver: null, timingRecoveryPlan: null };
+    }
+    const timing = selectAuthoritativeTimingEngine({
+      expectedVerseKeys: [], fastConformerResult: options.fastConformerResult, sourceDurationMs: 0,
+    });
+    return { matches: [], verseBoundaries: [], ...timing, diagnostics, passage, timingTrace: null, forcedAlignment: null, ctcShadow: null, globalBoundarySolver: null, shadowBoundarySolver: null, timingRecoveryPlan: null };
+  }
   const durationToleranceMs = 2;
   if (timingChunks.some((chunk) => chunk.startMs < 0 || chunk.endMs > sourceDurationMs + durationToleranceMs)) {
     throw new Error("Recognition timing belongs to a different source duration.");

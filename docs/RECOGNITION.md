@@ -5,15 +5,14 @@
 Recognition is a browser-local, accuracy-first hybrid pipeline:
 
 1. Decode the selected media once to mono PCM and build a 10 ms RMS envelope.
-2. Run lazy-loaded local Whisper Base Timestamped over overlapping 30-second windows.
-3. Freeze a `PrimaryTranscript`: the complete stitched ASR text, normalized tokens, whole-recording chunks, available word offsets, and timestamp mode.
-4. Retrieve high-recall Quran candidates and score contiguous passages from `PrimaryTranscript` only. This matcher has no PCM, word-timestamp, forced-alignment, or micro-ASR input.
-5. Freeze the selected contiguous canonical ayat. Canonical display ranges default to each full ayah; an unmatched first or last ASR word is not evidence that the reciter skipped it.
-6. Run a canonical-first alignment pass. Each canonical word receives an evidence-graded timing record, including interpolated words between anchors. Timestamped ASR words are direct evidence; chunk text is only coarse evidence. A backward jump requires a following sequential word, so one noisy token cannot invent a repetition.
+2. Run FastConformer Quran-wide CTC retrieval/reranking over VAD-qualified windows, solve a surah-aware continuity path, and pass it through the centralized production evidence gate.
+3. Adapt an accepted FastConformer word-level range to `FinalCanonicalSpan`. Canonical display ranges remain full ayat; identifier word boundaries remain evidence only.
+4. Only when FastConformer is insufficient, ambiguous, or structurally invalid, run lazy-loaded local Whisper Base Timestamped and retain its whole-recording matcher as the fallback passage engine.
+5. Run the existing canonical-first FastConformer forced alignment. It remains the sole automatic timing authority regardless of passage source.
 7. If word timestamps are unavailable, or an ayah has no direct anchor, trim the timing search to detected speech regions and run bounded overlapping local micro-ASR windows against the already-known passage. Micro-ASR is timing-only evidence and cannot replace the primary passage. The first verified Quran-containing window anchors onset; a missing interior ayah is explicitly searched between neighbouring evidence before interpolation is allowed.
 8. Refine verified onset, offset, and ayah transitions from the local PCM envelope. Derive one complete-ayah caption display set per ayah, without mutating the canonical recognition result.
 
-The canonical Hafs corpus is the displayed text authority. Whisper supplies retrieval and coarse temporal evidence only.
+The canonical Hafs corpus is the displayed text authority. FastConformer identification decides what passage was recited; FastConformer forced alignment decides when its canonical words occur. Whisper is fallback passage evidence only.
 
 ## Alternatives considered
 

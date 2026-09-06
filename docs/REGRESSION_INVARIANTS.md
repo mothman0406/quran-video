@@ -10,14 +10,16 @@ separate approved milestone intentionally changes the display contract.
   segments only when it exceeds that limit.
 - Every displayed ayah is complete: no first, internal, or final canonical
   word may be omitted because ASR missed it.
-- Passage identification uses the whole-recording Whisper transcript and does
-  not depend on timestamp quality.
+- FastConformer Quran-wide identification is the primary passage authority;
+  Whisper is a secondary fallback and does not veto an accepted FastConformer
+  passage. Whisper matching remains independent of timestamp quality.
 - VAD stays enabled and constrains acoustic timing work.
 - Timeline and preview use the same editable `CaptionSegment` interval.
 - There is exactly one authoritative automatic `CaptionSegment` timing array.
   A completed, structurally valid Tilawa FastConformer global canonical
-  alignment generates it once. Passage identification remains the
-  whole-recording Whisper matcher. If FastConformer cannot produce a valid
+  alignment generates it once. Passage identification first uses the
+  FastConformer Quran-wide evidence gate, then falls back to the whole-recording
+  Whisper matcher only when that gate does not pass. If FastConformer cannot produce a valid
   result, recognition returns a typed, recoverable `quran-timing` failure and
   generates no automatic captions.
 - Manual timeline edits remain authoritative over generated timing.

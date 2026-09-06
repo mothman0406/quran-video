@@ -1,6 +1,35 @@
 # Status
 
-## Current milestone: FastConformer Quran-wide identification shadow mode
+## Current milestone: FastConformer Quran-wide identification primary
+
+Complete:
+
+- Promoted the browser-local FastConformer Quran-wide CTC identifier to the
+  production passage authority. Audio/VAD preparation now defers Whisper; an
+  accepted FastConformer result proceeds directly to canonical forced alignment
+  in production, while development can still run Whisper for comparison.
+- Added one documented deterministic evidence gate with structural hard gates,
+  CTC fit and runner-up margin, VAD-explained-audio, and multi-window/surah
+  agreement checks. Composite confidence remains diagnostic only. The supplied
+  noisy Surah 74 shape (four agreeing windows, -0.233966 CTC, 0.183743 margin,
+  fully explained voiced audio) is accepted as `fastconformer-quran`.
+- Added the canonical-span adapter so FastConformer preserves mid-ayah word
+  evidence while downstream alignment, display splitting, caption timing, and
+  manual edits retain their established contracts. Whisper is now only the
+  typed fallback (`whisper-fallback`), and both-engine failure remains manual
+  correction/no confident passage.
+- Replaced shadow diagnostics with `PASSAGE_IDENTIFICATION_DECISION`, including
+  engine, evidence gate, spans, optional prelude evidence, fallback state,
+  disagreement data, and FastConformer timing/performance fields. The two
+  FastConformer passes are still intentionally separate; no mathematically
+  unsafe acoustic-output reuse was introduced.
+
+Verification: `npx tsc --noEmit`, `npm test` (182 passing), `npm run lint`,
+`npm run build`, and `git diff --check` pass. Lint retains four existing
+unused legacy-timing helper warnings; build retains the existing non-fatal VAD
+ONNX Runtime dynamic-require warning.
+
+## Previous milestone: FastConformer Quran-wide identification shadow mode
 
 Complete:
 

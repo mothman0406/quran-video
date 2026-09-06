@@ -10,9 +10,10 @@ import {
   useRef,
   useState,
 } from "react";
-import { analyzeTranscript, createPrimaryTranscript, hafsSurahs, hafsVerses } from "@/lib/recognition/core";
+import { analyzeTranscript, canonicalSpanFromFastConformerIdentification, createPrimaryTranscript, hafsSurahs, hafsVerses } from "@/lib/recognition/core";
 import { FASTCONFORMER_MODEL, FASTCONFORMER_MODEL_ARTIFACT, FASTCONFORMER_MODEL_BYTES, FASTCONFORMER_MODEL_LICENSE, FASTCONFORMER_RUNTIME } from "@/lib/recognition/local-fastconformer";
 import { comparePassageIdentification } from "@/lib/recognition/fastconformer-identification";
+import { decideFastConformerPassage } from "@/lib/recognition/passage-decision";
 import type { TranscriptionProgress } from "@/lib/recognition/transcriber";
 import {
   recognitionToVerseAlignments,
@@ -150,6 +151,20 @@ const busyStages: Stage[] = [
   "captions",
 ];
 
+function recognitionStageLabel(stage: Stage) {
+  switch (stage) {
+    case "preparing": return "Preparing audio";
+    case "detecting-speech": return "Analyzing recitation";
+    case "loading-model": return "Preparing recognition";
+    case "transcribing": return "Analyzing recitation";
+    case "matching": return "Identifying Quran passage";
+    case "captions": return "Preparing captions";
+    case "complete": return "Captions ready";
+    case "error": return "Recognition needs attention";
+    default: return "Ready to recognize";
+  }
+}
+
 function publishAlignmentDebug(value: unknown) {
   if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
     Object.defineProperty(window, "__QURAN_ALIGNMENT_DEBUG__", { value, configurable: true });
@@ -175,6 +190,8 @@ export default function Home() {
   const [mediaSource, setMediaSource] = useState<MediaSource | null>(null);
   const [mediaTrim, setMediaTrim] = useState<MediaTrim>(createMediaTrim(0));
   const [stage, setStage] = useState<Stage>("idle");
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed by JSX below; this ESLint setup does not mark JSX expressions as references.
+  const recognitionStatusLabel = recognitionStageLabel(stage);
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [timingWarning, setTimingWarning] = useState<string | null>(null);
@@ -904,57 +921,65 @@ export default function Home() {
     try {
       const { localWhisperTranscriber } =
         await import("@/lib/recognition/local-whisper");
-      const result = await localWhisperTranscriber.transcribe(
+      const prepared = await localWhisperTranscriber.transcribe(
         videoFile,
         (next) => {
           if (job !== generation.current) return;
           setProgress(next);
           setStage(next.phase === "decoding" ? "preparing" : next.phase);
         },
+        { analysisRunId: crypto.randomUUID(), sourceIdentity: `${videoFile.name}:${videoFile.size}:${videoFile.lastModified}`, sourceObjectUrl: videoUrl, deferWhisper: true },
       );
       if (job !== generation.current) return;
       setStage("matching");
-      // This independent CTC search has no Whisper input and remains shadow
-      // evidence. It is intentionally run even when production matching fails.
-      const fastConformerShadow = result.runFastConformerIdentification
-        ? await result.runFastConformerIdentification()
+      const fastConformerIdentification = prepared.runFastConformerIdentification
+        ? await prepared.runFastConformerIdentification()
         : null;
       if (job !== generation.current) return;
+      const fastConformerSpan = canonicalSpanFromFastConformerIdentification(fastConformerIdentification?.canonicalSpan ?? null);
+      const fastConformerDecision = decideFastConformerPassage(fastConformerIdentification, fastConformerSpan);
+      // Development comparison keeps both engines observable. Production does
+      // not pay Whisper's model/inference cost after accepted FC evidence.
+      const runWhisperComparison = process.env.NODE_ENV !== "production";
+      const result = !fastConformerDecision.accepted || runWhisperComparison
+        ? (await prepared.runWhisperFallback?.()) ?? prepared
+        : prepared;
+      if (job !== generation.current) return;
       const primaryTranscript = createPrimaryTranscript(result.chunks, result.timestampMode);
-      let analysis = analyzeTranscript(primaryTranscript, {
+      const whisperAnalysis = analyzeTranscript(primaryTranscript, {
         audioAnalysis: result.audioAnalysis,
         speechRegions: result.speechRegions,
       });
-      const passageComparison = fastConformerShadow
+      const useFastConformer = fastConformerDecision.accepted && fastConformerSpan !== null;
+      const selectedCanonicalSpan = useFastConformer ? fastConformerSpan : whisperAnalysis.passage.canonicalSpan;
+      const passageComparison = fastConformerIdentification
         ? comparePassageIdentification({
           engine: "whisper-quran-matcher",
-          span: analysis.passage.canonicalSpan ? {
-            firstVerseKey: analysis.passage.canonicalSpan.firstVerseKey,
-            lastVerseKey: analysis.passage.canonicalSpan.lastVerseKey,
-            firstWordIndex: analysis.passage.canonicalSpan.firstWordIndex,
-            lastWordIndex: analysis.passage.canonicalSpan.lastWordIndex,
+          span: whisperAnalysis.passage.canonicalSpan ? {
+            firstVerseKey: whisperAnalysis.passage.canonicalSpan.firstVerseKey,
+            lastVerseKey: whisperAnalysis.passage.canonicalSpan.lastVerseKey,
+            firstWordIndex: whisperAnalysis.passage.canonicalSpan.firstWordIndex,
+            lastWordIndex: whisperAnalysis.passage.canonicalSpan.lastWordIndex,
           } : null,
-          confidence: analysis.passage.identityConfidence,
-        }, fastConformerShadow)
+          confidence: whisperAnalysis.passage.identityConfidence,
+        }, fastConformerIdentification)
         : null;
-      const fastConformerAlignment = analysis.matches.length && result.runFastConformer
-        ? await result.runFastConformer(hafsVerses.filter((verse) => new Set(analysis.matches.map((match) => match.verseKey)).has(verse.verseKey)), analysis.matches)
+      const speechStartMs = result.speechRegions[0]?.startMs ?? 0;
+      const speechEndMs = result.speechRegions.at(-1)?.endMs ?? result.audioAnalysis.durationMs;
+      const alignmentMatches = selectedCanonicalSpan?.coveredVerseKeys.map((verseKey) => ({ verseKey, startMs: speechStartMs, endMs: speechEndMs })) ?? [];
+      const fastConformerAlignment = alignmentMatches.length && result.runFastConformer
+        ? await result.runFastConformer(hafsVerses.filter((verse) => selectedCanonicalSpan!.coveredVerseKeys.includes(verse.verseKey)), alignmentMatches)
         : null;
-      if (fastConformerAlignment) {
-        analysis = analyzeTranscript(primaryTranscript, {
-          audioAnalysis: result.audioAnalysis,
-          speechRegions: result.speechRegions,
-          fastConformerResult: fastConformerAlignment,
-        });
-      }
+      const analysis = useFastConformer
+        ? analyzeTranscript(primaryTranscript, { audioAnalysis: result.audioAnalysis, speechRegions: result.speechRegions, fastConformerResult: fastConformerAlignment, passageOverride: { canonicalSpan: fastConformerSpan, passageSource: "fastconformer-quran" } })
+        : selectedCanonicalSpan
+          ? analyzeTranscript(primaryTranscript, { audioAnalysis: result.audioAnalysis, speechRegions: result.speechRegions, fastConformerResult: fastConformerAlignment, passageOverride: { canonicalSpan: selectedCanonicalSpan, passageSource: "whisper-fallback" } })
+          : whisperAnalysis;
       if (analysis.matches.length === 0) {
         alignmentDebug.current = {
-          FASTCONFORMER_QURAN_IDENTIFICATION: fastConformerShadow,
-          CROSS_SURAH_CANDIDATES_REJECTED: fastConformerShadow?.CROSS_SURAH_CANDIDATES_REJECTED ?? 0,
+          PASSAGE_IDENTIFICATION_DECISION: { selectedEngine: "manual", acceptedSpan: null, decisionReason: fastConformerDecision.reason, fastConformer: { identification: fastConformerIdentification, evidenceGate: fastConformerDecision }, whisper: { attempted: result !== prepared, state: whisperAnalysis.passage.state, span: whisperAnalysis.passage.canonicalSpan, confidence: whisperAnalysis.passage.identityConfidence }, disagreement: passageComparison },
+          CROSS_SURAH_CANDIDATES_REJECTED: fastConformerIdentification?.CROSS_SURAH_CANDIDATES_REJECTED ?? 0,
           WHISPER_VS_FASTCONFORMER: passageComparison,
-          FC_RECOVERY_CANDIDATE: analysis.passage.state === "no-reliable-match" && fastConformerShadow?.status === "complete" && fastConformerShadow.span
-            ? { message: "Whisper produced no match while FastConformer has a shadow Quran candidate.", candidate: fastConformerShadow.span, confidence: fastConformerShadow.confidence }
-            : null,
           passage: analysis.passage,
         };
         publishAlignmentDebug(alignmentDebug.current);
@@ -1010,12 +1035,20 @@ export default function Home() {
           resultState: analysis.passage.state,
           shadowComparison: analysis.passage.shadowComparison,
         },
-        FASTCONFORMER_QURAN_IDENTIFICATION: fastConformerShadow,
-        CROSS_SURAH_CANDIDATES_REJECTED: fastConformerShadow?.CROSS_SURAH_CANDIDATES_REJECTED ?? 0,
-        WHISPER_VS_FASTCONFORMER: passageComparison,
-        FC_RECOVERY_CANDIDATE: analysis.passage.state === "no-reliable-match" && fastConformerShadow?.status === "complete" && fastConformerShadow.span
-          ? { message: "Whisper produced no match while FastConformer has a shadow Quran candidate.", candidate: fastConformerShadow.span, confidence: fastConformerShadow.confidence }
+        PASSAGE_IDENTIFICATION_DECISION: {
+          selectedEngine: analysis.passage.passageSource,
+          acceptedSpan: selectedCanonicalSpan,
+          decisionReason: useFastConformer ? fastConformerDecision.reason : whisperAnalysis.passage.state,
+          fastConformer: { status: fastConformerIdentification?.status ?? "not-run", span: fastConformerIdentification?.canonicalSpan ?? null, evidenceGate: fastConformerDecision, confidence: fastConformerIdentification?.confidence ?? null, selectedSurah: fastConformerIdentification?.selectedSurah ?? null, optionalPrelude: fastConformerIdentification?.optionalPrelude ?? null, windows: fastConformerIdentification?.windowResults.map((window) => ({ index: window.index, state: window.state, selectedCandidate: window.selectedCandidate })) ?? [] },
+          whisper: { attempted: result !== prepared, state: whisperAnalysis.passage.state, span: whisperAnalysis.passage.canonicalSpan, confidence: whisperAnalysis.passage.identityConfidence },
+          disagreement: passageComparison,
+        },
+        PASSAGE_ENGINE_DISAGREEMENT: useFastConformer && whisperAnalysis.passage.state === "confident-unique" && passageComparison?.agreement.exactSpan === false
+          ? { fastConformer: fastConformerSpan, whisper: whisperAnalysis.passage.canonicalSpan, overlap: passageComparison.agreement.overlappingAyat, decisionReason: fastConformerDecision.reason }
           : null,
+        FASTCONFORMER_QURAN_IDENTIFICATION: fastConformerIdentification,
+        CROSS_SURAH_CANDIDATES_REJECTED: fastConformerIdentification?.CROSS_SURAH_CANDIDATES_REJECTED ?? 0,
+        WHISPER_VS_FASTCONFORMER: passageComparison,
         verseTimingTable: next.map((item) => ({
           verse: item.verseKey,
           predictedStartMs: item.startMs,
@@ -2301,7 +2334,7 @@ export default function Home() {
                 aria-live="polite"
                 className="mt-4 rounded-2xl border border-[#c8d4cc] bg-[#edf4ef] px-4 py-3 text-sm text-[#35604f]"
               >
-                <p className="font-semibold">{stageLabel(stage)}</p>
+                <p className="font-semibold">{recognitionStatusLabel}</p>
                 <p className="mt-1 text-xs">
                   Audio is processed locally and is not uploaded.
                   {progress?.phase === "transcribing" && progress.total

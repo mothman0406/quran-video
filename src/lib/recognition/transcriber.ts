@@ -17,6 +17,8 @@ export type RecognitionRunSnapshot = {
   analysisRunId: string;
   sourceIdentity: string;
   sourceObjectUrl: string | null;
+  /** Decode/VAD first and retain Whisper as an explicit secondary runner. */
+  deferWhisper?: boolean;
 };
 
 export type TranscriptionProgress = {
@@ -51,8 +53,10 @@ export type LocalTranscriptionResult = {
   /** Known-passage FastConformer timing run. Passage identity remains owned by
    * the existing Whisper matcher; successful output is the sole timing input. */
   runFastConformer?: FastConformerRunner;
-  /** Quran-wide CTC identification, retained exclusively as shadow evidence. */
+  /** Quran-wide CTC identification, evaluated before Whisper fallback. */
   runFastConformerIdentification?: FastConformerIdentificationRunner;
+  /** Available only for a deferred browser-local preparation. */
+  runWhisperFallback?: () => Promise<LocalTranscriptionResult>;
 };
 
 export type TimestampValidationDiagnostics = {

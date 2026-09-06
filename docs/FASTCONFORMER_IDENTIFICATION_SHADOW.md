@@ -1,30 +1,29 @@
-# FastConformer Quran identification — shadow mode
+# FastConformer Quran identification — production primary
 
-This milestone adds an independent, browser-local Quran-wide passage search.
-It is diagnostic only: it must not select `FinalCanonicalSpan`, create
-`CaptionSegment`s, or influence editor timing.
+FastConformer is the browser-local production passage identifier. Its
+Quran-wide output passes one deterministic evidence gate before being adapted
+to `FinalCanonicalSpan`; it still never supplies caption timing.
 
 ## Architecture
 
-Current production authority remains:
+Current production authority is:
 
 ```text
-audio -> Whisper Quran matcher -> FinalCanonicalSpan -> FastConformer forced alignment -> CaptionSegments
+audio -> FastConformer Quran-wide identifier -> evidence gate -> FinalCanonicalSpan -> FastConformer forced alignment -> CaptionSegments
 ```
 
-Shadow comparison runs independently from the completed local audio/VAD job:
+Whisper is retained as the fallback when the FastConformer gate rejects or
+cannot structurally validate a passage. Development builds may also run it as
+an explicit comparison after FastConformer succeeds:
 
 ```text
-audio -> FastConformer CTC -> Quran-wide retrieval -> CTC reranking -> continuity solver -> shadow span
+audio -> FastConformer CTC -> Quran-wide retrieval -> CTC reranking -> continuity solver -> accepted span
 ```
-
-The intended future architecture, not enabled here, is FastConformer
-identification -> `FinalCanonicalSpan` -> the existing FastConformer forced
-alignment, with Whisper as corroboration/fallback.
 
 The two FastConformer jobs are separate. The existing known-passage runner
-continues to create exact canonical word timing only after Whisper supplies the
-range. The new runner has no Whisper input and cannot emit timing or captions.
+continues to create exact canonical word timing only after the selected engine
+supplies the canonical range. The identifier has no Whisper input and cannot
+emit timing or captions.
 Their inference output could be shared in a later refactor only when the audio
 window is identical; this milestone keeps the established alignment path intact
 and prioritizes regression safety over reuse.
@@ -83,9 +82,10 @@ explained.
 ## Debug and performance
 
 Development debug (`Copy Alignment Debug` or `window.__QURAN_ALIGNMENT_DEBUG__`)
-includes `FASTCONFORMER_QURAN_IDENTIFICATION`, `WHISPER_VS_FASTCONFORMER`, and
-`FC_RECOVERY_CANDIDATE` when Whisper has no reliable match while FastConformer
-has a shadow span. Verbose candidates remain outside production UI.
+includes `PASSAGE_IDENTIFICATION_DECISION`, the evidence gate, selected engine,
+and `WHISPER_VS_FASTCONFORMER` when comparison ran. A reliable but conflicting
+Whisper result is recorded as a development disagreement; it cannot override
+an accepted FastConformer passage. Verbose candidates remain outside production UI.
 
 The result records model inference time, retrieval time, reranking time,
 number reranked, and total elapsed time. The Quran index is built once per
