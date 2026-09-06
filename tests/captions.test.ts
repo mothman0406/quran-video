@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { CANONICAL_BASMALAH_ARABIC, arabicCaptionDisplay, arabicIndicNumber, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, composeArabicCaptionText, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { CANONICAL_BASMALAH_ARABIC, arabicCaptionDisplay, arabicIndicNumber, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, cleanQuranArabicForDisplay, composeArabicCaptionText, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -48,6 +48,20 @@ test("inline ayah ornaments use Arabic-Indic digits without mutating Quran text"
   assert.equal(arabicCaptionDisplay(segment!, true).verseNumber, "١");
   assert.equal(composeArabicCaptionText(segment!, true), `${segment!.arabic}\u00a0١`);
   assert.equal(segment!.arabic, content["93:1"].arabic.uthmani);
+});
+
+test("caption display removes audited Quran annotations while retaining vocalization and the generated verse number", () => {
+  const canonical = "قُلْۖ هُوَۗ ٱللَّهُۘ أَحَدٌ۟ وَٱللَّهُ۠ ٱلصَّمَدُۢ وَهُوَۥ عَلِيمٌۭ رَحْمَٰنٌ";
+  const cleaned = cleanQuranArabicForDisplay(canonical);
+  assert.equal(cleaned, "قُلْ هُوَ ٱللَّهُ أَحَدٌ وَٱللَّهُ ٱلصَّمَدُ وَهُوَ عَلِيمٌ رَحْمَٰنٌ");
+  const auditedAnnotations = "\u06D6\u06D7\u06D8\u06D9\u06DA\u06DB\u06DC\u06DF\u06E0\u06E2\u06E3\u06E5\u06E6\u06E7\u06E8\u06EA\u06EB\u06EC\u06ED";
+  assert.equal(cleanQuranArabicForDisplay(`ا${auditedAnnotations}ب`), "اب");
+  assert.ok(cleaned.includes("ْ"), "sukun is ordinary vocalization");
+  assert.ok(cleaned.includes("ٰ"), "superscript alef is ordinary readable orthography");
+
+  const segment = { ...createCaptionSegments([alignment], content)[0]!, arabic: canonical, verseKeys: ["112:1"] };
+  assert.equal(arabicCaptionDisplay(segment, true).text, `${cleaned}\u00a0١`);
+  assert.equal(segment.arabic, canonical, "presentation cleaning never mutates the stored canonical segment");
 });
 
 test("a terminal source ornament is replaced by the font's single numbered ornament for preview and export", () => {

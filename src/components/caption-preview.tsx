@@ -1,9 +1,10 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, type PointerEvent, type RefObject } from "react";
-import { arabicCaptionDisplay, captionBackgroundStyle, captionVisualStatesAtTime, getActiveCaptionSegment, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
+import { arabicCaptionDisplay, captionBackgroundStyle, captionVisualStatesAtTime, getActiveCaptionSegment, linkedCaptionStackLayout, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import { quranFontDefinitions } from "@/lib/quran/content";
+import type { ProjectFormat } from "@/lib/schemas/project";
 
 export type CaptionObject = "arabic" | "translation";
 export type CaptionResizeEdge = "left" | "right";
@@ -15,6 +16,7 @@ type CaptionPreviewProps = {
   typography: Typography;
   captionBackground: CaptionBackground;
   positioning: CaptionPositioning;
+  format: ProjectFormat;
   transitionSettings: TransitionSettings;
   showVerseNumber: boolean;
   selectedObject: CaptionObject | null;
@@ -32,6 +34,7 @@ function CaptionPreview({
   typography,
   captionBackground,
   positioning,
+  format,
   transitionSettings,
   showVerseNumber,
   selectedObject,
@@ -42,10 +45,39 @@ function CaptionPreview({
   onPointerUp,
 }: CaptionPreviewProps) {
   const layerRefs = useRef(new Map<string, HTMLDivElement>());
+  const linkedStackRefs = useRef(new Map<string, HTMLDivElement>());
+  const [linkedStackCenters, setLinkedStackCenters] = useState<Record<string, number>>({});
   const registerLayer = useCallback((id: string) => (node: HTMLDivElement | null) => {
     if (node) layerRefs.current.set(id, node);
     else layerRefs.current.delete(id);
   }, []);
+  const registerLinkedStack = useCallback((id: string) => (node: HTMLDivElement | null) => {
+    if (node) linkedStackRefs.current.set(id, node);
+    else linkedStackRefs.current.delete(id);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!positioning.translationPositionLinked) return;
+    const measure = () => {
+      const next: Record<string, number> = {};
+      linkedStackRefs.current.forEach((stack, id) => {
+        const canvasHeight = stack.parentElement?.clientHeight ?? 0;
+        next[id] = linkedCaptionStackLayout(format, positioning.y, canvasHeight, stack.offsetHeight).centerY;
+      });
+      setLinkedStackCenters((current) => {
+        const unchanged = Object.keys(current).length === Object.keys(next).length
+          && Object.entries(next).every(([id, centerY]) => current[id] === centerY);
+        return unchanged ? current : next;
+      });
+    };
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    linkedStackRefs.current.forEach((stack) => {
+      observer?.observe(stack);
+      if (stack.parentElement) observer?.observe(stack.parentElement);
+    });
+    return () => observer?.disconnect();
+  }, [captionBackground, format, positioning.translationPositionLinked, positioning.y, segments, typography]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -127,31 +159,42 @@ function CaptionPreview({
         <span className="caption-handle caption-handle-bottom-left" aria-hidden="true" />
         <span className="caption-handle caption-handle-bottom-right" aria-hidden="true" />
       </> : null;
+      const arabicObject = (linked: boolean) => <div
+        className={`${objectClass("arabic")}${linked ? " caption-object-linked" : ""}`}
+        data-caption-object="arabic"
+        style={linked ? { width: "100%" } : { ...background, left: `${positioning.x * 100}%`, top: `${positioning.y * 100}%`, width: arabicWidth }}
+        onPointerDown={(event) => onObjectPointerDown(event, "arabic")}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onClick={(event) => { event.stopPropagation(); onSelectObject("arabic"); }}
+      >
+        <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic"), color: typography.textColor, fontFamily: quranFontDefinitions[typography.quranStyle].family, fontSize: typography.arabicFontSize, lineHeight: typography.arabicLineSpacing, opacity: typography.arabicOpacity }}><span data-caption-arabic-text>{arabicDisplay.text}</span></p>
+        {handles("arabic")}
+      </div>;
+      const translationObject = (linked: boolean) => hasTranslation && <div
+        className={`${objectClass("translation")}${linked ? " caption-object-linked" : ""}`}
+        data-caption-object="translation"
+        style={linked ? { width: "100%" } : { ...background, left: `${positioning.translationX * 100}%`, top: `${positioning.translationY * 100}%`, width: translationWidth }}
+        onPointerDown={(event) => onObjectPointerDown(event, "translation")}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onClick={(event) => { event.stopPropagation(); onSelectObject("translation"); }}
+      >
+        <p className="pointer-events-none" style={translationStyle}>{translation}</p>
+        {handles("translation")}
+      </div>;
       return <div key={segment.id} ref={registerLayer(segment.id)} className="absolute inset-0 pointer-events-none" data-caption-segment={segment.id} data-caption-opacity="0" style={{ opacity: 0, visibility: "hidden", willChange: "opacity, filter" }}>
-        <div
-          className={objectClass("arabic")}
-          data-caption-object="arabic"
-          style={{ ...background, left: `${positioning.x * 100}%`, top: `${positioning.y * 100}%`, width: arabicWidth }}
-          onPointerDown={(event) => onObjectPointerDown(event, "arabic")}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onClick={(event) => { event.stopPropagation(); onSelectObject("arabic"); }}
+        {positioning.translationPositionLinked ? <div
+          ref={registerLinkedStack(segment.id)}
+          className="caption-linked-stack"
+          style={{ ...background, left: `${positioning.x * 100}%`, top: `${(linkedStackCenters[segment.id] ?? positioning.y) * 100}%`, width: arabicWidth, gap: `${typography.translationSpacingBelowArabic}px` }}
         >
-          <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic"), color: typography.textColor, fontFamily: quranFontDefinitions[typography.quranStyle].family, fontSize: typography.arabicFontSize, lineHeight: typography.arabicLineSpacing, opacity: typography.arabicOpacity }}><span data-caption-arabic-text>{arabicDisplay.text}</span></p>
-          {handles("arabic")}
-        </div>
-        {hasTranslation && <div
-          className={objectClass("translation")}
-          data-caption-object="translation"
-          style={{ ...background, left: `${positioning.translationX * 100}%`, top: `${positioning.translationY * 100}%`, width: translationWidth }}
-          onPointerDown={(event) => onObjectPointerDown(event, "translation")}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onClick={(event) => { event.stopPropagation(); onSelectObject("translation"); }}
-        >
-          <p className="pointer-events-none" style={translationStyle}>{translation}</p>
-          {handles("translation")}
-        </div>}
+          {arabicObject(true)}
+          {translationObject(true)}
+        </div> : <>
+          {arabicObject(false)}
+          {translationObject(false)}
+        </>}
       </div>;
     })}
   </>;

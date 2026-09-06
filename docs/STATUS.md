@@ -1,5 +1,40 @@
 # Status
 
+## Current milestone: Clean Quran caption presentation and default stacked layout
+
+Complete:
+
+- Audited every Quran-specific annotation that appears in the bundled Tanzil
+  corpus and could reach caption display. All are removed only by
+  `cleanQuranArabicForDisplay` at preview/export composition, after canonical
+  word ranges and waqf-aware splitting. The canonical corpus, recognition
+  normalization, FastConformer targets, and split metadata are unchanged.
+  - Split metadata still uses U+06D6 `ۖ` (1,682; continuation), U+06D7 `ۗ`
+    (603; preferred), U+06D8 `ۘ` (22; preferred), U+06D9 `ۙ` (68; avoid),
+    U+06DA `ۚ` (1,972; acceptable), U+06DB `ۛ` (12; acceptable), and U+06DC
+    `ۜ` (7; avoid). Each is Unicode category `Mn` and is now display-hidden.
+  - The remaining display-hidden annotations are U+06DF `۟` (3,988, `Mn`),
+    U+06E0 `۠` (66, `Mn`), U+06E2 `ۢ` (510, `Mn`), U+06E3 `ۣ` (1, `Mn`),
+    U+06E5 `ۥ` (1,257, `Lm`), U+06E6 `ۦ` (957, `Lm`), U+06E7 `ۧ` (38,
+    `Mn`), U+06E8 `ۨ` (1, `Mn`), U+06EA `۪` (1, `Mn`), U+06EB `۫` (1,
+    `Mn`), U+06EC `۬` (1, `Mn`), and U+06ED `ۭ` (99, `Mn`). None is used
+    as splitter waqf metadata. U+06E1, U+06E4, U+06E9, and U+06DE have zero
+    corpus occurrences and are not filtered speculatively.
+- Ordinary Arabic letters and harakat, including U+0670 superscript alef, are
+  retained. The app-generated final-piece Arabic-Indic verse number remains
+  exactly once; intermediate pieces and basmalah remain numberless. Preview
+  and export share the same Arabic composition function.
+- Linked/default Arabic and translation now render as one measured vertical
+  stack, so normal document flow always places translation below Arabic. The
+  reusable normalized safe-area calculation is also used by canvas export to
+  rebalance multi-line stacks across 9:16, 16:9, and 1:1. Dragging either
+  caption still unlinks it immediately, preserving manual user authority.
+- Added display-cleaning, canonical-immutability, final-ornament, actual
+  18:57 waqf, and measured stack-layout regressions.
+
+Verification: `npm test` (143 passing), `npx tsc --noEmit`, and `npm run
+lint` pass. Lint retains four existing unused legacy-timing helper warnings.
+
 ## Current milestone: Apply long ayah segmentation in editor
 
 Complete:

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { canonicalDisplayWords, DEFAULT_MAX_ARABIC_VISIBLE_CHARS, planAyahDisplaySplit, visibleArabicCharacterCount, waqfMetadataForWord } from "../src/lib/editor/ayah-display-splitting.ts";
-import { arabicCaptionDisplay, createCaptionSegmentsFromVerseBoundaries } from "../src/lib/editor/captions.ts";
+import { arabicCaptionDisplay, cleanQuranArabicForDisplay, createCaptionSegmentsFromVerseBoundaries } from "../src/lib/editor/captions.ts";
 import { getVerse } from "../src/lib/quran/local.ts";
 import { canonicalCtcWords } from "../src/lib/recognition/ctc-forced-alignment.ts";
 import { hafsVerses } from "../src/lib/recognition/core.ts";
@@ -119,6 +119,6 @@ test("production FastConformer -> editor path splits 18:57 while retaining stand
   assert.deepEqual(ayah57.map((segment) => segment.showVerseNumberAtEnd), [false, true]);
   assert.equal(ayah57.flatMap((segment) => [...segment.arabic]).includes("۝"), false, "the corpus display pieces do not carry a terminal ayah ornament");
   assert.equal(arabicCaptionDisplay(ayah57[0]!, true).text.includes("۝"), false, "an intermediate piece has no ornament");
-  assert.equal(arabicCaptionDisplay(ayah57[1]!, true).text, `${ayah57[1]!.arabic}\u00a0٥٧`, "the final piece has exactly the font's numbered ornament input");
+  assert.equal(arabicCaptionDisplay(ayah57[1]!, true).text, `${cleanQuranArabicForDisplay(ayah57[1]!.arabic)}\u00a0٥٧`, "the final piece removes annotations and has exactly the font's numbered ornament input");
   assert.ok(ayah58.length > 0 && ayah58.every((segment) => segment.verseKeys.join() === "18:58"), "the following ayah remains separately owned");
 });

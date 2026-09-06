@@ -56,14 +56,32 @@ function withoutTerminalAyahMarker(value: string): string {
   return value.replace(/\s*\u06dd\s*[0-9٠-٩۰-۹]*\s*$/u, "").trimEnd();
 }
 
+/**
+ * Tanzil's canonical Uthmani text includes recitation and waqf annotations.
+ * These code points are intentionally listed (rather than removing a broad
+ * Unicode range): split planning still reads the original segment text for
+ * waqf metadata, while caption presentation omits only these annotations.
+ * Ordinary harakat and U+0670 superscript alef are preserved.
+ */
+const QURANIC_DISPLAY_ANNOTATIONS = /[\u06d6-\u06dc\u06df\u06e0\u06e2\u06e3\u06e5-\u06e8\u06ea-\u06ed]/gu;
+
+/** Cleans only the text sent to preview, timeline, and export. */
+export function cleanQuranArabicForDisplay(value: string): string {
+  return value
+    .replace(QURANIC_DISPLAY_ANNOTATIONS, "")
+    .replace(/\s{2,}/gu, " ")
+    .trim();
+}
+
 /** Shared preview/export display composition; canonical source text is never mutated. */
 export function arabicCaptionDisplay(segment: Pick<CaptionSegment, "arabic" | "contentKind" | "verseKeys" | "showVerseNumberAtEnd">, showVerseNumber: boolean): ArabicCaptionDisplay {
   // Existing display snapshots can already have a terminal U+06DD. When the
   // toggle is on, replace that presentation marker with the one numbered
   // marker below. When off, ayah text retains its pre-toggle appearance.
-  const canonicalText = showVerseNumber || segment.contentKind === "basmalah-prelude"
+  const sourceText = showVerseNumber || segment.contentKind === "basmalah-prelude"
     ? withoutTerminalAyahMarker(segment.arabic)
     : segment.arabic;
+  const canonicalText = cleanQuranArabicForDisplay(sourceText);
   const verseNumber = inlineVerseNumber(segment, showVerseNumber);
   return {
     canonicalText,
@@ -83,9 +101,9 @@ export { CANONICAL_BASMALAH_ARABIC } from "../quran/content.ts";
 const DEFAULT_VERTICAL_CAPTION_POSITIONING: CaptionPositioning = {
   anchor: "bottom",
   x: 0.5,
-  y: 0.62,
+  y: 0.52,
   translationX: 0.5,
-  translationY: 0.74,
+  translationY: 0.66,
   translationPositionLinked: true,
   maxWidthPercent: 0.9,
   translationMaxWidthPercent: 0.9,
@@ -96,8 +114,8 @@ export const DEFAULT_CAPTION_POSITIONING: CaptionPositioning = { ...DEFAULT_VERT
 
 export const DEFAULT_CAPTION_POSITIONING_BY_FORMAT: Record<ProjectFormat["preset"], CaptionPositioning> = {
   vertical: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING },
-  landscape: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING, y: 0.68, translationY: 0.8 },
-  square: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING, y: 0.64, translationY: 0.76 },
+  landscape: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING, y: 0.5, translationY: 0.66 },
+  square: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING, y: 0.52, translationY: 0.66 },
 };
 
 export const DEFAULT_TYPOGRAPHY: Typography = {
@@ -177,6 +195,40 @@ export function captionPositionBounds(format: ProjectFormat, maxWidthPercent = D
   return { x: [horizontalInset, 1 - horizontalInset], y: [minimumY, socialBottom] };
 }
 
+export type LinkedCaptionStackLayout = {
+  /** Center of the measured stack in normalized canvas coordinates. */
+  centerY: number;
+  topY: number;
+  bottomY: number;
+};
+
+/**
+ * Places the default linked Arabic/translation stack inside the selected safe
+ * region using its measured height. The stack's normal document flow keeps
+ * translation below Arabic; this calculation only rebalances the complete
+ * stack when a multi-line caption would otherwise leave the safe area.
+ */
+export function linkedCaptionStackLayout(
+  format: ProjectFormat,
+  anchorY: number,
+  canvasHeight: number,
+  stackHeight: number,
+): LinkedCaptionStackLayout {
+  const [minimumY, maximumY] = captionPositionBounds(format).y;
+  if (!Number.isFinite(canvasHeight) || canvasHeight <= 0 || !Number.isFinite(stackHeight) || stackHeight < 0) {
+    const centerY = clampNormalizedPosition(anchorY, minimumY, maximumY);
+    return { centerY, topY: centerY, bottomY: centerY };
+  }
+  const safeTop = minimumY * canvasHeight;
+  const safeBottom = maximumY * canvasHeight;
+  const desiredTop = anchorY * canvasHeight - stackHeight / 2;
+  // When a caption is taller than its safe area, preserving its reading order
+  // takes precedence and its top remains reachable instead of overlapping.
+  const top = Math.min(Math.max(desiredTop, safeTop), Math.max(safeTop, safeBottom - stackHeight));
+  const bottom = top + stackHeight;
+  return { centerY: (top + stackHeight / 2) / canvasHeight, topY: top / canvasHeight, bottomY: bottom / canvasHeight };
+}
+
 export function clampCaptionPositioning(positioning: CaptionPositioning, format: ProjectFormat): CaptionPositioning {
   const bounds = captionPositionBounds(format, positioning.maxWidthPercent);
   const next = { ...positioning };
@@ -209,7 +261,7 @@ export function resizeCaptionWidth(
 }
 
 export function resetCaptionPositioning(format: ProjectFormat): CaptionPositioning {
-  return clampCaptionPositioning(DEFAULT_CAPTION_POSITIONING_BY_FORMAT[format.preset], format);
+  return { ...DEFAULT_CAPTION_POSITIONING_BY_FORMAT[format.preset] };
 }
 
 export function updateCaptionPosition(

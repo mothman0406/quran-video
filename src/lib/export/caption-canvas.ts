@@ -1,4 +1,4 @@
-import { composeArabicCaptionText, captionVisualStatesAtTime } from "../editor/captions.ts";
+import { composeArabicCaptionText, captionVisualStatesAtTime, linkedCaptionStackLayout } from "../editor/captions.ts";
 import type { LocalExportRequest } from "./types.ts";
 
 function alphaColor(color: string, opacity: number) { return color.startsWith("#") ? `${color}${Math.round(Math.max(0, Math.min(1, opacity)) * 255).toString(16).padStart(2, "0")}` : color; }
@@ -19,8 +19,13 @@ export function drawExportCaptions(context: CanvasRenderingContext2D, request: L
     context.font = `${translationSize}px ${typography.translationFontFamily}`; const translationLines = translation ? wrap(context, translation, positioning.translationPositionLinked ? maxWidth : translationMaxWidth) : []; const translationHeight = translationLines.length * translationSize * 1.25;
     context.font = `${transliterationSize}px ${typography.transliterationFontFamily}`; const transliterationLines = transliteration ? wrap(context, transliteration, maxWidth) : []; const transliterationHeight = transliterationLines.length * transliterationSize * 1.25;
     const totalHeight = arabicHeight + (translationLines.length ? typography.translationSpacingBelowArabic * scale + translationHeight : 0) + (transliterationLines.length ? 8 * scale + transliterationHeight : 0);
-    const x = positioning.x * request.format.width; const y = positioning.y * request.format.height - totalHeight / 2;
-    if (captionBackground.enabled && positioning.translationPositionLinked) { context.fillStyle = alphaColor(captionBackground.color, captionBackground.opacity); roundedRect(context, x - maxWidth / 2 - captionBackground.horizontalPadding * scale, y - captionBackground.verticalPadding * scale, maxWidth + captionBackground.horizontalPadding * scale * 2, totalHeight + captionBackground.verticalPadding * scale * 2, captionBackground.cornerRadius * scale); }
+    const linkedBackgroundPadding = captionBackground.enabled && positioning.translationPositionLinked ? captionBackground.verticalPadding * scale : 0;
+    const linkedLayout = linkedCaptionStackLayout(request.format, positioning.y, request.format.height, totalHeight + linkedBackgroundPadding * 2);
+    const x = positioning.x * request.format.width;
+    const y = positioning.translationPositionLinked
+      ? linkedLayout.topY * request.format.height + linkedBackgroundPadding
+      : positioning.y * request.format.height - totalHeight / 2;
+    if (captionBackground.enabled && positioning.translationPositionLinked) { context.fillStyle = alphaColor(captionBackground.color, captionBackground.opacity); roundedRect(context, x - maxWidth / 2 - captionBackground.horizontalPadding * scale, linkedLayout.topY * request.format.height, maxWidth + captionBackground.horizontalPadding * scale * 2, totalHeight + linkedBackgroundPadding * 2, captionBackground.cornerRadius * scale); }
     let cursor = y;
     context.font = `${arabicSize}px "${arabicFont}", serif`; drawText(context, arabicLines, x, cursor + arabicSize, arabicSize * typography.arabicLineSpacing, typography.textAlign, "rtl", alphaColor(typography.textColor, typography.arabicOpacity), typography.arabicOutlineEnabled, typography.arabicOutlineWidth * scale, typography.arabicOutlineColor, typography.arabicShadowEnabled, typography.arabicShadowBlur * scale, typography.arabicShadowStrength); cursor += arabicHeight;
     if (translationLines.length && positioning.translationPositionLinked) { cursor += typography.translationSpacingBelowArabic * scale; context.font = `${translationSize}px ${typography.translationFontFamily}`; drawText(context, translationLines, x, cursor + translationSize, translationSize * 1.25, typography.translationTextAlign, "ltr", alphaColor(typography.translationTextColor, typography.translationOpacity), typography.translationOutlineEnabled, typography.translationOutlineWidth * scale, typography.translationOutlineColor, typography.translationShadowEnabled, typography.translationShadowBlur * scale, typography.translationShadowStrength); cursor += translationHeight; }

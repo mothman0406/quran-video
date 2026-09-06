@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { CaptionSegmentSchema, ProjectFormatSchema } from "../src/lib/schemas/project.ts";
-import { clampCaptionPositioning, DEFAULT_CAPTION_POSITIONING, resetCaptionPositioning } from "../src/lib/editor/captions.ts";
+import { clampCaptionPositioning, DEFAULT_CAPTION_POSITIONING, linkedCaptionStackLayout, resetCaptionPositioning } from "../src/lib/editor/captions.ts";
 import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, SAFE_AREA_GUIDES, SAFE_AREA_OVERLAY_METADATA, safeAreaGuidesForFormat } from "../src/lib/editor/formats.ts";
 
 test("the default project format is 9:16 vertical", () => {
@@ -44,7 +44,18 @@ test("linked translation positioning survives a format change", () => {
 test("reset position uses a format-aware lower-middle default", () => {
   assert.deepEqual(resetCaptionPositioning(DEFAULT_PROJECT_FORMAT), DEFAULT_CAPTION_POSITIONING);
   assert.equal(resetCaptionPositioning(PROJECT_FORMATS.landscape).x, 0.5);
-  assert.equal(resetCaptionPositioning(PROJECT_FORMATS.landscape).y, 0.68);
+  assert.equal(resetCaptionPositioning(PROJECT_FORMATS.landscape).y, 0.5);
+});
+
+test("linked default caption stacks rebalance measured multi-line content inside the safe area", () => {
+  const fitting = linkedCaptionStackLayout(PROJECT_FORMATS.vertical, 0.52, 1_920, 480);
+  assert.ok(fitting.topY >= 0.06);
+  assert.ok(fitting.bottomY <= 0.82);
+  assert.equal(fitting.centerY, 0.52);
+
+  const tall = linkedCaptionStackLayout(PROJECT_FORMATS.vertical, 0.7, 1_920, 1_600);
+  assert.ok(Math.abs(tall.topY - 0.06) < Number.EPSILON);
+  assert.ok(tall.bottomY > 0.82, "a too-tall stack remains ordered instead of overlapping");
 });
 
 test("safe-area configuration is centralized for every project format", () => {
