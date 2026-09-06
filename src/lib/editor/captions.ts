@@ -16,6 +16,51 @@ export const DEFAULT_CAPTION_PRESENTATION: CaptionPresentationSettings = {
   showVerseNumber: false,
 };
 
+/** U+06DD is the Quranic Arabic End of Ayah ornament. */
+export const ARABIC_END_OF_AYAH = "\u06DD";
+
+const ARABIC_INDIC_DIGITS = ["٠", "١", "٢", "٣", "٤", "٥", "٦", "٧", "٨", "٩"] as const;
+
+function ayahNumberFromVerseKey(verseKey: string | undefined): number | null {
+  const value = verseKey?.split(":")[1];
+  if (!value || !/^\d+$/u.test(value)) return null;
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0 ? number : null;
+}
+
+/** Formats a canonical ayah number without altering canonical Quran text. */
+export function arabicIndicNumber(value: number): string {
+  if (!Number.isSafeInteger(value) || value < 0) return "";
+  return String(value).replace(/\d/gu, (digit) => ARABIC_INDIC_DIGITS[Number(digit)]!);
+}
+
+/**
+ * Produces the presentation-only Quranic ayah-end marker for a segment. The
+ * explicit metadata lets a future split show the marker only on its final
+ * piece, while legacy whole-ayah projects retain the current default.
+ */
+export function inlineVerseNumber(segment: Pick<CaptionSegment, "contentKind" | "verseKeys" | "showVerseNumberAtEnd">, showVerseNumber: boolean): string | null {
+  if (!showVerseNumber || segment.contentKind !== "ayah" || segment.showVerseNumberAtEnd === false || segment.verseKeys.length !== 1) return null;
+  const number = ayahNumberFromVerseKey(segment.verseKeys[0]);
+  return number === null ? null : `${ARABIC_END_OF_AYAH}${arabicIndicNumber(number)}`;
+}
+
+export type ArabicCaptionDisplay = {
+  canonicalText: string;
+  verseNumber: string | null;
+};
+
+/** Shared preview/export display composition; `canonicalText` is never mutated. */
+export function arabicCaptionDisplay(segment: Pick<CaptionSegment, "arabic" | "contentKind" | "verseKeys" | "showVerseNumberAtEnd">, showVerseNumber: boolean): ArabicCaptionDisplay {
+  return { canonicalText: segment.arabic, verseNumber: inlineVerseNumber(segment, showVerseNumber) };
+}
+
+/** Canvas export uses the exact text composed from the same display metadata. */
+export function composeArabicCaptionText(segment: Pick<CaptionSegment, "arabic" | "contentKind" | "verseKeys" | "showVerseNumberAtEnd">, showVerseNumber: boolean): string {
+  const display = arabicCaptionDisplay(segment, showVerseNumber);
+  return display.verseNumber ? `${display.canonicalText}\u00a0${display.verseNumber}` : display.canonicalText;
+}
+
 /** Canonical Hafs display text for the acoustically selected opening prelude. */
 export { CANONICAL_BASMALAH_ARABIC } from "../quran/content.ts";
 
@@ -290,6 +335,8 @@ export type CaptionSegment = CaptionSegmentBase & {
   contentKind: "ayah" | "basmalah-prelude";
   /** Empty only for Quran preludes, which deliberately have no ayah owner. */
   verseKeys: string[];
+  /** False on an intermediate split piece; legacy segments default to true. */
+  showVerseNumberAtEnd?: boolean;
 };
 
 export type OptionalPreludeTiming = {
@@ -405,6 +452,7 @@ export function createCaptionSegments(
       wordStart: 0,
       wordEnd: verseWords.length,
       wordCount: verseWords.length,
+      showVerseNumberAtEnd: true,
       timingEvidence: {
         start: { timestampMs: alignment.startMs, source: alignment.timingEvidence.start.source },
         end: { timestampMs: alignment.endMs, source: alignment.timingEvidence.end.source },
@@ -467,6 +515,7 @@ function createBasmalahPreludeSegment(
     wordStart: 0,
     wordEnd: wordCount,
     wordCount,
+    showVerseNumberAtEnd: false,
     timingEvidence: {
       start: { timestampMs: startMs, source: "fastconformer" },
       end: { timestampMs: endMs, source: "fastconformer" },
@@ -557,6 +606,7 @@ export function splitCaptionSegment(segment: CaptionSegment, boundary: number): 
     transliteration: null,
     wordStart: segment.wordStart + start,
     wordEnd: segment.wordStart + end,
+    showVerseNumberAtEnd: end === verseWords.length ? segment.showVerseNumberAtEnd : false,
     timingEvidence: {
       start: { timestampMs: startMs, source: start === 0 ? segment.timingEvidence.start.source : "derived" },
       end: { timestampMs: endMs, source: end === verseWords.length ? segment.timingEvidence.end.source : "derived" },
@@ -578,6 +628,7 @@ function mergeSegments(left: CaptionSegment, right: CaptionSegment): CaptionSegm
     transliteration: null,
     wordEnd: right.wordEnd,
     wordCount: left.wordCount + right.wordCount,
+    showVerseNumberAtEnd: right.showVerseNumberAtEnd,
     timingEvidence: {
       start: left.timingEvidence.start,
       end: right.timingEvidence.end,

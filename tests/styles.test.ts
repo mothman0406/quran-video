@@ -39,3 +39,10 @@ test("style snapshots contain styling only and local styles save, load, rename, 
   assert.deepEqual(deleted, []);
   assert.deepEqual(loadLocalStyles(storage), []);
 });
+
+test("legacy caption styles without an Arabic text color fall back to the existing default", () => {
+  const legacy = captionStyleFromState(DEFAULT_TYPOGRAPHY, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_BACKGROUND, DEFAULT_TRANSITION_SETTINGS);
+  const typographyWithoutColor = Object.fromEntries(Object.entries(legacy.typography).filter(([key]) => key !== "textColor"));
+  const migrated = CaptionStyleSchema.parse({ ...legacy, typography: typographyWithoutColor });
+  assert.equal(migrated.typography.textColor, "#ffffff");
+});

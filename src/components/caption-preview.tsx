@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, type PointerEvent, type RefObject } from "react";
-import { captionBackgroundStyle, captionVisualStatesAtTime, captionVerseNumberLabel, getActiveCaptionSegment, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
+import { arabicCaptionDisplay, captionBackgroundStyle, captionVisualStatesAtTime, getActiveCaptionSegment, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import { quranFontDefinitions } from "@/lib/quran/content";
 
@@ -113,6 +113,7 @@ function CaptionPreview({
       if (segment.contentKind === "ayah" && item?.status !== "ready") return null;
       const translation = segment.translation ?? (item?.status === "ready" ? item.verse.translation : null);
       const hasTranslation = typography.translationVisible && Boolean(translation);
+      const arabicDisplay = arabicCaptionDisplay(segment, showVerseNumber);
       const background = captionBackgroundStyle(captionBackground);
       const arabicWidth = `${positioning.maxWidthPercent * 100}%`;
       const translationWidth = `${(positioning.translationMaxWidthPercent ?? positioning.maxWidthPercent) * 100}%`;
@@ -127,7 +128,6 @@ function CaptionPreview({
         <span className="caption-handle caption-handle-bottom-right" aria-hidden="true" />
       </> : null;
       return <div key={segment.id} ref={registerLayer(segment.id)} className="absolute inset-0 pointer-events-none" data-caption-segment={segment.id} data-caption-opacity="0" style={{ opacity: 0, visibility: "hidden", willChange: "opacity, filter" }}>
-        {showVerseNumber && segment.contentKind === "ayah" && <p className="pointer-events-none absolute left-1/2 top-[calc(50%-72px)] -translate-x-1/2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#f7d88b]" data-caption-verse-number>{captionVerseNumberLabel(segment)}</p>}
         <div
           className={objectClass("arabic")}
           data-caption-object="arabic"
@@ -137,7 +137,7 @@ function CaptionPreview({
           onPointerUp={onPointerUp}
           onClick={(event) => { event.stopPropagation(); onSelectObject("arabic"); }}
         >
-          <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic"), color: typography.textColor, fontFamily: quranFontDefinitions[typography.quranStyle].family, fontSize: typography.arabicFontSize, lineHeight: typography.arabicLineSpacing, opacity: typography.arabicOpacity }}>{segment.arabic}</p>
+          <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic"), color: typography.textColor, fontFamily: quranFontDefinitions[typography.quranStyle].family, fontSize: typography.arabicFontSize, lineHeight: typography.arabicLineSpacing, opacity: typography.arabicOpacity }}><span>{arabicDisplay.canonicalText}</span>{arabicDisplay.verseNumber && <span data-caption-verse-number aria-label={`Ayah ${segment.verseKeys[0]?.split(":")[1]}`}>{"\u00a0"}{arabicDisplay.verseNumber}</span>}</p>
           {handles("arabic")}
         </div>
         {hasTranslation && <div

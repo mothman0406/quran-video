@@ -51,6 +51,11 @@ export const CaptionSegmentSchema = z.strictObject({
   wordStart: z.number().int().nonnegative(),
   wordEnd: z.number().int().positive(),
   wordCount: z.number().int().positive(),
+  /**
+   * Presentation metadata for an inline ayah-end ornament. Undefined keeps
+   * legacy one-segment-per-ayah captions visible when the project toggle is on.
+   */
+  showVerseNumberAtEnd: z.boolean().optional(),
   timingEvidence: z.strictObject({
     start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["fastconformer", "word-audio-refined", "word-timestamp", "merged-token-word1", "bounded-recovery", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown", "forced-alignment", "derived"]) }),
     end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["fastconformer", "word-audio-refined", "word-timestamp", "merged-token-word1", "bounded-recovery", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown", "forced-alignment", "derived"]) }),
@@ -102,7 +107,8 @@ export const TypographySchema = z.strictObject({
   arabicFontSize: z.number().finite().positive(),
   translationFontSize: z.number().finite().positive(),
   transliterationFontSize: z.number().finite().positive(),
-  textColor: z.string().min(1),
+  /** Legacy typography snapshots predate the editable Arabic color control. */
+  textColor: z.string().min(1).default("#ffffff"),
   arabicOutlineEnabled: z.boolean(),
   arabicOutlineWidth: z.number().finite().nonnegative(),
   arabicOutlineColor: z.string().min(1),

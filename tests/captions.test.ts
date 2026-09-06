@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { CANONICAL_BASMALAH_ARABIC, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { ARABIC_END_OF_AYAH, CANONICAL_BASMALAH_ARABIC, arabicCaptionDisplay, arabicIndicNumber, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, composeArabicCaptionText, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -37,6 +37,27 @@ test("verse numbers are optional presentation metadata and never part of Arabic 
   assert.equal(marked["93:1"].arabic.uthmani, "وَالضُّحَىٰ ۝١");
   assert.equal(captionVerseNumberLabel(segments[0]), "1");
   assert.equal(splitCaptionSegment(segments[0], 1)[0].arabic, segments[0].arabic);
+});
+
+test("inline ayah ornaments use Arabic-Indic digits without mutating Quran text", () => {
+  const [segment] = createCaptionSegments([alignment], content);
+  assert.equal(arabicIndicNumber(1), "١");
+  assert.equal(arabicIndicNumber(10), "١٠");
+  assert.equal(arabicIndicNumber(286), "٢٨٦");
+  assert.equal(arabicCaptionDisplay(segment!, false).verseNumber, null);
+  assert.equal(arabicCaptionDisplay(segment!, true).verseNumber, `${ARABIC_END_OF_AYAH}١`);
+  assert.equal(composeArabicCaptionText(segment!, true), `${segment!.arabic}\u00a0${ARABIC_END_OF_AYAH}١`);
+  assert.equal(segment!.arabic, content["93:1"].arabic.uthmani);
+});
+
+test("only a final ayah piece receives the inline ornament, never a basmalah prelude", () => {
+  const [segment] = createCaptionSegments([alignment], content);
+  const split = splitCaptionSegment(segment!, 3);
+  assert.equal(arabicCaptionDisplay(split[0]!, true).verseNumber, null);
+  assert.equal(arabicCaptionDisplay(split[1]!, true).verseNumber, `${ARABIC_END_OF_AYAH}١`);
+  const prelude = { ...segment!, contentKind: "basmalah-prelude" as const, verseKeys: [], showVerseNumberAtEnd: false, arabic: CANONICAL_BASMALAH_ARABIC };
+  assert.equal(arabicCaptionDisplay(prelude, true).verseNumber, null);
+  assert.equal(composeArabicCaptionText(prelude, true), CANONICAL_BASMALAH_ARABIC);
 });
 
 test("automatic display never splits long ayat; line wrapping is visual only", () => {

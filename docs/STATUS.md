@@ -1,5 +1,28 @@
 # Status
 
+## Current milestone: Quran caption color and inline ayah ornaments
+
+Complete:
+
+- Reused the persisted `typography.textColor` Arabic caption style, clarified
+  its editor control, and added the existing white default as a schema fallback
+  for legacy project and “My Style” snapshots. Preview and export continue to
+  consume that same style value.
+- Replaced the detached verse-number label with shared presentation-only Arabic
+  composition: canonical ayah text followed inline by U+06DD and Arabic-Indic
+  digits. The ornament stays in the Arabic text flow, inherits Arabic styling,
+  and is included in canvas wrapping/export from the same display helper.
+- Added `showVerseNumberAtEnd` metadata so an intermediate split piece has no
+  ornament; current complete ayah captions and legacy segments retain the
+  expected behavior. `basmalah-prelude` always remains numberless.
+- Recognition, FastConformer, passage identification, basmalah timing, and
+  automatic whole-ayah timing were not changed.
+
+Verification: `npm test` (130 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. Lint retains four existing
+unused legacy-timing helper warnings; the production build retains the existing
+non-fatal VAD ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Display detected FastConformer basmalah prelude
 
 Complete:
