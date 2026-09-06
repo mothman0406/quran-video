@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { ARABIC_END_OF_AYAH, CANONICAL_BASMALAH_ARABIC, arabicCaptionDisplay, arabicIndicNumber, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, composeArabicCaptionText, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { CANONICAL_BASMALAH_ARABIC, arabicCaptionDisplay, arabicIndicNumber, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, composeArabicCaptionText, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -45,22 +45,21 @@ test("inline ayah ornaments use Arabic-Indic digits without mutating Quran text"
   assert.equal(arabicIndicNumber(10), "١٠");
   assert.equal(arabicIndicNumber(286), "٢٨٦");
   assert.equal(arabicCaptionDisplay(segment!, false).verseNumber, null);
-  assert.equal(arabicCaptionDisplay(segment!, true).verseNumber, `${ARABIC_END_OF_AYAH}١`);
-  assert.equal(composeArabicCaptionText(segment!, true), `${segment!.arabic}\u00a0${ARABIC_END_OF_AYAH}١`);
+  assert.equal(arabicCaptionDisplay(segment!, true).verseNumber, "١");
+  assert.equal(composeArabicCaptionText(segment!, true), `${segment!.arabic}\u00a0١`);
   assert.equal(segment!.arabic, content["93:1"].arabic.uthmani);
 });
 
-test("a terminal source ornament is replaced by one numbered ornament for preview and export", () => {
+test("a terminal source ornament is replaced by the font's single numbered ornament for preview and export", () => {
   const [source] = createCaptionSegments([alignment], content);
   const marked = { ...source!, verseKeys: ["2:4"], arabic: "ٱلْبَيَانَ \u06DD٣" };
   const preview = arabicCaptionDisplay(marked, true);
   const exportText = composeArabicCaptionText(marked, true);
 
-  assert.equal(preview.text, "ٱلْبَيَانَ\u00a0۝٤");
+  assert.equal(preview.text, "ٱلْبَيَانَ\u00a0٤");
   assert.equal(exportText, preview.text, "preview and export use the same composed Arabic text");
-  assert.equal([...preview.text].filter((character) => character === ARABIC_END_OF_AYAH).length, 1);
-  assert.equal(preview.text.includes(`${ARABIC_END_OF_AYAH}\u00a0${ARABIC_END_OF_AYAH}`), false);
-  assert.equal(preview.verseNumber, "۝٤");
+  assert.equal([...preview.text].filter((character) => character === "۝").length, 0);
+  assert.equal(preview.verseNumber, "٤");
 
   const off = arabicCaptionDisplay(marked, false);
   assert.equal(off.text, marked.arabic, "the off state preserves the prior display text");
@@ -71,7 +70,7 @@ test("only a final ayah piece receives the inline ornament, never a basmalah pre
   const [segment] = createCaptionSegments([alignment], content);
   const split = splitCaptionSegment(segment!, 3);
   assert.equal(arabicCaptionDisplay(split[0]!, true).verseNumber, null);
-  assert.equal(arabicCaptionDisplay(split[1]!, true).verseNumber, `${ARABIC_END_OF_AYAH}١`);
+  assert.equal(arabicCaptionDisplay(split[1]!, true).verseNumber, "١");
   const prelude = { ...segment!, contentKind: "basmalah-prelude" as const, verseKeys: [], showVerseNumberAtEnd: false, arabic: CANONICAL_BASMALAH_ARABIC };
   assert.equal(arabicCaptionDisplay(prelude, true).verseNumber, null);
   assert.equal(composeArabicCaptionText(prelude, true), CANONICAL_BASMALAH_ARABIC);

@@ -16,9 +16,6 @@ export const DEFAULT_CAPTION_PRESENTATION: CaptionPresentationSettings = {
   showVerseNumber: false,
 };
 
-/** U+06DD is the Quranic Arabic End of Ayah ornament. */
-export const ARABIC_END_OF_AYAH = "\u06DD";
-
 const ARABIC_INDIC_DIGITS = ["٠", "١", "٢", "٣", "٤", "٥", "٦", "٧", "٨", "٩"] as const;
 
 function ayahNumberFromVerseKey(verseKey: string | undefined): number | null {
@@ -35,14 +32,16 @@ export function arabicIndicNumber(value: number): string {
 }
 
 /**
- * Produces the presentation-only Quranic ayah-end marker for a segment. The
- * explicit metadata lets a future split show the marker only on its final
+ * Produces the presentation-only Quranic ayah number for a segment. In the
+ * UthmanicHafs browser font, an Arabic-Indic digit already renders inside its
+ * own ayah frame; prepending U+06DD creates a second, empty frame.
+ * The explicit metadata lets a future split show the number only on its final
  * piece, while legacy whole-ayah projects retain the current default.
  */
 export function inlineVerseNumber(segment: Pick<CaptionSegment, "contentKind" | "verseKeys" | "showVerseNumberAtEnd">, showVerseNumber: boolean): string | null {
   if (!showVerseNumber || segment.contentKind !== "ayah" || segment.showVerseNumberAtEnd === false || segment.verseKeys.length !== 1) return null;
   const number = ayahNumberFromVerseKey(segment.verseKeys[0]);
-  return number === null ? null : `${ARABIC_END_OF_AYAH}${arabicIndicNumber(number)}`;
+  return number === null ? null : arabicIndicNumber(number);
 }
 
 export type ArabicCaptionDisplay = {
