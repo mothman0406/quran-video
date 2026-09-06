@@ -22,6 +22,7 @@ test("yt-dlp receives a safe argument array with the URL as one opaque argument"
   assert.equal(args.at(-1), url);
   assert.ok(args.includes("--output"));
   assert.ok(args.includes("--format"));
+  assert.ok(args.some((argument) => argument.includes("bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a][acodec^=mp4a]")));
   assert.equal(args.some((argument) => argument.includes(";")), false);
 });
 

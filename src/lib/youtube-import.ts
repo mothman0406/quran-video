@@ -60,7 +60,7 @@ export function isValidImportSessionId(sessionId: string) {
 export function createYtDlpArgs(url: string, mode: YouTubeImportMode, outputTemplate: string): string[] {
   const format = mode === "audio"
     ? "bestaudio[ext=m4a]/bestaudio"
-    : "best[ext=mp4][vcodec^=avc][acodec^=mp4a]/best[ext=mp4]";
+    : "bestvideo[ext=mp4][vcodec^=avc]+bestaudio[ext=m4a][acodec^=mp4a]/best[ext=mp4][vcodec^=avc][acodec^=mp4a]/best[ext=mp4]";
   return [
     "--no-playlist",
     "--no-warnings",

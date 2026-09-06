@@ -8,6 +8,7 @@ Complete:
 - The local route uses `spawn` argument arrays only, an app-owned temporary directory, a per-import UUID, cancellation cleanup, stale-import cleanup, and no cloud/Supabase/OpenAI media path. Temporary downloaded media is fetched into the existing browser `File`/object-URL pipeline, then removed when cleared or replaced.
 - `MediaSource` now records durable provenance metadata (`youtube-import`, source URL, optional title) without persisting temporary bytes. Opening a saved URL-import project still requires a manual relink/re-import; it never silently downloads again. A future production/commercial version requires separate platform and compliance review.
 - Added URL validation, argument-array safety, injection rejection, and normalized video/audio timeline regression coverage.
+- Local end-to-end validation found that YouTube can expose separate AVC video and M4A audio streams instead of a pre-muxed MP4. The importer now selects that compatible pair first and lets yt-dlp merge it; a 44-second public Al-Fātiḥah import passed in both video and audio-only modes, including temporary-media streaming and cleanup.
 
 Verification: `npx tsc --noEmit`, `npm test` (165 passing), `npm run lint`, `npm run build`, and `git diff --check` pass. Lint retains four existing unused legacy-timing helper warnings; the build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning.
 
