@@ -1,5 +1,18 @@
 # Status
 
+## Current milestone: FastConformer Quran-wide identification shadow mode
+
+Complete:
+
+- Added a cached Quran-wide Tilawa lexical/CTC index and an independent FastConformer identification runner. It uses overlapping VAD-qualified audio windows, greedy CTC n-gram retrieval, forward-probability CTC reranking, optional basmalah alternatives, and a deterministic continuity Viterbi solver with an uncertain-window skip state.
+- Kept Whisper as the sole production passage authority and left the established FastConformer forced-alignment/caption path unchanged. Shadow output is development diagnostics only and now explicitly highlights a FastConformer recovery candidate when Whisper finds no passage.
+- Added synthetic regressions for reversible indexing, noisy retrieval, CTC collapse/forward ranking, optional basmalah scoring, cross-ayah/mid-ayah candidates, and continuity through unusable/backward/unrelated-window evidence. No real media fixture was available in this workspace, so noisy real-world accuracy is not claimed.
+
+Verification: `npm test` (173 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. Lint retains four existing
+unused legacy-timing helper warnings; build retains the existing non-fatal VAD
+ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Compact desktop editor redesign
 
 Complete:

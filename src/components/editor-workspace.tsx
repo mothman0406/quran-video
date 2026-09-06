@@ -230,7 +230,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
             <p className="editor-muted editor-truncate" title={videoFile.name}>{videoFile.name}</p>
             {videoMetadata && <p className="editor-meta-line">{formatDuration(videoMetadata.durationSeconds)}{mediaSource?.hasVideo ? ` · ${videoMetadata.width} × ${videoMetadata.height}` : " · audio"}</p>}
             <button className="editor-button editor-button-primary editor-full-button" disabled={busy || !support?.supported} type="button" onClick={onDetect}>{stage === "complete" ? "Detect again" : "Detect Quran"}</button>
-            {process.env.NODE_ENV !== "production" && stage === "complete" && <button className="editor-text-button" type="button" onClick={onCopyAlignmentDebug}>Copy Alignment Debug</button>}
+            {process.env.NODE_ENV !== "production" && (stage === "complete" || stage === "error") && <button className="editor-text-button" type="button" onClick={onCopyAlignmentDebug}>Copy Alignment Debug</button>}
             {stage === "complete" && alignments.length > 0 && <button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onToggleCorrection}>Correct detection</button>}
             <button className="editor-text-button" type="button" onClick={onClearVideo}>Choose a different source</button>
           </> : <label className="editor-upload-mini"><span>↑</span><strong>Choose media</strong><small>Video or browser-supported audio</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}

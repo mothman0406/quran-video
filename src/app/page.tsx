@@ -12,6 +12,7 @@ import {
 } from "react";
 import { analyzeTranscript, createPrimaryTranscript, hafsSurahs, hafsVerses } from "@/lib/recognition/core";
 import { FASTCONFORMER_MODEL, FASTCONFORMER_MODEL_ARTIFACT, FASTCONFORMER_MODEL_BYTES, FASTCONFORMER_MODEL_LICENSE, FASTCONFORMER_RUNTIME } from "@/lib/recognition/local-fastconformer";
+import { comparePassageIdentification } from "@/lib/recognition/fastconformer-identification";
 import type { TranscriptionProgress } from "@/lib/recognition/transcriber";
 import {
   recognitionToVerseAlignments,
@@ -913,11 +914,29 @@ export default function Home() {
       );
       if (job !== generation.current) return;
       setStage("matching");
+      // This independent CTC search has no Whisper input and remains shadow
+      // evidence. It is intentionally run even when production matching fails.
+      const fastConformerShadow = result.runFastConformerIdentification
+        ? await result.runFastConformerIdentification()
+        : null;
+      if (job !== generation.current) return;
       const primaryTranscript = createPrimaryTranscript(result.chunks, result.timestampMode);
       let analysis = analyzeTranscript(primaryTranscript, {
         audioAnalysis: result.audioAnalysis,
         speechRegions: result.speechRegions,
       });
+      const passageComparison = fastConformerShadow
+        ? comparePassageIdentification({
+          engine: "whisper-quran-matcher",
+          span: analysis.passage.canonicalSpan ? {
+            firstVerseKey: analysis.passage.canonicalSpan.firstVerseKey,
+            lastVerseKey: analysis.passage.canonicalSpan.lastVerseKey,
+            firstWordIndex: analysis.passage.canonicalSpan.firstWordIndex,
+            lastWordIndex: analysis.passage.canonicalSpan.lastWordIndex,
+          } : null,
+          confidence: analysis.passage.identityConfidence,
+        }, fastConformerShadow)
+        : null;
       const fastConformerAlignment = analysis.matches.length && result.runFastConformer
         ? await result.runFastConformer(hafsVerses.filter((verse) => new Set(analysis.matches.map((match) => match.verseKey)).has(verse.verseKey)), analysis.matches)
         : null;
@@ -928,10 +947,20 @@ export default function Home() {
           fastConformerResult: fastConformerAlignment,
         });
       }
-      if (analysis.matches.length === 0)
+      if (analysis.matches.length === 0) {
+        alignmentDebug.current = {
+          FASTCONFORMER_QURAN_IDENTIFICATION: fastConformerShadow,
+          WHISPER_VS_FASTCONFORMER: passageComparison,
+          FC_RECOVERY_CANDIDATE: analysis.passage.state === "no-reliable-match" && fastConformerShadow?.status === "complete" && fastConformerShadow.span
+            ? { message: "Whisper produced no match while FastConformer has a shadow Quran candidate.", candidate: fastConformerShadow.span, confidence: fastConformerShadow.confidence }
+            : null,
+          passage: analysis.passage,
+        };
+        publishAlignmentDebug(alignmentDebug.current);
         throw new Error(
           "No confident Quran passage was detected. You can try again or correct it manually.",
         );
+      }
       if (analysis.timingFailure) throw new Error(`Quran timing could not be completed. ${analysis.timingFailure.reason} Please retry.`);
       if (!analysis.authoritativeTimingEngine) throw new Error("Quran timing could not be completed. Please retry.");
       const next = recognitionToVerseAlignments(analysis.matches);
@@ -980,6 +1009,11 @@ export default function Home() {
           resultState: analysis.passage.state,
           shadowComparison: analysis.passage.shadowComparison,
         },
+        FASTCONFORMER_QURAN_IDENTIFICATION: fastConformerShadow,
+        WHISPER_VS_FASTCONFORMER: passageComparison,
+        FC_RECOVERY_CANDIDATE: analysis.passage.state === "no-reliable-match" && fastConformerShadow?.status === "complete" && fastConformerShadow.span
+          ? { message: "Whisper produced no match while FastConformer has a shadow Quran candidate.", candidate: fastConformerShadow.span, confidence: fastConformerShadow.confidence }
+          : null,
         verseTimingTable: next.map((item) => ({
           verse: item.verseKey,
           predictedStartMs: item.startMs,

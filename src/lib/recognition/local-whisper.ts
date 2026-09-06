@@ -5,7 +5,7 @@ import type {
 } from "./transcriber";
 import { analyzeMonoPcm } from "./audio-analysis.ts";
 import { detectLocalSpeechRegions } from "./vad.ts";
-import { createFastConformerRunner } from "./local-fastconformer.ts";
+import { createFastConformerIdentificationRunner, createFastConformerRunner } from "./local-fastconformer.ts";
 import type { TimestampValidationDiagnostics } from "./transcriber";
 
 /** This export retains the decoder cross-attentions Transformers.js needs for word timestamps. */
@@ -318,9 +318,10 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
       durationMs: Math.round(performance.now() - startedAt),
       audioAnalysis,
       speechRegions,
-      // FastConformer receives only the complete canonical range already
-      // identified by Whisper. It cannot participate in passage identity.
+      // The known-passage runner remains timing-only. The independent runner
+      // is shadow evidence and cannot participate in caption authority.
       runFastConformer: createFastConformerRunner(audio, speechRegions, run.analysisRunId),
+      runFastConformerIdentification: createFastConformerIdentificationRunner(audio, speechRegions),
     };
   },
 };

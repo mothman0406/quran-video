@@ -1,7 +1,7 @@
 import type { TranscriptChunk } from "./core";
 import type { AudioAnalysis } from "./audio-analysis.ts";
 import type { VadSpeechRegion } from "./speech-regions.ts";
-import type { FastConformerRunner } from "./local-fastconformer.ts";
+import type { FastConformerIdentificationRunner, FastConformerRunner } from "./local-fastconformer.ts";
 
 /** The boundary used by recognition clients; implementations never receive a server URL. */
 export type RecognitionTranscriber = {
@@ -51,6 +51,8 @@ export type LocalTranscriptionResult = {
   /** Known-passage FastConformer timing run. Passage identity remains owned by
    * the existing Whisper matcher; successful output is the sole timing input. */
   runFastConformer?: FastConformerRunner;
+  /** Quran-wide CTC identification, retained exclusively as shadow evidence. */
+  runFastConformerIdentification?: FastConformerIdentificationRunner;
 };
 
 export type TimestampValidationDiagnostics = {

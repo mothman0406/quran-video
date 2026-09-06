@@ -7,6 +7,15 @@ import {
 } from "./ctc-forced-alignment.ts";
 import { hafsVerses, type QuranCorpusVerse } from "./core.ts";
 import type { VadSpeechRegion } from "./speech-regions.ts";
+import { normalizeTilawaArabic } from "./tilawa-lexical.ts";
+import {
+  FASTCONFORMER_IDENTIFICATION_DEFAULTS,
+  buildQuranWideLexicalIndex,
+  identifyQuranWindow,
+  summarizeFastConformerIdentification,
+  type FastConformerIdentificationResult,
+  type QuranWideLexicalIndex,
+} from "./fastconformer-identification.ts";
 
 /**
  * Tilawa FastConformer known-passage timing adapter. The public artifact is
@@ -189,8 +198,11 @@ export type FastConformerResult = {
 };
 
 export type FastConformerRunner = (verses: readonly QuranCorpusVerse[], matches: readonly { startMs: number; endMs: number }[]) => Promise<FastConformerResult>;
+/** Independent Quran-wide CTC identifier. Its result is shadow evidence only. */
+export type FastConformerIdentificationRunner = () => Promise<FastConformerIdentificationResult>;
 
 let sharedModelPromise: Promise<LoadedFastConformer> | null = null;
+let sharedQuranIdentificationIndexPromise: Promise<QuranWideLexicalIndex> | null = null;
 const sharedAssetPromises = new Map<string, Promise<FastConformerAsset>>();
 
 function passageWindow(audio: Float32Array, speechRegions: readonly VadSpeechRegion[], matches: readonly { startMs: number; endMs: number }[]) {
@@ -414,16 +426,6 @@ function verseTableKey(verseKey: string) {
  * only for diagnostics; target IDs always come directly from
  * quran_ctc_tokens.json.
  */
-function normalizeTilawaArabic(value: string) {
-  return value
-    .replace(/\ufeff/g, "")
-    .replace(/[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06DE\u06DF-\u06ED\u0640]/g, "")
-    .replace(/[\u0623\u0625\u0622\u0671\u0629\u0649]/g, (character) => ({ "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ة": "ه", "ى": "ي" })[character] ?? character)
-    .split(/\s+/)
-    .filter(Boolean)
-    .join(" ");
-}
-
 function vocabularySize(vocabulary: Vocabulary) {
   return Math.max(-1, ...Object.keys(vocabulary).map(Number)) + 1;
 }
@@ -486,8 +488,13 @@ export function encodeFastConformerWords(
   const targetValidation: FastConformerTargetValidation[] = [];
   let optionalPreludeLexicalText = "";
   const vocabSize = vocabularySize(vocabulary);
-  for (const verseKey of [...new Set(words.map((word) => word.verseKey))]) {
-    const verseWords = words.filter((word) => word.verseKey === verseKey);
+  const wordsByVerse = new Map<string, CtcCanonicalWord[]>();
+  for (const word of words) {
+    const verseWords = wordsByVerse.get(word.verseKey) ?? [];
+    verseWords.push(word);
+    wordsByVerse.set(word.verseKey, verseWords);
+  }
+  for (const [verseKey, verseWords] of wordsByVerse) {
     const ids = tokenTable[verseTableKey(verseKey)];
     if (!ids?.length) throw new Error(`Tilawa's token table has no canonical target for ${verseKey}.`);
     const invalidTokenIds = ids.filter((tokenId) => !Number.isInteger(tokenId) || tokenId < 0 || tokenId >= vocabSize || tokenId === BLANK_TOKEN_ID);
@@ -680,6 +687,124 @@ async function runUpstreamTilawaOracle(
   } catch (error) {
     return { status: "unavailable", transcript: "", detectedPassage: null, confidence: null, tokenCount: 0, reason: error instanceof Error ? error.message : String(error) };
   }
+}
+
+function quranWideIdentificationIndex(assets: FastConformerAssets): Promise<QuranWideLexicalIndex> {
+  sharedQuranIdentificationIndexPromise ??= Promise.resolve().then(() => {
+    const canonicalWords = canonicalCtcWords(hafsVerses);
+    const encoded = encodeFastConformerWords(canonicalWords, assets.tokenTable, assets.vocabulary, assets.quranText);
+    const tokenIdsByWord = new Map<number, number[]>();
+    const optionalPreludeByVerse = new Map<string, number[]>();
+    for (const token of encoded.targetTokens) {
+      if (token.globalWordIndex === undefined) continue;
+      const ids = tokenIdsByWord.get(token.globalWordIndex) ?? [];
+      ids.push(token.tokenId);
+      tokenIdsByWord.set(token.globalWordIndex, ids);
+    }
+    for (const token of encoded.targetTokenMapping.filter((item) => item.owner === "optional-prelude")) {
+      const ids = optionalPreludeByVerse.get(token.verseKey) ?? [];
+      ids.push(token.tokenId);
+      optionalPreludeByVerse.set(token.verseKey, ids);
+    }
+    return buildQuranWideLexicalIndex(encoded.canonicalWords.map((word) => {
+      const [surah, ayah] = word.verseKey.split(":").map(Number);
+      return {
+        surah: surah!,
+        ayah: ayah!,
+        canonicalWordIndex: word.canonicalWordIndex,
+        globalWordIndex: word.globalWordIndex,
+        canonicalArabic: word.canonicalArabic,
+        lexicalText: word.alignmentText,
+        ctcTokenIds: tokenIdsByWord.get(word.globalWordIndex) ?? [],
+        optionalPreludeCtcTokenIds: word.canonicalWordIndex === 1 ? optionalPreludeByVerse.get(word.verseKey) : undefined,
+      };
+    }));
+  }).catch((error) => {
+    sharedQuranIdentificationIndexPromise = null;
+    throw error;
+  });
+  return sharedQuranIdentificationIndexPromise;
+}
+
+function identificationAudioWindows(audio: Float32Array, speechRegions: readonly VadSpeechRegion[]) {
+  const durationMs = Math.round(audio.length / SAMPLE_RATE * 1_000);
+  const windows: Array<{ startMs: number; endMs: number; startSample: number; endSample: number; voicedMs: number }> = [];
+  for (let startMs = 0; startMs < durationMs; startMs += FASTCONFORMER_IDENTIFICATION_DEFAULTS.hopMs) {
+    const endMs = Math.min(durationMs, startMs + FASTCONFORMER_IDENTIFICATION_DEFAULTS.windowMs);
+    const voicedMs = speechRegions.reduce((sum, region) => sum + Math.max(0, Math.min(endMs, region.endMs) - Math.max(startMs, region.startMs)), 0);
+    if (voicedMs >= FASTCONFORMER_IDENTIFICATION_DEFAULTS.minimumVoicedMs) {
+      windows.push({
+        startMs,
+        endMs,
+        startSample: Math.max(0, Math.floor(startMs * SAMPLE_RATE / 1_000)),
+        endSample: Math.min(audio.length, Math.ceil(endMs * SAMPLE_RATE / 1_000)),
+        voicedMs,
+      });
+    }
+    if (endMs === durationMs) break;
+  }
+  return windows;
+}
+
+function unavailableIdentification(reason: string, totalMs: number): FastConformerIdentificationResult {
+  return {
+    status: "unavailable",
+    reason,
+    span: null,
+    wordLevelSpan: null,
+    windowResults: [],
+    retrievalCandidates: [],
+    normalizedCtcScore: null,
+    margin: null,
+    continuityScore: 0,
+    confidence: { composite: null, normalizedBestCtcScore: null, bestVsSecondMargin: null, agreeingWindows: 0, voicedAudioExplained: 0 },
+    performance: { inferenceMs: 0, retrievalMs: 0, rerankingMs: 0, candidatesReranked: 0, totalMs },
+  };
+}
+
+/**
+ * Creates a Quran-wide FastConformer CTC search runner. This deliberately has
+ * no Whisper input and never yields a FinalCanonicalSpan or caption timing.
+ */
+export function createFastConformerIdentificationRunner(audio: Float32Array, speechRegions: readonly VadSpeechRegion[]): FastConformerIdentificationRunner {
+  return async () => {
+    const startedAt = performance.now();
+    const audioWindows = identificationAudioWindows(audio, speechRegions);
+    if (!audioWindows.length) return unavailableIdentification("No sufficiently voiced VAD window was available for FastConformer identification.", Math.round(performance.now() - startedAt));
+    try {
+      sharedModelPromise ??= loadModel().catch((error) => { sharedModelPromise = null; throw error; });
+      const loaded = await sharedModelPromise;
+      const index = await quranWideIdentificationIndex(loaded.assets);
+      if (!loaded.session.inputNames.includes("audio_signal") || !loaded.session.inputNames.includes("length")) throw new Error(`FastConformer has an unsupported input contract: ${loaded.session.inputNames.join(", ")}.`);
+      let inferenceMs = 0;
+      const windows = [];
+      for (const [windowIndex, window] of audioWindows.entries()) {
+        const inferenceStartedAt = performance.now();
+        const samples = audio.slice(window.startSample, window.endSample);
+        const outputs = await loaded.session.run({
+          audio_signal: new loaded.ort.Tensor("float32", samples, [1, samples.length]),
+          length: new loaded.ort.Tensor("int64", BigInt64Array.from([BigInt(samples.length)]), [1]),
+        });
+        const output = outputs[loaded.session.outputNames[0]!];
+        const [, frames, vocabularySize] = output?.dims ?? [];
+        if (!output || !(output.data instanceof Float32Array) || !frames || !vocabularySize || vocabularySize <= BLANK_TOKEN_ID) throw new Error("FastConformer returned an unsupported CTC log-probability shape.");
+        inferenceMs += Math.round(performance.now() - inferenceStartedAt);
+        windows.push(identifyQuranWindow(index, {
+          index: windowIndex,
+          startMs: window.startMs,
+          endMs: window.endMs,
+          voicedMs: window.voicedMs,
+          logits: { values: output.data, frames, vocabularySize },
+          vocabulary: loaded.assets.vocabulary,
+          blankTokenId: BLANK_TOKEN_ID,
+        }));
+      }
+      const summary = summarizeFastConformerIdentification(windows, inferenceMs);
+      return { ...summary, performance: { ...summary.performance, totalMs: Math.round(performance.now() - startedAt) } };
+    } catch (error) {
+      return unavailableIdentification(error instanceof Error ? error.message : String(error), Math.round(performance.now() - startedAt));
+    }
+  };
 }
 
 /** Creates a lazy browser-only known-passage runner over the same decoded 16 kHz PCM. */
