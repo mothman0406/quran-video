@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
 import { arabicCaptionDisplay, captionBackgroundStyle, captionVisualStatesAtTime, getActiveCaptionSegment, linkedCaptionStackLayout, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import { quranFontDefinitions } from "@/lib/quran/content";
@@ -10,7 +10,7 @@ export type CaptionObject = "arabic" | "translation";
 export type CaptionResizeEdge = "left" | "right";
 
 type CaptionPreviewProps = {
-  videoRef: RefObject<HTMLVideoElement | null>;
+  currentTimeMs: number;
   segments: readonly CaptionSegment[];
   content: Readonly<Record<string, QuranContentResponse>>;
   typography: Typography;
@@ -28,7 +28,7 @@ type CaptionPreviewProps = {
 };
 
 function CaptionPreview({
-  videoRef,
+  currentTimeMs,
   segments,
   content,
   typography,
@@ -80,10 +80,7 @@ function CaptionPreview({
   }, [captionBackground, format, positioning.translationPositionLinked, positioning.y, segments, typography]);
 
   useEffect(() => {
-    const video = videoRef.current;
-    let frame: number | null = null;
     const applyVisualState = () => {
-      const currentTimeMs = (video?.currentTime ?? 0) * 1000;
       // This exact selector is the shared preview/timeline/test authority.
       const active = getActiveCaptionSegment(segments, currentTimeMs);
       const states = active ? captionVisualStatesAtTime(segments, currentTimeMs, transitionSettings) : [];
@@ -100,30 +97,8 @@ function CaptionPreview({
         layer.dataset.captionOpacity = opacity.toFixed(3);
       });
     };
-    const stopFrame = () => { if (frame !== null) cancelAnimationFrame(frame); frame = null; };
-    const scheduleFrame = () => {
-      if (frame !== null || !video || video.paused || video.ended) return;
-      frame = requestAnimationFrame(() => { frame = null; applyVisualState(); scheduleFrame(); });
-    };
-    const applyAndSchedule = () => { applyVisualState(); scheduleFrame(); };
-    const applyAndStop = () => { stopFrame(); applyVisualState(); };
-    applyAndSchedule();
-    video?.addEventListener("play", applyAndSchedule);
-    video?.addEventListener("pause", applyAndStop);
-    video?.addEventListener("seeking", applyVisualState);
-    video?.addEventListener("seeked", applyVisualState);
-    video?.addEventListener("timeupdate", applyVisualState);
-    video?.addEventListener("ended", applyAndStop);
-    return () => {
-      stopFrame();
-      video?.removeEventListener("play", applyAndSchedule);
-      video?.removeEventListener("pause", applyAndStop);
-      video?.removeEventListener("seeking", applyVisualState);
-      video?.removeEventListener("seeked", applyVisualState);
-      video?.removeEventListener("timeupdate", applyVisualState);
-      video?.removeEventListener("ended", applyAndStop);
-    };
-  }, [segments, transitionSettings, videoRef]);
+    applyVisualState();
+  }, [currentTimeMs, segments, transitionSettings]);
 
   const styleText = (kind: CaptionObject) => {
     const outline = kind === "arabic" ? typography.arabicOutlineEnabled : typography.translationOutlineEnabled;

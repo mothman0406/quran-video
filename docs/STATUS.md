@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Media and multi-track timeline foundation
+
+Complete:
+
+- Added the local metadata-only `MediaSource` contract for browser-playable video and audio. Old `sourceVideo` records migrate safely into a video media source; no `File`, source bytes, or object URL is persisted.
+- Audio-only selection now follows the existing File-to-PCM recognition path, plays through the shared transport, and renders Quran captions over the selected-aspect-ratio neutral canvas. Video sources continue to populate preview and recognition and now expose both Video and Audio timeline rows from the one file.
+- Replaced the single caption strip with one shared Text / Video / Audio timeline, deterministic time ruler, full-height playhead, centralized time-position conversion, click seeking, and playhead dragging. Caption blocks still use the existing authoritative half-open `CaptionSegment[]` timing, including distinct long-ayah pieces and basmalah.
+- Audio-only export remains intentionally unavailable with a clear message; no multi-clip, YouTube, waveform, cloud-media, trim, snapping, or zoom work was added.
+
+Verification: `npm test` (147 passing), `npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check` pass. Lint retains four pre-existing unused legacy-timing helper warnings; the build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning. No browser media fixtures are present in this workspace, so the required video and audio-only browser passes remain pending.
+
 ## Current milestone: Clean Quran caption presentation and default stacked layout
 
 Complete:

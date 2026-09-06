@@ -11,7 +11,7 @@ export type CloudProjectRow = {
   created_at: string;
   updated_at: string;
   source_filename: string | null;
-  source_metadata: SavedProject["sourceVideo"];
+  source_metadata: SavedProject["sourceMedia"];
   project_data: unknown;
   schema_version: number;
 };
@@ -42,8 +42,8 @@ export function toCloudProjectPayload(project: SavedProject): CloudProjectPayloa
     name: valid.title,
     created_at: valid.createdAt,
     updated_at: valid.updatedAt,
-    source_filename: valid.sourceVideo?.fileName ?? null,
-    source_metadata: valid.sourceVideo,
+    source_filename: valid.sourceMedia?.fileName ?? null,
+    source_metadata: valid.sourceMedia,
     project_data: valid,
     schema_version: CLOUD_SCHEMA_VERSION,
   };

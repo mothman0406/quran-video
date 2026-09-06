@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ChangeEvent, type PointerEvent, type SyntheticEvent } from "react";
+import { useEffect, useState, type ChangeEvent, type PointerEvent, type SyntheticEvent } from "react";
 import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "@/lib/editor/captions";
 import type { ProjectFormat, ProjectFormatPreset } from "@/lib/schemas/project";
 import type { ExportQuality } from "@/lib/export/quality";
@@ -16,6 +16,7 @@ import AccountPanel from "@/components/account-panel";
 import { DEFAULT_SOURCE_VIDEO_FIT, PROJECT_FORMATS, projectFormatDefinition } from "@/lib/editor/formats";
 import { BUILT_IN_STYLES, type BuiltInStyleName, type CaptionStyle } from "@/lib/editor/styles";
 import { quranFontDefinitions } from "@/lib/quran/content";
+import { formatTimelineClock, projectDurationMs, timeToTimelinePosition, timelineRulerTicks, timelineTracks, type MediaSource } from "@/lib/editor/media";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage = "idle" | "preparing" | "detecting-speech" | "loading-model" | "transcribing" | "matching" | "captions" | "complete" | "error";
@@ -25,6 +26,7 @@ type EditorWorkspaceProps = {
   videoFile: File | null;
   videoUrl: string | null;
   videoMetadata: VideoMetadata | null;
+  mediaSource: MediaSource | null;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   previewRef: React.RefObject<HTMLDivElement | null>;
   timelineRef: React.RefObject<HTMLDivElement | null>;
@@ -72,8 +74,8 @@ type EditorWorkspaceProps = {
   selectedFormatDefinition: ReturnType<typeof projectFormatDefinition>;
   onProjectNameChange: (name: string) => void;
   onVideoSelect: (event: ChangeEvent<HTMLInputElement>) => void;
-  onLoadedMetadata: (event: SyntheticEvent<HTMLVideoElement>) => void;
-  onVideoTimeUpdate: (event: SyntheticEvent<HTMLVideoElement>) => void;
+  onLoadedMetadata: (event: SyntheticEvent<HTMLMediaElement>) => void;
+  onVideoTimeUpdate: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onVideoError: () => void;
   onSelectObject: (kind: CaptionObject | null) => void;
   onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, kind: CaptionObject) => void;
@@ -84,6 +86,7 @@ type EditorWorkspaceProps = {
   onSelectSegment: (segment: CaptionSegment) => void;
   onSegmentPointerDown: (event: PointerEvent<HTMLButtonElement>, segment: CaptionSegment) => void;
   onTimelinePointerDown: (event: PointerEvent<HTMLElement>) => void;
+  onPlayheadPointerDown: (event: PointerEvent<HTMLElement>) => void;
   onTimelinePointerMove: (event: PointerEvent<HTMLElement>) => void;
   onEdgeDown: (event: PointerEvent<HTMLElement>, edge: "start" | "end", segment: CaptionSegment) => void;
   onEdgeUp: () => void;
@@ -141,8 +144,9 @@ function Segmented({ value, options, onChange }: { value: string; options: [stri
 
 export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const [accountOpen, setAccountOpen] = useState(false);
+  const [timelineWidth, setTimelineWidth] = useState(600);
   const {
-    videoFile, videoUrl, videoMetadata, videoRef, previewRef, timelineRef, stage, progress, support,
+    videoFile, videoUrl, videoMetadata, mediaSource, videoRef, previewRef, timelineRef, stage, progress, support,
     alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
     selectedObject, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, showVerseNumber, showSafeArea, projectName, dirty, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
@@ -150,7 +154,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     showCorrection, surah, startAyah, endAyah, entitlements, selectedFormatDefinition, timelineTooltip,
     onProjectNameChange, onVideoSelect, onLoadedMetadata, onVideoTimeUpdate, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown,
-    onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onChangeFormat, onDetect, onCopyAlignmentDebug,
+    onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onChangeFormat, onDetect, onCopyAlignmentDebug,
     onCorrectDetection, onToggleCorrection, onClearVideo, onSaveProject, onSaveToAccount, onOpenProjects,
     onOpenCloudProjects, onSessionChange, onPlanChange, onDiscard, onNewProject, onExportOpen, onExport, onCancelExport, onDownloadExport,
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange,
@@ -158,14 +162,26 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     onResetSelectedObjectStyle, onAlignTranslation, onSetSplitBoundary, onSplit, onMergePrevious,
     onMergeNext, onResetTiming, onResetAllTiming,
   } = props;
-  const maxTime = Math.max(1, (videoMetadata?.durationSeconds ?? 0) * 1000);
+  const durationMs = projectDurationMs(mediaSource);
+  const maxTime = Math.max(1, durationMs);
+  const tracks = timelineTracks(mediaSource, segments);
+  const rulerTicks = timelineRulerTicks(durationMs, timelineWidth);
+  useEffect(() => {
+    const node = timelineRef.current;
+    if (!node) return;
+    const update = () => setTimelineWidth(node.clientWidth || 600);
+    update();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(node);
+    return () => observer?.disconnect();
+  }, [timelineRef]);
   const objectLabel = selectedObject === "arabic" ? "Arabic" : selectedObject === "translation" ? "Translation" : null;
   const updateObjectTypography = <K extends keyof Typography>(key: K, value: Typography[K]) => onTypographyChange(key, value);
 
   return <div className="editor-shell">
     <header className="editor-topbar">
       <div className="editor-brand"><span className="editor-brand-mark">۝</span><div><p>Quran Video</p><span>Recitation editor</span></div></div>
-      <div className="editor-project-title"><input aria-label="Project name" value={projectName} onChange={(event) => onProjectNameChange(event.target.value)} /><span>{videoFile?.name ?? "No source video"}</span></div>
+      <div className="editor-project-title"><input aria-label="Project name" value={projectName} onChange={(event) => onProjectNameChange(event.target.value)} /><span>{videoFile?.name ?? "No local source"}</span></div>
       <div className="editor-top-actions">
         <div className="editor-format-switcher" aria-label="Project format">{(Object.keys(PROJECT_FORMATS) as ProjectFormatPreset[]).map((preset) => <button key={preset} type="button" className={projectFormat.preset === preset ? "is-active" : ""} onClick={() => onChangeFormat(preset)}>{preset === "vertical" ? "9:16" : preset === "landscape" ? "16:9" : "1:1"}</button>)}</div>
         <span className={`editor-save-state ${dirty ? "is-dirty" : ""}`}><i />{dirty ? "Unsaved" : "Saved"}</span>
@@ -178,15 +194,15 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     <div className="editor-body">
       <aside className="editor-sidebar editor-sidebar-left">
         <div className="editor-sidebar-scroll">
-          <div className="editor-panel-heading"><div><SectionLabel>Source</SectionLabel><h2>{videoFile ? "Local video" : "Start a project"}</h2></div><span className="editor-status-dot" /></div>
+          <div className="editor-panel-heading"><div><SectionLabel>Source</SectionLabel><h2>{videoFile ? mediaSource?.kind === "audio" ? "Local audio" : "Local video" : "Start a project"}</h2></div><span className="editor-status-dot" /></div>
           {videoFile ? <>
             <p className="editor-muted editor-truncate" title={videoFile.name}>{videoFile.name}</p>
-            {videoMetadata && <p className="editor-meta-line">{formatDuration(videoMetadata.durationSeconds)} · {videoMetadata.width} × {videoMetadata.height}</p>}
+            {videoMetadata && <p className="editor-meta-line">{formatDuration(videoMetadata.durationSeconds)}{mediaSource?.hasVideo ? ` · ${videoMetadata.width} × ${videoMetadata.height}` : " · audio"}</p>}
             <button className="editor-button editor-button-primary editor-full-button" disabled={busy || !support?.supported} type="button" onClick={onDetect}>{stage === "complete" ? "Detect again" : "Detect Quran"}</button>
             {process.env.NODE_ENV !== "production" && stage === "complete" && <button className="editor-text-button" type="button" onClick={onCopyAlignmentDebug}>Copy Alignment Debug</button>}
             {stage === "complete" && alignments.length > 0 && <button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onToggleCorrection}>Correct detection</button>}
-            <button className="editor-text-button" type="button" onClick={onClearVideo}>Choose a different video</button>
-          </> : <label className="editor-upload-mini"><span>↑</span><strong>Choose a video</strong><small>MP4, WebM, or browser-supported video</small><input accept="video/*" type="file" onChange={onVideoSelect} /></label>}
+            <button className="editor-text-button" type="button" onClick={onClearVideo}>Choose a different source</button>
+          </> : <label className="editor-upload-mini"><span>↑</span><strong>Choose media</strong><small>Video or browser-supported audio</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
 
           <div className="editor-divider" />
           <SectionLabel>Canvas</SectionLabel>
@@ -208,18 +224,19 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
       </aside>
 
       <section className="editor-main-stage">
-        <div className="editor-stage-header"><div><SectionLabel>Canvas</SectionLabel><h1>{videoFile ? "Caption composition" : "Begin with a recitation"}</h1></div><div className="editor-stage-info"><span>{selectedFormatDefinition.label}</span><span>{formatDuration(videoMetadata?.durationSeconds ?? 0)}</span></div></div>
+        <div className="editor-stage-header"><div><SectionLabel>Canvas</SectionLabel><h1>{videoFile ? "Caption composition" : "Begin with a recitation"}</h1></div><div className="editor-stage-info"><span>{selectedFormatDefinition.label}</span><span>{formatDuration(durationMs / 1000)}</span></div></div>
         <div className="editor-canvas-well">
-          {videoUrl ? <div ref={previewRef} className="project-preview-canvas editor-canvas" data-project-aspect-ratio={selectedFormatDefinition.aspectRatio} data-project-format={projectFormat.preset} style={{ aspectRatio: `${projectFormat.width} / ${projectFormat.height}` }} onPointerDown={onCanvasBackgroundPointerDown}>
-            <video ref={videoRef} className="h-full w-full object-cover" controls playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onSeeked={onVideoTimeUpdate} onError={onVideoError}>Your browser does not support video playback.</video>
+          {videoUrl ? <div ref={previewRef} className={`project-preview-canvas editor-canvas ${mediaSource?.hasVideo ? "" : "editor-audio-canvas"}`} data-project-aspect-ratio={selectedFormatDefinition.aspectRatio} data-project-format={projectFormat.preset} style={{ aspectRatio: `${projectFormat.width} / ${projectFormat.height}` }} onPointerDown={onCanvasBackgroundPointerDown}>
+            {mediaSource?.hasVideo ? <video ref={videoRef} className="h-full w-full object-cover" controls playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onSeeked={onVideoTimeUpdate} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={(node) => { (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node as unknown as HTMLVideoElement; }} className="editor-audio-element" controls preload="metadata" src={videoUrl} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onSeeked={onVideoTimeUpdate} onError={onVideoError}>Your browser does not support audio playback.</audio>}
             {showSafeArea && <SafeAreaOverlay format={projectFormat} />}
-            <CaptionPreview videoRef={videoRef} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} />
-          </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose a video to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*" type="file" onChange={onVideoSelect} /></label>}
+            <CaptionPreview currentTimeMs={currentTimeMs} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} />
+          </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
         </div>
-        <div className="editor-playback-row"><span className="editor-playback-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(videoMetadata?.durationSeconds ?? 0)}</span><span className="editor-playback-hint">Space to play · ← → to nudge</span></div>
-        {segments.length > 0 && <div className="editor-timeline-panel"><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(videoMetadata?.durationSeconds ?? 0)}</span></div><div ref={timelineRef} className="editor-timeline" onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove}>
-          <div className="editor-playhead" style={{ left: `${(currentTimeMs / maxTime) * 100}%` }} />
-          <div className="editor-timeline-track">{segments.map((segment) => <button key={segment.id} type="button" aria-label={`Caption ${captionSegmentLabel(segment)}`} onPointerDown={(event) => onSegmentPointerDown(event, segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.stopPropagation(); onSelectSegment(segment); }} className={`editor-caption-block ${segment.id === selectedSegmentId ? "is-selected" : ""} ${getActiveCaptionSegment(segments, currentTimeMs)?.id === segment.id ? "is-active" : ""}`} style={{ width: `${Math.max(1, ((segment.endMs - segment.startMs) / maxTime) * 100)}%`, left: `${(segment.startMs / maxTime) * 100}%` }}><span>{captionSegmentLabel(segment)}</span><span className="editor-caption-block-range">{(segment.startMs / 1000).toFixed(2)}–{(segment.endMs / 1000).toFixed(2)}s</span><span className="editor-timing-handle editor-timing-handle-start" aria-label={`Resize ${captionSegmentLabel(segment)} start`} onPointerDown={(event) => onEdgeDown(event, "start", segment)} onPointerUp={onEdgeUp} /><span className="editor-timing-handle editor-timing-handle-end" aria-label={`Resize ${captionSegmentLabel(segment)} end`} onPointerDown={(event) => onEdgeDown(event, "end", segment)} onPointerUp={onEdgeUp} /></button>)}</div>
+        <div className="editor-playback-row"><span className="editor-playback-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(durationMs / 1000)}</span><span className="editor-playback-hint">Space to play · ← → to nudge</span></div>
+        {videoUrl && <div className="editor-timeline-panel"><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div ref={timelineRef} className="editor-timeline" onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove}>
+          <div className="editor-timeline-ruler">{rulerTicks.map((tick) => <span key={tick} style={{ left: `${timeToTimelinePosition(tick, maxTime) * 100}%` }}>{formatTimelineClock(tick)}</span>)}</div>
+          <button className="editor-playhead" aria-label="Drag playhead to seek" type="button" onPointerDown={onPlayheadPointerDown} style={{ left: `${timeToTimelinePosition(currentTimeMs, maxTime) * 100}%` }} />
+          <div className="editor-timeline-tracks">{tracks.map((track) => <div className="editor-timeline-row" key={track.kind}><span className="editor-track-label">{track.label}</span><div className={`editor-timeline-track editor-timeline-track-${track.kind}`}>{track.items.map((item) => item.captionSegmentId ? (() => { const segment = segments.find((value) => value.id === item.captionSegmentId)!; return <button key={item.id} type="button" aria-label={`Caption ${captionSegmentLabel(segment)}`} onPointerDown={(event) => onSegmentPointerDown(event, segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.stopPropagation(); onSelectSegment(segment); }} className={`editor-caption-block ${segment.id === selectedSegmentId ? "is-selected" : ""} ${getActiveCaptionSegment(segments, currentTimeMs)?.id === segment.id ? "is-active" : ""}`} style={{ width: `${Math.max(1, timeToTimelinePosition(item.endMs - item.startMs, maxTime) * 100)}%`, left: `${timeToTimelinePosition(item.startMs, maxTime) * 100}%` }}><span>{item.label}</span><span className="editor-caption-block-range">{(item.startMs / 1000).toFixed(2)}–{(item.endMs / 1000).toFixed(2)}s</span><span className="editor-timing-handle editor-timing-handle-start" aria-label={`Resize ${captionSegmentLabel(segment)} start`} onPointerDown={(event) => onEdgeDown(event, "start", segment)} onPointerUp={onEdgeUp} /><span className="editor-timing-handle editor-timing-handle-end" aria-label={`Resize ${captionSegmentLabel(segment)} end`} onPointerDown={(event) => onEdgeDown(event, "end", segment)} onPointerUp={onEdgeUp} /></button>; })() : <div key={item.id} className="editor-media-block" style={{ width: `${timeToTimelinePosition(item.endMs - item.startMs, maxTime) * 100}%`, left: `${timeToTimelinePosition(item.startMs, maxTime) * 100}%` }}><span>{item.label}</span></div>)}</div></div>)}</div>
           {timelineTooltip && <div className="editor-timeline-tooltip" role="status">{timelineTooltip}</div>}
         </div></div>}
         {(busy || (stage === "complete" && alignments.length > 0) || showCorrection || errorMessage || timingWarning || exportState) && <div className="editor-notices">

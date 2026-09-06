@@ -3,15 +3,20 @@ import { z } from "zod";
 const PositiveNumber = z.number().finite().nonnegative();
 const PositiveInteger = z.number().int().positive();
 
-export const SourceVideoSchema = z.strictObject({
+const MediaMetadataSchema = z.strictObject({
   fileName: z.string().min(1),
   mimeType: z.string().min(1),
   fileSize: PositiveNumber.optional(),
-  durationSeconds: PositiveNumber.optional(),
+  durationMs: PositiveNumber.optional(),
   width: PositiveInteger.optional(),
   height: PositiveInteger.optional(),
   fingerprint: z.string().min(1).optional(),
 });
+
+export const MediaSourceSchema = z.discriminatedUnion("kind", [
+  MediaMetadataSchema.extend({ kind: z.literal("video"), hasVideo: z.literal(true), hasAudio: z.boolean() }),
+  MediaMetadataSchema.extend({ kind: z.literal("audio"), hasVideo: z.literal(false), hasAudio: z.literal(true) }),
+]);
 
 export const ProjectFormatSchema = z.strictObject({
   preset: z.enum(["vertical", "square", "landscape"]),
@@ -152,7 +157,7 @@ export const ProjectSchema = z.strictObject({
   version: z.literal(2),
   id: z.string().min(1),
   title: z.string().min(1),
-  sourceVideo: SourceVideoSchema.nullable(),
+  sourceMedia: MediaSourceSchema.nullable(),
   format: ProjectFormatSchema,
   verseAlignments: z.array(VerseAlignmentSchema),
   captionSegments: z.array(CaptionSegmentSchema),

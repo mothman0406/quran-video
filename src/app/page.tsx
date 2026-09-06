@@ -52,7 +52,6 @@ import type { ProjectFormat, ProjectFormatPreset } from "@/lib/schemas/project";
 import type { SavedProject } from "@/lib/schemas/project";
 import {
   createProjectRepository,
-  sourceFingerprint,
   verifySourceFile,
   type ProjectRepository,
 } from "@/lib/project-storage";
@@ -102,6 +101,7 @@ import type { Session } from "@supabase/supabase-js";
 import { recordAuthenticatedUsage } from "@/lib/usage/client";
 import { getCloudProjectLimit, getCustomStyleLimit, getPlanEntitlements, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
+import { mediaKindForFile, mediaSourceFromFile, projectDurationMs, timelinePositionToTime, type MediaSource } from "@/lib/editor/media";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -155,6 +155,7 @@ export default function Home() {
   const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(
     null,
   );
+  const [mediaSource, setMediaSource] = useState<MediaSource | null>(null);
   const [stage, setStage] = useState<Stage>("idle");
   const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -243,6 +244,7 @@ export default function Home() {
     positioning: CaptionPositioning;
   } | null>(null);
   const draggingEdge = useRef<"start" | "end" | null>(null);
+  const draggingPlayhead = useRef(false);
   const timelineInteraction = useRef<{
     id: string;
     mode: "start" | "end" | "body";
@@ -322,14 +324,7 @@ export default function Home() {
   }, [typography.quranStyle]);
   const editorSignature = JSON.stringify({
     projectName,
-    sourceVideo: videoFile
-      ? {
-          fileName: videoFile.name,
-          fileSize: videoFile.size,
-          mimeType: videoFile.type,
-          durationSeconds: videoMetadata?.durationSeconds,
-        }
-      : (savedProject?.sourceVideo ?? null),
+    sourceMedia: videoFile ? sourceMetadata(videoFile) : (savedProject?.sourceMedia ?? null),
     format: projectFormat,
     verseAlignments: alignments,
     captionSegments: segments,
@@ -416,15 +411,13 @@ export default function Home() {
     }
   }
   function sourceMetadata(file: File, metadata = videoMetadata) {
-    return {
-      fileName: file.name,
-      fileSize: file.size,
-      mimeType: file.type || "video/*",
-      durationSeconds: metadata?.durationSeconds,
+    const kind = mediaKindForFile(file);
+    if (!kind) throw new Error("Choose browser-supported video or audio media.");
+    return mediaSourceFromFile(file, kind, {
+      durationMs: metadata ? Math.round(metadata.durationSeconds * 1_000) : undefined,
       width: metadata?.width,
       height: metadata?.height,
-      fingerprint: sourceFingerprint(file),
-    };
+    });
   }
   function resetEditorState() {
     exportAbort.current?.abort();
@@ -433,6 +426,7 @@ export default function Home() {
     setVideoFile(null);
     setVideoUrl(null);
     setVideoMetadata(null);
+    setMediaSource(null);
     setAlignments([]);
     setSegments([]);
     setContent({});
@@ -463,9 +457,9 @@ export default function Home() {
       version: 2,
       id,
       title,
-      sourceVideo: videoFile
+      sourceMedia: videoFile
         ? sourceMetadata(videoFile)
-        : (savedProject?.sourceVideo ?? null),
+        : (savedProject?.sourceMedia ?? null),
       format: projectFormat,
       verseAlignments: alignments,
       captionSegments: segments,
@@ -509,7 +503,7 @@ export default function Home() {
       setProjectName(title);
       savedSignature.current = JSON.stringify({
         projectName: title,
-        sourceVideo: project.sourceVideo,
+        sourceMedia: project.sourceMedia,
         format: project.format,
         verseAlignments: project.verseAlignments,
         captionSegments: project.captionSegments,
@@ -613,7 +607,7 @@ export default function Home() {
     cloudBaselineUpdatedAt.current = fromCloud ? project.updatedAt : null;
     savedSignature.current = JSON.stringify({
       projectName: project.title,
-      sourceVideo: project.sourceVideo,
+      sourceMedia: project.sourceMedia,
       format: project.format,
       verseAlignments: project.verseAlignments,
       captionSegments: project.captionSegments,
@@ -676,8 +670,8 @@ export default function Home() {
   function selectVideo(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0];
     if (!next) return;
-    if (!next.type.startsWith("video/")) {
-      setErrorMessage("Choose a video file to start a local editing session.");
+    if (!mediaKindForFile(next)) {
+      setErrorMessage("Choose browser-supported video or audio to start a local editing session.");
       return;
     }
     exportAbort.current?.abort();
@@ -686,10 +680,11 @@ export default function Home() {
     const opening = pendingOpenProject;
     setVideoFile(next);
     setVideoUrl(URL.createObjectURL(next));
+    setMediaSource(mediaSourceFromFile(next, mediaKindForFile(next)!));
     setVideoMetadata(null);
     setErrorMessage(
       opening
-        ? `Reselect source video: ${opening.sourceVideo?.fileName ?? next.name}`
+        ? `Reselect source media: ${opening.sourceMedia?.fileName ?? next.name}`
         : null,
     );
     setStage("idle");
@@ -705,18 +700,21 @@ export default function Home() {
       setExportDiagnostics(null);
     }
   }
-  function loadedVideoMetadata(event: SyntheticEvent<HTMLVideoElement>) {
+  function loadedVideoMetadata(event: SyntheticEvent<HTMLMediaElement>) {
+    const target = event.currentTarget;
+    const visual = target as HTMLVideoElement;
     const metadata = {
-      durationSeconds: event.currentTarget.duration,
-      width: event.currentTarget.videoWidth,
-      height: event.currentTarget.videoHeight,
+      durationSeconds: target.duration,
+      width: Number.isFinite(visual.videoWidth) ? visual.videoWidth : 0,
+      height: Number.isFinite(visual.videoHeight) ? visual.videoHeight : 0,
     };
     setVideoMetadata(metadata);
+    setMediaSource((current) => current ? { ...current, durationMs: Math.round(metadata.durationSeconds * 1_000), ...(current.hasVideo ? { width: metadata.width, height: metadata.height } : {}) } : current);
     if (pendingOpenProject) {
       const result = verifySourceFile(
         videoFile!,
-        pendingOpenProject.sourceVideo,
-        metadata.durationSeconds,
+        pendingOpenProject.sourceMedia,
+        Math.round(metadata.durationSeconds * 1_000),
       );
       if (!result.matches) {
         setErrorMessage(
@@ -925,6 +923,7 @@ export default function Home() {
     setVideoFile(null);
     setVideoUrl(null);
     setVideoMetadata(null);
+    setMediaSource(null);
     setAlignments([]);
     setSegments([]);
     setContent({});
@@ -1001,7 +1000,7 @@ export default function Home() {
       }
     }
   }
-  function updateTime(event: SyntheticEvent<HTMLVideoElement>) {
+  function updateTime(event: SyntheticEvent<HTMLMediaElement>) {
     setCurrentTimeMs(event.currentTarget.currentTime * 1000);
   }
   const seekTo = useCallback(
@@ -1011,11 +1010,11 @@ export default function Home() {
       video.currentTime =
         Math.max(
           0,
-          Math.min(ms, (videoMetadata?.durationSeconds ?? 0) * 1000),
+          Math.min(ms, projectDurationMs(mediaSource)),
         ) / 1000;
       setCurrentTimeMs(video.currentTime * 1000);
     },
-    [videoMetadata],
+    [mediaSource],
   );
   function selectSegment(segment: CaptionSegment) {
     setSelectedSegmentId(segment.id);
@@ -1081,14 +1080,16 @@ export default function Home() {
   function timelineTimeFromPointer(event: PointerEvent<HTMLElement>) {
     const rect = timelineRef.current?.getBoundingClientRect();
     if (!rect) return 0;
-    return (
-      Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) *
-      (videoMetadata?.durationSeconds ?? 0) *
-      1000
-    );
+    return timelinePositionToTime((event.clientX - rect.left) / rect.width, projectDurationMs(mediaSource));
   }
   function seekTimeline(event: PointerEvent<HTMLElement>) {
     seekTo(timelineTimeFromPointer(event));
+  }
+  function handlePlayheadPointerDown(event: PointerEvent<HTMLElement>) {
+    event.stopPropagation();
+    draggingPlayhead.current = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    seekTimeline(event);
   }
   function formatTimelineTime(value: number) {
     const milliseconds = Math.max(0, Math.round(value));
@@ -1097,7 +1098,7 @@ export default function Home() {
     return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${String(milliseconds % 1_000).padStart(3, "0")}`;
   }
   function snapTimelineTime(value: number, id: string) {
-    const maxMs = Math.max(1, (videoMetadata?.durationSeconds ?? 0) * 1_000);
+    const maxMs = Math.max(1, projectDurationMs(mediaSource));
     const candidates = [currentTimeMs, ...segments.flatMap((segment) => segment.id === id ? [] : [segment.startMs, segment.endMs])];
     const nearby = candidates.find((candidate) => Math.abs(candidate - value) <= 80);
     return Math.max(0, Math.min(maxMs, Math.round(nearby ?? value)));
@@ -1124,6 +1125,10 @@ export default function Home() {
     event.currentTarget.setPointerCapture(event.pointerId);
   }
   function handleEdgeMove(event: PointerEvent<HTMLElement>) {
+    if (draggingPlayhead.current) {
+      seekTimeline(event);
+      return;
+    }
     const interaction = timelineInteraction.current;
     if (!interaction) return;
     const nextTime = timelineTimeFromPointer(event);
@@ -1132,7 +1137,7 @@ export default function Home() {
     const nextPatch = interaction.mode === "body"
       ? (() => {
           const duration = interaction.initialEndMs - interaction.initialStartMs;
-          const startMs = Math.max(0, Math.min(Math.max(1, (videoMetadata?.durationSeconds ?? 0) * 1_000) - duration, snapTimelineTime(interaction.initialStartMs + delta, interaction.id)));
+          const startMs = Math.max(0, Math.min(Math.max(1, projectDurationMs(mediaSource)) - duration, snapTimelineTime(interaction.initialStartMs + delta, interaction.id)));
           return { startMs, endMs: startMs + duration };
         })()
       : interaction.mode === "start" ? { startMs: snapped } : { endMs: snapped };
@@ -1141,13 +1146,14 @@ export default function Home() {
         current,
         interaction.id,
         nextPatch,
-        (videoMetadata?.durationSeconds ?? 0) * 1000,
+        projectDurationMs(mediaSource),
       ),
     );
     setTimelineTooltip(formatTimelineTime(interaction.mode === "end" ? nextPatch.endMs ?? snapped : nextPatch.startMs ?? snapped));
   }
   function handleEdgeUp() {
     draggingEdge.current = null;
+    draggingPlayhead.current = false;
     timelineInteraction.current = null;
     setTimelineTooltip(null);
   }
@@ -1267,6 +1273,11 @@ export default function Home() {
   async function exportVideo() {
     if (!videoFile || exportAbort.current || !exportCoordinator.current.start())
       return;
+    if (mediaSource?.kind === "audio") {
+      setExportError("Audio-only export is not available yet. Playback, captioning, and local recognition remain available.");
+      exportCoordinator.current.finish();
+      return;
+    }
     const capability = offlineWebCodecsSupport();
     if (!capability.supported) {
       setExportError(capability.reason);
@@ -1358,6 +1369,7 @@ export default function Home() {
         videoFile={videoFile}
         videoUrl={videoUrl}
         videoMetadata={videoMetadata}
+        mediaSource={mediaSource}
         videoRef={videoRef}
         previewRef={previewRef}
         timelineRef={timelineRef}
@@ -1417,6 +1429,7 @@ export default function Home() {
         onSelectSegment={selectSegment}
         onSegmentPointerDown={handleSegmentPointerDown}
         onTimelinePointerDown={seekTimeline}
+        onPlayheadPointerDown={handlePlayheadPointerDown}
         onTimelinePointerMove={handleEdgeMove}
         onEdgeDown={handleEdgeDown}
         onEdgeUp={handleEdgeUp}
@@ -1454,8 +1467,8 @@ export default function Home() {
         onSplit={splitSelected}
         onMergePrevious={mergePrevious}
         onMergeNext={mergeNext}
-        onResetTiming={() => selectedSegment && setSegments((current) => resetCaptionSegmentTiming(current, selectedSegment.id, (videoMetadata?.durationSeconds ?? 0) * 1000))}
-        onResetAllTiming={() => setSegments((current) => resetAllCaptionSegmentTiming(current, (videoMetadata?.durationSeconds ?? 0) * 1000))}
+        onResetTiming={() => selectedSegment && setSegments((current) => resetCaptionSegmentTiming(current, selectedSegment.id, projectDurationMs(mediaSource)))}
+        onResetAllTiming={() => setSegments((current) => resetAllCaptionSegmentTiming(current, projectDurationMs(mediaSource)))}
       />
       {/* <div className="hidden" aria-hidden="true">
       <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-5 py-5 sm:px-8 lg:px-12 lg:py-8">
@@ -2993,7 +3006,7 @@ export default function Home() {
                         {project.title}
                       </span>
                       <span className="block truncate text-xs text-[#68716a]">
-                        {project.sourceVideo?.fileName ?? "No source"} ·{" "}
+                        {project.sourceMedia?.fileName ?? "No source"} ·{" "}
                         {project.format.preset} ·{" "}
                         {new Date(project.updatedAt).toLocaleDateString()}
                       </span>
@@ -3020,7 +3033,7 @@ export default function Home() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="dialog" aria-modal="true">
           <div className="w-full max-w-lg rounded-2xl bg-[#fbfaf6] p-5 shadow-2xl">
             <div className="flex items-center justify-between"><h2 className="font-serif text-xl font-semibold text-[#173c32]">Cloud Projects</h2><button className="text-sm underline" type="button" onClick={() => setCloudProjectsOpen(false)}>Close</button></div>
-            {!session ? <p className="mt-5 text-sm text-[#68716a]">Sign in to view projects saved to your account.</p> : cloudProjects.length === 0 ? <p className="mt-5 text-sm text-[#68716a]">No cloud projects yet.</p> : <div className="mt-4 space-y-2">{cloudProjects.map((project) => <div className="flex items-center justify-between gap-3 rounded-xl border border-[#e3e0d8] bg-white p-3" key={project.id}><button className="min-w-0 text-left" type="button" onClick={() => { setCloudProjectsOpen(false); void openProject(project); }}><span className="block truncate font-semibold text-[#173c32]">{project.title}</span><span className="block truncate text-xs text-[#68716a]">{project.sourceVideo?.fileName ?? "No source"} · {new Date(project.updatedAt).toLocaleDateString()}</span></button><button className="shrink-0 text-xs text-[#984b32] underline" type="button" onClick={() => void deleteCloud(project)}>Delete</button></div>)}</div>}
+            {!session ? <p className="mt-5 text-sm text-[#68716a]">Sign in to view projects saved to your account.</p> : cloudProjects.length === 0 ? <p className="mt-5 text-sm text-[#68716a]">No cloud projects yet.</p> : <div className="mt-4 space-y-2">{cloudProjects.map((project) => <div className="flex items-center justify-between gap-3 rounded-xl border border-[#e3e0d8] bg-white p-3" key={project.id}><button className="min-w-0 text-left" type="button" onClick={() => { setCloudProjectsOpen(false); void openProject(project); }}><span className="block truncate font-semibold text-[#68716a]">{project.title}</span><span className="block truncate text-xs text-[#68716a]">{project.sourceMedia?.fileName ?? "No source"} · {new Date(project.updatedAt).toLocaleDateString()}</span></button><button className="shrink-0 text-xs text-[#984b32] underline" type="button" onClick={() => void deleteCloud(project)}>Delete</button></div>)}</div>}
             <p className="mt-5 text-xs leading-5 text-[#737b73]">Opening a cloud project restores metadata and requires you to reselect its local source video.</p>
           </div>
         </div>

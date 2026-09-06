@@ -27,8 +27,28 @@ function migrateSavedProject(value: unknown): unknown {
   const project = value as Record<string, unknown>;
   if (!Array.isArray(project.verseAlignments)) return value;
 
+  const legacySource = project.sourceVideo;
+  const sourceMedia = !("sourceMedia" in project) && legacySource && typeof legacySource === "object" && !Array.isArray(legacySource)
+    ? (() => {
+        const source = legacySource as Record<string, unknown>;
+        return {
+          kind: "video",
+          fileName: source.fileName,
+          mimeType: source.mimeType,
+          fileSize: source.fileSize,
+          durationMs: typeof source.durationSeconds === "number" ? source.durationSeconds * 1_000 : undefined,
+          width: source.width,
+          height: source.height,
+          fingerprint: source.fingerprint,
+          hasVideo: true,
+          hasAudio: true,
+        };
+      })()
+    : undefined;
+  const withoutLegacySource = Object.fromEntries(Object.entries(project).filter(([key]) => key !== "sourceVideo"));
   return {
-    ...project,
+    ...withoutLegacySource,
+    ...("sourceMedia" in project ? {} : { sourceMedia: sourceMedia ?? null }),
     // Projects created before inline ayah numbers had no explicit preference.
     // Preserve saved false, but give missing legacy state the new default.
     ...(typeof project.showVerseNumber === "boolean" ? {} : { showVerseNumber: true }),
@@ -119,12 +139,12 @@ export function sourceFingerprint(file: Pick<File, "name" | "size" | "type">): s
   return `${file.name}:${file.size}:${file.type}`;
 }
 
-export function verifySourceFile(file: Pick<File, "name" | "size" | "type">, source: SavedProject["sourceVideo"], durationSeconds?: number): { matches: boolean; reasons: string[] } {
+export function verifySourceFile(file: Pick<File, "name" | "size" | "type">, source: SavedProject["sourceMedia"], durationMs?: number): { matches: boolean; reasons: string[] } {
   const reasons: string[] = [];
   if (!source) return { matches: true, reasons };
   if (source.fileName !== file.name) reasons.push(`filename is “${file.name}”, expected “${source.fileName}”`);
   if (source.fileSize !== undefined && source.fileSize !== file.size) reasons.push(`file size is ${file.size} bytes, expected ${source.fileSize} bytes`);
   if (source.mimeType !== file.type) reasons.push(`media type is “${file.type || "unknown"}”, expected “${source.mimeType}”`);
-  if (source.durationSeconds !== undefined && durationSeconds !== undefined && Math.abs(source.durationSeconds - durationSeconds) > 0.5) reasons.push(`duration is ${durationSeconds.toFixed(2)}s, expected ${source.durationSeconds.toFixed(2)}s`);
+  if (source.durationMs !== undefined && durationMs !== undefined && Math.abs(source.durationMs - durationMs) > 500) reasons.push(`duration is ${(durationMs / 1_000).toFixed(2)}s, expected ${(source.durationMs / 1_000).toFixed(2)}s`);
   return { matches: reasons.length === 0, reasons };
 }
