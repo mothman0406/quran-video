@@ -22,6 +22,7 @@ import { waveformPeaksForViewport, type WaveformData } from "@/lib/editor/wavefo
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage = "idle" | "preparing" | "detecting-speech" | "loading-model" | "transcribing" | "matching" | "captions" | "complete" | "error";
 type ExportState = { phase: ExportPhase; fraction: number; elapsedSeconds: number; estimatedRemainingSeconds?: number } | "complete" | "error" | null;
+type YouTubeImportStatus = "idle" | "validating" | "fetching-metadata" | "downloading" | "preparing-media" | "ready" | "failed";
 
 type EditorWorkspaceProps = {
   videoFile: File | null;
@@ -74,10 +75,18 @@ type EditorWorkspaceProps = {
   surah: number;
   startAyah: number;
   endAyah: number;
+  youtubeUrl: string;
+  youtubeMode: "video" | "audio";
+  youtubeImportStatus: YouTubeImportStatus;
+  youtubeImportError: string | null;
   entitlements: { watermarkRequired: boolean };
   selectedFormatDefinition: ReturnType<typeof projectFormatDefinition>;
   onProjectNameChange: (name: string) => void;
   onVideoSelect: (event: ChangeEvent<HTMLInputElement>) => void;
+  onYoutubeUrlChange: (value: string) => void;
+  onYoutubeModeChange: (value: "video" | "audio") => void;
+  onImportYouTube: () => void;
+  onCancelYouTubeImport: () => void;
   onLoadedMetadata: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onVideoTimeUpdate: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onMediaPlay: (event: SyntheticEvent<HTMLMediaElement>) => void;
@@ -163,8 +172,8 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     selectedObject, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, showVerseNumber, showSafeArea, projectName, dirty, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage, timingWarning,
-    showCorrection, surah, startAyah, endAyah, entitlements, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
-    onProjectNameChange, onVideoSelect, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
+    showCorrection, surah, startAyah, endAyah, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, entitlements, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
+    onProjectNameChange, onVideoSelect, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown,
     onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
     onCorrectDetection, onToggleCorrection, onClearVideo, onSaveProject, onSaveToAccount, onOpenProjects,
@@ -216,7 +225,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     <div className="editor-body">
       <aside className="editor-sidebar editor-sidebar-left">
         <div className="editor-sidebar-scroll">
-          <div className="editor-panel-heading"><div><SectionLabel>Source</SectionLabel><h2>{videoFile ? mediaSource?.kind === "audio" ? "Local audio" : "Local video" : "Start a project"}</h2></div><span className="editor-status-dot" /></div>
+          <div className="editor-panel-heading"><div><SectionLabel>Source</SectionLabel><h2>{videoFile ? mediaSource?.kind === "audio" ? mediaSource.origin === "youtube-import" ? "YouTube audio" : "Local audio" : mediaSource?.origin === "youtube-import" ? "YouTube video" : "Local video" : "Start a project"}</h2></div><span className="editor-status-dot" /></div>
           {videoFile ? <>
             <p className="editor-muted editor-truncate" title={videoFile.name}>{videoFile.name}</p>
             {videoMetadata && <p className="editor-meta-line">{formatDuration(videoMetadata.durationSeconds)}{mediaSource?.hasVideo ? ` · ${videoMetadata.width} × ${videoMetadata.height}` : " · audio"}</p>}
@@ -225,6 +234,14 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
             {stage === "complete" && alignments.length > 0 && <button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onToggleCorrection}>Correct detection</button>}
             <button className="editor-text-button" type="button" onClick={onClearVideo}>Choose a different source</button>
           </> : <label className="editor-upload-mini"><span>↑</span><strong>Choose media</strong><small>Video or browser-supported audio</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
+          <div className="editor-youtube-import">
+            <SectionLabel>YouTube (local development)</SectionLabel>
+            <div className="editor-youtube-row"><input aria-label="YouTube URL" type="url" placeholder="Paste YouTube link…" value={youtubeUrl} disabled={!['idle', 'failed', 'ready'].includes(youtubeImportStatus)} onChange={(event) => onYoutubeUrlChange(event.target.value)} /><select aria-label="YouTube import type" value={youtubeMode} disabled={!['idle', 'failed', 'ready'].includes(youtubeImportStatus)} onChange={(event) => onYoutubeModeChange(event.target.value as "video" | "audio")}><option value="video">Video</option><option value="audio">Audio only</option></select><button className="editor-button editor-button-primary" type="button" disabled={!youtubeUrl.trim() || !['idle', 'failed', 'ready'].includes(youtubeImportStatus)} onClick={onImportYouTube}>Import</button></div>
+            {!['idle', 'failed', 'ready'].includes(youtubeImportStatus) && <div className="editor-youtube-progress" role="status"><span>{youtubeImportStatus === "validating" ? "Validating URL" : youtubeImportStatus === "fetching-metadata" ? "Fetching metadata" : youtubeImportStatus === "downloading" ? "Downloading" : "Preparing media"}…</span><button className="editor-text-button" type="button" onClick={onCancelYouTubeImport}>Cancel</button></div>}
+            {youtubeImportStatus === "ready" && <p className="editor-youtube-help">Imported temporarily into this browser. It will be removed when this source is cleared.</p>}
+            {youtubeImportError && <p className="editor-alert">{youtubeImportError}</p>}
+            <p className="editor-youtube-help">Local-only helper; downloaded media is temporary. Production or commercial URL import requires a separate platform and compliance review.</p>
+          </div>
 
           <div className="editor-divider" />
           <SectionLabel>Canvas</SectionLabel>

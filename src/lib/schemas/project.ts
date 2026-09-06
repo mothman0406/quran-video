@@ -11,6 +11,9 @@ const MediaMetadataSchema = z.strictObject({
   width: PositiveInteger.optional(),
   height: PositiveInteger.optional(),
   fingerprint: z.string().min(1).optional(),
+  origin: z.enum(["local-file", "youtube-import"]).optional(),
+  sourceUrl: z.string().url().optional(),
+  displayName: z.string().min(1).optional(),
 });
 
 export const MediaSourceSchema = z.discriminatedUnion("kind", [

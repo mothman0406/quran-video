@@ -25,6 +25,10 @@ export type MediaSource = ({
   width?: number;
   height?: number;
   fingerprint?: string;
+  /** Durable provenance only. The playable File remains browser-local. */
+  origin?: "local-file" | "youtube-import";
+  sourceUrl?: string;
+  displayName?: string;
 };
 
 export type TimelineTrackKind = "text" | "video" | "audio";
@@ -114,13 +118,16 @@ export function mediaKindForFile(file: Pick<File, "type">): MediaKind | null {
   return null;
 }
 
-export function mediaSourceFromFile(file: Pick<File, "name" | "size" | "type">, kind: MediaKind, metadata?: { durationMs?: number; width?: number; height?: number }): MediaSource {
+export function mediaSourceFromFile(file: Pick<File, "name" | "size" | "type">, kind: MediaKind, metadata?: { durationMs?: number; width?: number; height?: number; origin?: NonNullable<MediaSource["origin"]>; sourceUrl?: string; displayName?: string }): MediaSource {
   const common = {
     fileName: file.name,
     fileSize: file.size,
     mimeType: file.type || `${kind}/*`,
     durationMs: metadata?.durationMs,
     fingerprint: `${file.name}:${file.size}:${file.type}`,
+    origin: metadata?.origin ?? "local-file",
+    sourceUrl: metadata?.sourceUrl,
+    displayName: metadata?.displayName,
   };
   if (kind === "audio") return { ...common, kind: "audio", hasVideo: false, hasAudio: true };
   return {

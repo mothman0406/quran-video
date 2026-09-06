@@ -1,6 +1,17 @@
 # Status
 
-## Current milestone: Non-destructive media trimming
+## Current milestone: Local YouTube URL import
+
+Complete:
+
+- Added a development-only YouTube URL importer beside local media upload, including strict YouTube URL validation, video/audio-only selection, visible staged progress, cancellation, actionable local `yt-dlp` setup guidance, and failure-safe source replacement.
+- The local route uses `spawn` argument arrays only, an app-owned temporary directory, a per-import UUID, cancellation cleanup, stale-import cleanup, and no cloud/Supabase/OpenAI media path. Temporary downloaded media is fetched into the existing browser `File`/object-URL pipeline, then removed when cleared or replaced.
+- `MediaSource` now records durable provenance metadata (`youtube-import`, source URL, optional title) without persisting temporary bytes. Opening a saved URL-import project still requires a manual relink/re-import; it never silently downloads again. A future production/commercial version requires separate platform and compliance review.
+- Added URL validation, argument-array safety, injection rejection, and normalized video/audio timeline regression coverage.
+
+Verification: `npx tsc --noEmit`, `npm test` (165 passing), `npm run lint`, `npm run build`, and `git diff --check` pass. Lint retains four existing unused legacy-timing helper warnings; the build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning.
+
+## Previous milestone: Non-destructive media trimming
 
 Complete:
 

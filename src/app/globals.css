@@ -115,6 +115,7 @@ body {
 .editor-upload-mini strong { font-family: Georgia, serif; font-size: 14px; }
 .editor-upload-mini small, .editor-empty-canvas small { color: var(--editor-muted); font-size: 10px; line-height: 1.5; }
 .editor-upload-mini input, .editor-empty-canvas input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+.editor-youtube-import { margin-top: 16px; border-top: 1px solid var(--editor-line); padding-top: 13px; }.editor-youtube-import .editor-section-label { margin-bottom: 7px; }.editor-youtube-row { display: grid; grid-template-columns: minmax(0, 1fr) 78px auto; gap: 5px; }.editor-youtube-row input, .editor-youtube-row select { min-width: 0; border: 1px solid #cfd6ce; border-radius: 7px; background: #fff; padding: 7px; color: #304036; font-size: 11px; }.editor-youtube-row .editor-button { padding: 7px 9px; font-size: 11px; }.editor-youtube-progress { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; color: #4d6c57; font-size: 10px; }.editor-youtube-help { margin: 7px 0 0; color: var(--editor-muted); font-size: 10px; line-height: 1.45; }.editor-youtube-import .editor-alert { margin-top: 7px; }
 .editor-toggle { display: flex; align-items: center; gap: 8px; margin-top: 12px; color: #526057; cursor: pointer; font-size: 11px; }
 .editor-toggle input { position: absolute; opacity: 0; }
 .editor-toggle span { position: relative; width: 25px; height: 14px; flex: 0 0 auto; border-radius: 20px; background: #cbd3cd; transition: background .15s; }

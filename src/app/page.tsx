@@ -127,6 +127,19 @@ type ExportState =
   | "complete"
   | "error"
   | null;
+type YouTubeImportStatus = "idle" | "validating" | "fetching-metadata" | "downloading" | "preparing-media" | "ready" | "failed";
+type YouTubeImportResponse = { sessionId: string; sourceUrl: string; fileName: string; mimeType: string; title?: string; durationMs?: number; width?: number; height?: number; hasVideo: boolean; mediaUrl: string };
+function validateYouTubeImportUrl(value: string): boolean {
+  if (/[^\x20-\x7e]/.test(value) || /[\r\n]/.test(value)) return false;
+  try {
+    const parsed = new URL(value.trim());
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
+    if (!(["youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"].includes(host)) || !["https:", "http:"].includes(parsed.protocol)) return false;
+    return host === "youtu.be" ? parsed.pathname.length > 1 : parsed.pathname === "/watch" ? Boolean(parsed.searchParams.get("v")) : /^\/(shorts|live|embed)\/[^/]+/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+}
 const busyStages: Stage[] = [
   "preparing",
   "detecting-speech",
@@ -176,6 +189,10 @@ export default function Home() {
   const [timelineTooltip, setTimelineTooltip] = useState<{ label: string; position: number } | null>(null);
   const [timelineViewport, setTimelineViewport] = useState<TimelineViewport>({ zoom: 1, visibleStartMs: 0, visibleEndMs: 0 });
   const [waveformData, setWaveformData] = useState<WaveformData | null>(null);
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [youtubeMode, setYoutubeMode] = useState<"video" | "audio">("video");
+  const [youtubeImportStatus, setYoutubeImportStatus] = useState<YouTubeImportStatus>("idle");
+  const [youtubeImportError, setYoutubeImportError] = useState<string | null>(null);
   const [segments, setSegments] = useState<CaptionSegment[]>([]);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(
     null,
@@ -263,6 +280,8 @@ export default function Home() {
   const mediaTrimRef = useRef(mediaTrim);
   const waveformGeneration = useRef(0);
   const exportAbort = useRef<AbortController | null>(null);
+  const youtubeImportAbort = useRef<AbortController | null>(null);
+  const youtubeImportSession = useRef<string | null>(null);
   const exportCoordinator = useRef(new ExportCoordinator());
   const playbackClock = useRef<MediaPlaybackClock | null>(null);
 
@@ -365,7 +384,12 @@ export default function Home() {
     },
     [videoUrl],
   );
-  useEffect(() => () => exportAbort.current?.abort(), []);
+  useEffect(() => () => {
+    exportAbort.current?.abort();
+    youtubeImportAbort.current?.abort();
+    const sessionId = youtubeImportSession.current;
+    if (sessionId) void fetch(`/api/local-youtube-import?sessionId=${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+  }, []);
   useEffect(() => {
     const font = quranFontDefinitions[typography.quranStyle];
     const style = document.createElement("style");
@@ -375,7 +399,7 @@ export default function Home() {
   }, [typography.quranStyle]);
   const editorSignature = JSON.stringify({
     projectName,
-    sourceMedia: videoFile ? sourceMetadata(videoFile) : (savedProject?.sourceMedia ?? null),
+    sourceMedia: videoFile ? mediaSource : (savedProject?.sourceMedia ?? null),
     mediaTrim,
     format: projectFormat,
     verseAlignments: alignments,
@@ -462,20 +486,47 @@ export default function Home() {
       /* Arabic remains available when translation enrichment fails. */
     }
   }
-  function sourceMetadata(file: File, metadata = videoMetadata) {
-    const kind = mediaKindForFile(file);
-    if (!kind) throw new Error("Choose browser-supported video or audio media.");
-    return mediaSourceFromFile(file, kind, {
-      durationMs: metadata ? Math.round(metadata.durationSeconds * 1_000) : undefined,
-      width: metadata?.width,
-      height: metadata?.height,
-    });
+  function releaseYouTubeImport(sessionId = youtubeImportSession.current) {
+    if (!sessionId) return;
+    if (youtubeImportSession.current === sessionId) youtubeImportSession.current = null;
+    void fetch(`/api/local-youtube-import?sessionId=${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => undefined);
+  }
+  function loadSelectedSource(next: File, nextSource: MediaSource) {
+    exportAbort.current?.abort();
+    generation.current += 1;
+    const waveformJob = ++waveformGeneration.current;
+    setWaveformData(null);
+    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    const opening = pendingOpenProject;
+    setVideoFile(next);
+    setVideoUrl(URL.createObjectURL(next));
+    setMediaSource(nextSource);
+    setMediaTrim(opening?.mediaTrim ?? createMediaTrim(projectDurationMs(nextSource)));
+    setTimelineViewport(createTimelineViewport(projectDurationMs(nextSource)));
+    void loadWaveform(next, waveformJob);
+    setVideoMetadata(null);
+    setErrorMessage(opening ? `Reselect source media: ${opening.sourceMedia?.fileName ?? next.name}` : null);
+    setStage("idle");
+    setProgress(null);
+    if (!opening) {
+      setAlignments([]);
+      setSegments([]);
+      setContent({});
+      setCurrentTimeMs(0);
+      setPositioning(resetCaptionPositioning(projectFormat));
+      setExportState(null);
+      setExportError(null);
+      setExportDiagnostics(null);
+    }
   }
   function resetEditorState() {
     exportAbort.current?.abort();
     generation.current += 1;
     waveformGeneration.current += 1;
     if (videoUrl) URL.revokeObjectURL(videoUrl);
+    releaseYouTubeImport();
+    setYoutubeImportStatus("idle");
+    setYoutubeImportError(null);
     setVideoFile(null);
     setVideoUrl(null);
     setVideoMetadata(null);
@@ -514,9 +565,9 @@ export default function Home() {
       id,
       title,
       sourceMedia: videoFile
-        ? sourceMetadata(videoFile)
+        ? mediaSource
         : (savedProject?.sourceMedia ?? null),
-      mediaTrim: clampMediaTrim(mediaTrim, projectDurationMs(videoFile ? sourceMetadata(videoFile) : savedProject?.sourceMedia ?? null)),
+      mediaTrim: clampMediaTrim(mediaTrim, projectDurationMs(videoFile ? mediaSource : savedProject?.sourceMedia ?? null)),
       format: projectFormat,
       verseAlignments: alignments,
       captionSegments: segments,
@@ -663,6 +714,9 @@ export default function Home() {
     setSelectedSegmentId(null);
     setSelectedObject(null);
     setContent({});
+    if (project.sourceMedia?.origin === "youtube-import") {
+      setErrorMessage("This YouTube source was temporary. Re-import or relink it before editing; it will not download automatically.");
+    }
     cloudBaselineUpdatedAt.current = fromCloud ? project.updatedAt : null;
     savedSignature.current = JSON.stringify({
       projectName: project.title,
@@ -754,36 +808,59 @@ export default function Home() {
       setErrorMessage("Choose browser-supported video or audio to start a local editing session.");
       return;
     }
-    exportAbort.current?.abort();
-    generation.current += 1;
-    const waveformJob = ++waveformGeneration.current;
-    setWaveformData(null);
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
-    const opening = pendingOpenProject;
-    setVideoFile(next);
-    setVideoUrl(URL.createObjectURL(next));
-    setMediaSource(mediaSourceFromFile(next, mediaKindForFile(next)!));
-    setMediaTrim(opening?.mediaTrim ?? createMediaTrim(0));
-    setTimelineViewport(createTimelineViewport(0));
-    void loadWaveform(next, waveformJob);
-    setVideoMetadata(null);
-    setErrorMessage(
-      opening
-        ? `Reselect source media: ${opening.sourceMedia?.fileName ?? next.name}`
-        : null,
-    );
-    setStage("idle");
-    setProgress(null);
-    if (!opening) {
-      setAlignments([]);
-      setSegments([]);
-      setContent({});
-      setCurrentTimeMs(0);
-      setPositioning(resetCaptionPositioning(projectFormat));
-      setExportState(null);
-      setExportError(null);
-      setExportDiagnostics(null);
+    releaseYouTubeImport();
+    setYoutubeImportStatus("idle");
+    setYoutubeImportError(null);
+    loadSelectedSource(next, mediaSourceFromFile(next, mediaKindForFile(next)!));
+  }
+  async function importYouTube() {
+    if (!["idle", "failed", "ready"].includes(youtubeImportStatus)) return;
+    const sessionId = crypto.randomUUID();
+    const controller = new AbortController();
+    youtubeImportAbort.current = controller;
+    setYoutubeImportError(null);
+    setYoutubeImportStatus("validating");
+    try {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (!validateYouTubeImportUrl(youtubeUrl)) throw new Error("Enter a youtube.com, youtu.be, or YouTube Shorts link.");
+      setYoutubeImportStatus("fetching-metadata");
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      setYoutubeImportStatus("downloading");
+      const response = await fetch("/api/local-youtube-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId, url: youtubeUrl, mode: youtubeMode }),
+        signal: controller.signal,
+      });
+      const payload = await response.json() as YouTubeImportResponse & { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Could not import this YouTube video.");
+      setYoutubeImportStatus("preparing-media");
+      const mediaResponse = await fetch(payload.mediaUrl, { signal: controller.signal });
+      if (!mediaResponse.ok) throw new Error("The temporary imported media is no longer available. Please import it again.");
+      const file = new File([await mediaResponse.blob()], payload.fileName, { type: payload.mimeType });
+      const nextSource = mediaSourceFromFile(file, payload.hasVideo ? "video" : "audio", {
+        durationMs: payload.durationMs,
+        width: payload.width,
+        height: payload.height,
+        origin: "youtube-import",
+        sourceUrl: payload.sourceUrl,
+        displayName: payload.title,
+      });
+      const previousSession = youtubeImportSession.current;
+      youtubeImportSession.current = sessionId;
+      if (previousSession) releaseYouTubeImport(previousSession);
+      loadSelectedSource(file, nextSource);
+      setYoutubeImportStatus("ready");
+    } catch (error) {
+      releaseYouTubeImport(sessionId);
+      setYoutubeImportError(error instanceof DOMException && error.name === "AbortError" ? "YouTube import cancelled. Your current source was kept." : error instanceof Error ? error.message : "Could not import this YouTube video.");
+      setYoutubeImportStatus("failed");
+    } finally {
+      if (youtubeImportAbort.current === controller) youtubeImportAbort.current = null;
     }
+  }
+  function cancelYouTubeImport() {
+    youtubeImportAbort.current?.abort();
   }
   function loadedVideoMetadata(event: SyntheticEvent<HTMLMediaElement>) {
     const target = event.currentTarget;
@@ -1011,6 +1088,9 @@ export default function Home() {
     setWaveformData(null);
     setTimelineViewport(createTimelineViewport(0));
     if (videoUrl) URL.revokeObjectURL(videoUrl);
+    releaseYouTubeImport();
+    setYoutubeImportStatus("idle");
+    setYoutubeImportError(null);
     setVideoFile(null);
     setVideoUrl(null);
     setVideoMetadata(null);
@@ -1609,10 +1689,18 @@ export default function Home() {
         surah={surah}
         startAyah={startAyah}
         endAyah={endAyah}
+        youtubeUrl={youtubeUrl}
+        youtubeMode={youtubeMode}
+        youtubeImportStatus={youtubeImportStatus}
+        youtubeImportError={youtubeImportError}
         entitlements={entitlements}
         selectedFormatDefinition={selectedFormatDefinition}
         onProjectNameChange={setProjectName}
         onVideoSelect={selectVideo}
+        onYoutubeUrlChange={setYoutubeUrl}
+        onYoutubeModeChange={setYoutubeMode}
+        onImportYouTube={() => void importYouTube()}
+        onCancelYouTubeImport={cancelYouTubeImport}
         onLoadedMetadata={loadedVideoMetadata}
         onVideoTimeUpdate={updateTime}
         onMediaPlay={startPlaybackClock}

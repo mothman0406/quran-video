@@ -40,6 +40,7 @@ function migrateSavedProject(value: unknown): unknown {
           width: source.width,
           height: source.height,
           fingerprint: source.fingerprint,
+          origin: "local-file",
           hasVideo: true,
           hasAudio: true,
         };
