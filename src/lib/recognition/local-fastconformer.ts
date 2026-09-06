@@ -480,12 +480,13 @@ export function encodeFastConformerWords(
   tokenTable: TokenTable,
   vocabulary: Vocabulary,
   tilawaQuranText: TilawaQuranText = {},
-): { canonicalWords: CtcCanonicalWord[]; targetTokens: CtcTargetToken[]; optionalPreludeTokens: CtcTargetToken[]; targetTokenMapping: FastConformerTargetToken[]; targetValidation: FastConformerTargetValidation[]; optionalPreludeLexicalText: string } {
+): { canonicalWords: CtcCanonicalWord[]; targetTokens: CtcTargetToken[]; optionalPreludeTokens: CtcTargetToken[]; targetTokenMapping: FastConformerTargetToken[]; targetValidation: FastConformerTargetValidation[]; optionalPreludeLexicalText: string; optionalPreludeLexicalTextByVerse: ReadonlyMap<string, string> } {
   const words = canonicalWords.map((word) => ({ ...word, alignmentText: normalizeTilawaArabic(word.canonicalArabic) }));
   const targetTokens: CtcTargetToken[] = [];
   const optionalPreludeTokens: CtcTargetToken[] = [];
   const targetTokenMapping: FastConformerTargetToken[] = [];
   const targetValidation: FastConformerTargetValidation[] = [];
+  const optionalPreludeLexicalTextByVerse = new Map<string, string>();
   let optionalPreludeLexicalText = "";
   const vocabSize = vocabularySize(vocabulary);
   const wordsByVerse = new Map<string, CtcCanonicalWord[]>();
@@ -552,7 +553,9 @@ export function encodeFastConformerWords(
     // lexical span before the selected Quran text forms an optional prelude.
     const firstCanonicalPieceIndex = canonicalOffset > 0 ? lexicalOwners.findIndex((owner) => owner !== null) : 0;
     if (firstCanonicalPieceIndex > 0) {
-      optionalPreludeLexicalText += `${normalizeTilawaArabic(pieces.slice(0, firstCanonicalPieceIndex).map((piece) => piece.token).join("").replaceAll(WORD_PREFIX, " "))} `;
+      const lexicalPrelude = normalizeTilawaArabic(pieces.slice(0, firstCanonicalPieceIndex).map((piece) => piece.token).join("").replaceAll(WORD_PREFIX, " "));
+      optionalPreludeLexicalText += `${lexicalPrelude} `;
+      optionalPreludeLexicalTextByVerse.set(verseKey, lexicalPrelude);
     }
     const verseMapping = pieces.map((piece, index) => {
       if (index < firstCanonicalPieceIndex) {
@@ -574,7 +577,7 @@ export function encodeFastConformerWords(
       else targetTokens.push({ tokenId: mapped.tokenId, token: mapped.token, globalWordIndex: mapped.globalWordIndex, owner: "canonical" });
     }
   }
-  return { canonicalWords: words, targetTokens, optionalPreludeTokens, targetTokenMapping, targetValidation, optionalPreludeLexicalText: optionalPreludeLexicalText.trim() };
+  return { canonicalWords: words, targetTokens, optionalPreludeTokens, targetTokenMapping, targetValidation, optionalPreludeLexicalText: optionalPreludeLexicalText.trim(), optionalPreludeLexicalTextByVerse };
 }
 
 function greedyDecode(values: Float32Array, frames: number, vocabularySize: number, vocabulary: Vocabulary) {
@@ -717,6 +720,7 @@ function quranWideIdentificationIndex(assets: FastConformerAssets): Promise<Qura
         lexicalText: word.alignmentText,
         ctcTokenIds: tokenIdsByWord.get(word.globalWordIndex) ?? [],
         optionalPreludeCtcTokenIds: word.canonicalWordIndex === 1 ? optionalPreludeByVerse.get(word.verseKey) : undefined,
+        optionalPreludeLexicalText: word.canonicalWordIndex === 1 ? encoded.optionalPreludeLexicalTextByVerse.get(word.verseKey) : undefined,
       };
     }));
   }).catch((error) => {
@@ -752,6 +756,10 @@ function unavailableIdentification(reason: string, totalMs: number): FastConform
     reason,
     span: null,
     wordLevelSpan: null,
+    canonicalSpan: null,
+    selectedSurah: null,
+    optionalPrelude: null,
+    surahConsensus: { selectedSurah: null, strongWindowCount: 0, agreeingStrongWindows: 0 },
     windowResults: [],
     retrievalCandidates: [],
     normalizedCtcScore: null,
@@ -759,6 +767,7 @@ function unavailableIdentification(reason: string, totalMs: number): FastConform
     continuityScore: 0,
     confidence: { composite: null, normalizedBestCtcScore: null, bestVsSecondMargin: null, agreeingWindows: 0, voicedAudioExplained: 0 },
     performance: { inferenceMs: 0, retrievalMs: 0, rerankingMs: 0, candidatesReranked: 0, totalMs },
+    CROSS_SURAH_CANDIDATES_REJECTED: 0,
   };
 }
 

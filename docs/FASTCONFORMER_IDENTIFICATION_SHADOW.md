@@ -38,6 +38,15 @@ published CTC token IDs. Optional Tilawa basmalah token sequences are stored as
 an acoustic alternative before a verse's first canonical word; they are never
 attached to canonical ayah text.
 
+Global positions remain lookup keys only. Candidate n-grams and expansion are
+surah-aware: n-grams never straddle a surah boundary, and a retrieved anchor
+is clamped to the lexical bounds of the surah that supplied it. The optional
+basmalah is removed from coarse location evidence, because it is shared
+context rather than useful location evidence; after lexical evidence locates a
+surah start, CTC compares canonical-only against optional-basmalah-plus-
+canonical targets. The selected prelude is diagnostic metadata and does not
+alter the candidate's canonical start word.
+
 Each voiced 12-second window (6-second hop, at least 1.2 seconds VAD speech)
 is greedily CTC-decoded by argmax, repeated-token collapse, and blank removal.
 The decoded lexical words feed a deterministic inverted 1–3-gram index. Rare
@@ -61,6 +70,11 @@ forward movement, penalizes backward and unrelated-surah jumps, and retains
 the previous hypothesis across a null/uncertain window. A null state means one
 noisy window cannot veto a coherent passage.
 
+When at least two strong windows agree on a surah, the solver keeps only that
+surah's candidate states (plus its explicit null state). Final span
+construction then takes the earliest/latest selected words inside that solved
+surah, preventing a noisy boundary window from widening a single-surah path.
+
 `confidence.composite` is explicitly heuristic, not calibrated probability.
 The debug record exposes its components: normalized CTC score, best-vs-second
 margin, agreeing-window count, continuity score, and voiced-audio proportion
@@ -76,3 +90,7 @@ has a shadow span. Verbose candidates remain outside production UI.
 The result records model inference time, retrieval time, reranking time,
 number reranked, and total elapsed time. The Quran index is built once per
 loaded pinned model assets and reused across windows/runs in the browser.
+`FASTCONFORMER_QURAN_IDENTIFICATION` includes `selectedSurah`,
+`canonicalSpan`, `optionalPrelude`, per-window selected candidates,
+`surahConsensus`, score/confidence components, and
+`CROSS_SURAH_CANDIDATES_REJECTED`.

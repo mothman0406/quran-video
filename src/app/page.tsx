@@ -950,6 +950,7 @@ export default function Home() {
       if (analysis.matches.length === 0) {
         alignmentDebug.current = {
           FASTCONFORMER_QURAN_IDENTIFICATION: fastConformerShadow,
+          CROSS_SURAH_CANDIDATES_REJECTED: fastConformerShadow?.CROSS_SURAH_CANDIDATES_REJECTED ?? 0,
           WHISPER_VS_FASTCONFORMER: passageComparison,
           FC_RECOVERY_CANDIDATE: analysis.passage.state === "no-reliable-match" && fastConformerShadow?.status === "complete" && fastConformerShadow.span
             ? { message: "Whisper produced no match while FastConformer has a shadow Quran candidate.", candidate: fastConformerShadow.span, confidence: fastConformerShadow.confidence }
@@ -1010,6 +1011,7 @@ export default function Home() {
           shadowComparison: analysis.passage.shadowComparison,
         },
         FASTCONFORMER_QURAN_IDENTIFICATION: fastConformerShadow,
+        CROSS_SURAH_CANDIDATES_REJECTED: fastConformerShadow?.CROSS_SURAH_CANDIDATES_REJECTED ?? 0,
         WHISPER_VS_FASTCONFORMER: passageComparison,
         FC_RECOVERY_CANDIDATE: analysis.passage.state === "no-reliable-match" && fastConformerShadow?.status === "complete" && fastConformerShadow.span
           ? { message: "Whisper produced no match while FastConformer has a shadow Quran candidate.", candidate: fastConformerShadow.span, confidence: fastConformerShadow.confidence }

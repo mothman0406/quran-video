@@ -6,12 +6,14 @@ Complete:
 
 - Added a cached Quran-wide Tilawa lexical/CTC index and an independent FastConformer identification runner. It uses overlapping VAD-qualified audio windows, greedy CTC n-gram retrieval, forward-probability CTC reranking, optional basmalah alternatives, and a deterministic continuity Viterbi solver with an uncertain-window skip state.
 - Kept Whisper as the sole production passage authority and left the established FastConformer forced-alignment/caption path unchanged. Shadow output is development diagnostics only and now explicitly highlights a FastConformer recovery candidate when Whisper finds no passage.
-- Added synthetic regressions for reversible indexing, noisy retrieval, CTC collapse/forward ranking, optional basmalah scoring, cross-ayah/mid-ayah candidates, and continuity through unusable/backward/unrelated-window evidence. No real media fixture was available in this workspace, so noisy real-world accuracy is not claimed.
+- Corrected the reported 73:20 -> 74 boundary failure: global indexing remains intact, but retrieval n-grams and candidate expansion cannot cross a surah boundary; a basmalah is excluded from coarse location evidence and then scored only as an optional prelude for a canonical surah-start candidate. Strong single-surah window consensus now constrains the final canonical span.
+- Added regressions for the supplied Surah 74 boundary shape, optional-prelude present/absent CTC scoring, basmalah-only location suppression, anomalous-window rejection, and clean 93:1-5, 6:74-77, 69:19-32, and 3:33-35 retrieval shapes. The exact browser media clip is not stored in this workspace, so the supplied debug shape is covered deterministically but the browser rerun still requires that media input.
 
-Verification: `npm test` (173 passing), `npx tsc --noEmit`, `npm run lint`,
+Verification: `npm test` (178 passing), `npx tsc --noEmit`, `npm run lint`,
 `npm run build`, and `git diff --check` pass. Lint retains four existing
 unused legacy-timing helper warnings; build retains the existing non-fatal VAD
-ONNX Runtime dynamic-require warning.
+ONNX Runtime dynamic-require warning. The exact browser media clip still needs
+to be supplied for its direct rerun.
 
 ## Current milestone: Compact desktop editor redesign
 
