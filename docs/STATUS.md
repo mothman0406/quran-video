@@ -1,5 +1,25 @@
 # Status
 
+## Current milestone: Remove duplicate inline ayah ornament
+
+Complete:
+
+- Traced the regression to `arabicCaptionDisplay`: a legacy display segment
+  ending in U+06DD was preserved and then received a second U+06DD plus its
+  Arabic-Indic number. Preview and export both consumed that same duplicate
+  string.
+- The shared display composer now replaces only a terminal presentation ayah
+  marker (and any attached numeral) while verse numbers are enabled, then
+  produces one U+06DD with the correct Arabic-Indic ayah number. Toggle-off
+  ayah display remains unchanged; basmalah stays marker-free.
+- Kept existing color, position, basmalah, recognition/timing, FastConformer,
+  and `showVerseNumberAtEnd` behavior unchanged.
+
+Verification: `npm test` (131 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. Lint retains four existing
+unused legacy-timing helper warnings; the production build retains the existing
+non-fatal VAD ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Quran caption color and inline ayah ornaments
 
 Complete:

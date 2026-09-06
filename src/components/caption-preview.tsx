@@ -137,7 +137,7 @@ function CaptionPreview({
           onPointerUp={onPointerUp}
           onClick={(event) => { event.stopPropagation(); onSelectObject("arabic"); }}
         >
-          <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic"), color: typography.textColor, fontFamily: quranFontDefinitions[typography.quranStyle].family, fontSize: typography.arabicFontSize, lineHeight: typography.arabicLineSpacing, opacity: typography.arabicOpacity }}><span>{arabicDisplay.canonicalText}</span>{arabicDisplay.verseNumber && <span data-caption-verse-number aria-label={`Ayah ${segment.verseKeys[0]?.split(":")[1]}`}>{"\u00a0"}{arabicDisplay.verseNumber}</span>}</p>
+          <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic"), color: typography.textColor, fontFamily: quranFontDefinitions[typography.quranStyle].family, fontSize: typography.arabicFontSize, lineHeight: typography.arabicLineSpacing, opacity: typography.arabicOpacity }}><span data-caption-arabic-text>{arabicDisplay.text}</span></p>
           {handles("arabic")}
         </div>
         {hasTranslation && <div

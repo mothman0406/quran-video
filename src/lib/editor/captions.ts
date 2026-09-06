@@ -48,17 +48,33 @@ export function inlineVerseNumber(segment: Pick<CaptionSegment, "contentKind" | 
 export type ArabicCaptionDisplay = {
   canonicalText: string;
   verseNumber: string | null;
+  text: string;
 };
 
-/** Shared preview/export display composition; `canonicalText` is never mutated. */
+/** Removes only a terminal presentation-only ayah marker, never Quranic marks elsewhere. */
+function withoutTerminalAyahMarker(value: string): string {
+  return value.replace(/\s*\u06dd\s*[0-9٠-٩۰-۹]*\s*$/u, "").trimEnd();
+}
+
+/** Shared preview/export display composition; canonical source text is never mutated. */
 export function arabicCaptionDisplay(segment: Pick<CaptionSegment, "arabic" | "contentKind" | "verseKeys" | "showVerseNumberAtEnd">, showVerseNumber: boolean): ArabicCaptionDisplay {
-  return { canonicalText: segment.arabic, verseNumber: inlineVerseNumber(segment, showVerseNumber) };
+  // Existing display snapshots can already have a terminal U+06DD. When the
+  // toggle is on, replace that presentation marker with the one numbered
+  // marker below. When off, ayah text retains its pre-toggle appearance.
+  const canonicalText = showVerseNumber || segment.contentKind === "basmalah-prelude"
+    ? withoutTerminalAyahMarker(segment.arabic)
+    : segment.arabic;
+  const verseNumber = inlineVerseNumber(segment, showVerseNumber);
+  return {
+    canonicalText,
+    verseNumber,
+    text: verseNumber ? `${canonicalText}\u00a0${verseNumber}` : canonicalText,
+  };
 }
 
 /** Canvas export uses the exact text composed from the same display metadata. */
 export function composeArabicCaptionText(segment: Pick<CaptionSegment, "arabic" | "contentKind" | "verseKeys" | "showVerseNumberAtEnd">, showVerseNumber: boolean): string {
-  const display = arabicCaptionDisplay(segment, showVerseNumber);
-  return display.verseNumber ? `${display.canonicalText}\u00a0${display.verseNumber}` : display.canonicalText;
+  return arabicCaptionDisplay(segment, showVerseNumber).text;
 }
 
 /** Canonical Hafs display text for the acoustically selected opening prelude. */

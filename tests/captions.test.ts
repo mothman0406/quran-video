@@ -50,6 +50,23 @@ test("inline ayah ornaments use Arabic-Indic digits without mutating Quran text"
   assert.equal(segment!.arabic, content["93:1"].arabic.uthmani);
 });
 
+test("a terminal source ornament is replaced by one numbered ornament for preview and export", () => {
+  const [source] = createCaptionSegments([alignment], content);
+  const marked = { ...source!, verseKeys: ["2:4"], arabic: "ٱلْبَيَانَ \u06DD٣" };
+  const preview = arabicCaptionDisplay(marked, true);
+  const exportText = composeArabicCaptionText(marked, true);
+
+  assert.equal(preview.text, "ٱلْبَيَانَ\u00a0۝٤");
+  assert.equal(exportText, preview.text, "preview and export use the same composed Arabic text");
+  assert.equal([...preview.text].filter((character) => character === ARABIC_END_OF_AYAH).length, 1);
+  assert.equal(preview.text.includes(`${ARABIC_END_OF_AYAH}\u00a0${ARABIC_END_OF_AYAH}`), false);
+  assert.equal(preview.verseNumber, "۝٤");
+
+  const off = arabicCaptionDisplay(marked, false);
+  assert.equal(off.text, marked.arabic, "the off state preserves the prior display text");
+  assert.equal(off.verseNumber, null);
+});
+
 test("only a final ayah piece receives the inline ornament, never a basmalah prelude", () => {
   const [segment] = createCaptionSegments([alignment], content);
   const split = splitCaptionSegment(segment!, 3);
