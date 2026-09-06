@@ -17,6 +17,13 @@ export type CanonicalDisplayWord = {
   /** The one-based word index used by FastConformer canonical alignment. */
   wordIndex: number;
   canonicalText: string;
+  /**
+   * Half-open indexes into the display corpus token array. A standalone waqf
+   * token has no acoustic FastConformer word, so it is owned by the preceding
+   * lexical word while its original source range remains intact.
+   */
+  sourceWordStart?: number;
+  sourceWordEnd?: number;
   visibleCharCount: number;
   alignmentStartMs: number;
   alignmentEndMs: number;
@@ -104,12 +111,16 @@ export function waqfMetadataForWord(value: string): WaqfMetadata {
 export function canonicalDisplayWords(input: readonly {
   canonicalWordIndex: number;
   canonicalArabic: string;
+  sourceWordStart?: number;
+  sourceWordEnd?: number;
   startMs: number;
   endMs: number;
 }[]): CanonicalDisplayWord[] {
   return input.map((word) => ({
     wordIndex: word.canonicalWordIndex,
     canonicalText: word.canonicalArabic,
+    sourceWordStart: word.sourceWordStart,
+    sourceWordEnd: word.sourceWordEnd,
     visibleCharCount: visibleArabicCharacterCount(word.canonicalArabic),
     alignmentStartMs: word.startMs,
     alignmentEndMs: word.endMs,

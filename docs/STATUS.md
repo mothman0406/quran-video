@@ -1,5 +1,33 @@
 # Status
 
+## Current milestone: Apply long ayah segmentation in editor
+
+Complete:
+
+- Traced the real 18:57 production bypass to Tanzil's standalone `ۚ` and
+  `ۖ` source tokens. FastConformer correctly excludes those non-spoken marks,
+  which made the old exact source-token equality guard reject its otherwise
+  valid canonical word timing and leave the whole ayah unsplit.
+- The editor now associates only zero-visible standalone annotations with the
+  preceding FastConformer lexical word for display planning, then slices the
+  untouched original source-token ranges into the generated CaptionSegments.
+  This keeps waqf marks, gives the planner the same 147-character count as
+  `visibleArabicCharacterCount`, and keeps FastConformer next-word cut timing.
+- Added a 18:57 -> 18:58 production-path regression with the actual corpus
+  shape: 32 display tokens, 30 aligned lexical words, two 18:57 pieces,
+  contiguous timing, same-verse ownership, exactly-once text coverage, waqf
+  preservation, and final-piece-only Arabic-Indic verse-number composition.
+- Expanded development debug to report source word ranges and the final
+  generated project CaptionSegment array, so split pieces can be traced from
+  FastConformer input through editor state.
+
+Verification: `npm test` (141 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. Lint retains four existing
+unused legacy-timing helper warnings; the production build retains the existing
+non-fatal VAD ONNX Runtime dynamic-require warning. The supplied browser media
+fixture is not present in this workspace, so the exact recording still needs a
+browser rerun before committing this milestone.
+
 ## Current milestone: Split long Quran ayahs for display
 
 Complete:

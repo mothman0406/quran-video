@@ -1,5 +1,5 @@
 import { CANONICAL_BASMALAH_ARABIC, quranDisplayText } from "../quran/content.ts";
-import { canonicalDisplayWords, DEFAULT_MAX_ARABIC_VISIBLE_CHARS, planAyahDisplaySplit, type CanonicalDisplayWord } from "./ayah-display-splitting.ts";
+import { canonicalDisplayWords, DEFAULT_MAX_ARABIC_VISIBLE_CHARS, planAyahDisplaySplit, visibleArabicCharacterCount, type CanonicalDisplayWord } from "./ayah-display-splitting.ts";
 import type { QuranVerseContent } from "../quran/content.ts";
 import type { VerseAlignment } from "./recognition.ts";
 import type { VerseBoundary } from "../recognition/core.ts";
@@ -424,6 +424,50 @@ function words(value: string): string[] {
   return value.trim().split(/\s+/).filter(Boolean);
 }
 
+type FastConformerDisplayWord = {
+  verseKey: string;
+  canonicalWordIndex: number;
+  canonicalArabic: string;
+  startMs: number;
+  endMs: number;
+};
+
+/**
+ * FastConformer deliberately has no acoustic target for standalone Quranic
+ * annotations such as Tanzil's spaced waqf marks. They still belong in the
+ * displayed corpus text. Fold only those zero-visible tokens into the prior
+ * aligned word, retaining their original source-token range for slicing.
+ */
+function displayWordsFromFastConformer(
+  sourceWords: readonly string[],
+  alignedWords: readonly FastConformerDisplayWord[],
+): CanonicalDisplayWord[] | null {
+  const displayInput: Array<FastConformerDisplayWord & { sourceWordStart: number; sourceWordEnd: number }> = [];
+  let sourceIndex = 0;
+  const appendStandaloneAnnotation = () => {
+    const previous = displayInput.at(-1);
+    const annotation = sourceWords[sourceIndex];
+    if (!previous || !annotation || visibleArabicCharacterCount(annotation) !== 0) return false;
+    previous.canonicalArabic = `${previous.canonicalArabic} ${annotation}`;
+    previous.sourceWordEnd = sourceIndex + 1;
+    sourceIndex += 1;
+    return true;
+  };
+
+  for (const word of alignedWords) {
+    while (sourceWords[sourceIndex] !== word.canonicalArabic) {
+      if (!appendStandaloneAnnotation()) return null;
+    }
+    if (!Number.isFinite(word.startMs) || !Number.isFinite(word.endMs) || word.startMs > word.endMs) return null;
+    displayInput.push({ ...word, sourceWordStart: sourceIndex, sourceWordEnd: sourceIndex + 1 });
+    sourceIndex += 1;
+  }
+  while (sourceIndex < sourceWords.length) {
+    if (!appendStandaloneAnnotation()) return null;
+  }
+  return canonicalDisplayWords(displayInput);
+}
+
 function unique(values: readonly string[]): string[] {
   return values.filter((value, index) => values.indexOf(value) === index);
 }
@@ -548,13 +592,7 @@ export function createCaptionSegmentsFromVerseBoundaries(
   boundaries: readonly VerseBoundary[],
   content: Readonly<Record<string, QuranVerseContent | undefined>>,
   optionalPrelude?: OptionalPreludeTiming,
-  fastConformerWords?: readonly {
-    verseKey: string;
-    canonicalWordIndex: number;
-    canonicalArabic: string;
-    startMs: number;
-    endMs: number;
-  }[],
+  fastConformerWords?: readonly FastConformerDisplayWord[],
 ): CaptionSegment[] {
   const ayahSegments = boundaries.flatMap((boundary) => {
     const verse = content[boundary.verseKey];
@@ -563,15 +601,10 @@ export function createCaptionSegmentsFromVerseBoundaries(
     if (!canonicalWords.length) return [];
     const aligned = fastConformerWords?.filter((word) => word.verseKey === boundary.verseKey) ?? [];
     const ordered = aligned.slice().sort((left, right) => left.canonicalWordIndex - right.canonicalWordIndex);
-    const hasExactFastConformerWords = ordered.length === canonicalWords.length
-      && ordered.every((word, index) => word.canonicalWordIndex === index + 1
-        && word.canonicalArabic === canonicalWords[index]
-        && Number.isFinite(word.startMs)
-        && Number.isFinite(word.endMs)
-        && word.startMs <= word.endMs);
-    const displayWords: CanonicalDisplayWord[] = hasExactFastConformerWords
-      ? canonicalDisplayWords(ordered)
-      : [];
+    const hasOrderedFastConformerWords = ordered.every((word, index) => word.canonicalWordIndex === index + 1);
+    const displayWords = (hasOrderedFastConformerWords
+      ? displayWordsFromFastConformer(canonicalWords, ordered)
+      : null) ?? [];
     const plan = displayWords.length
       ? planAyahDisplaySplit(displayWords, DEFAULT_MAX_ARABIC_VISIBLE_CHARS)
       : null;
@@ -586,6 +619,8 @@ export function createCaptionSegmentsFromVerseBoundaries(
     if (plan?.requiredSplit && process.env.NODE_ENV === "development") {
       console.debug("AYAH_DISPLAY_SPLIT", {
         verseKey: boundary.verseKey,
+        canonicalWordCount: canonicalWords.length,
+        rawCanonicalArabic: arabic,
         totalVisibleChars: plan.totalVisibleChars,
         maxVisibleChars: plan.maxVisibleChars,
         requiredSplit: plan.requiredSplit,
@@ -593,6 +628,8 @@ export function createCaptionSegmentsFromVerseBoundaries(
         selectedCuts: plan.selectedCuts,
         pieces: pieces.map((piece, index) => ({
           ...piece,
+          sourceWordStart: displayWords[piece.canonicalStartWordIndex - 1]!.sourceWordStart,
+          sourceWordEnd: displayWords[piece.canonicalEndWordIndex - 1]!.sourceWordEnd,
           startMs: index === 0 ? boundary.startMs : displayWords[piece.canonicalStartWordIndex - 1]!.alignmentStartMs,
           endMs: index === pieces.length - 1 ? boundary.endMs : displayWords[pieces[index + 1]!.canonicalStartWordIndex - 1]!.alignmentStartMs,
           showVerseNumberAtEnd: index === pieces.length - 1,
@@ -604,21 +641,22 @@ export function createCaptionSegmentsFromVerseBoundaries(
       const startMs = index === 0 ? boundary.startMs : displayWords[piece.canonicalStartWordIndex - 1]!.alignmentStartMs;
       const endMs = isFinal ? boundary.endMs : displayWords[pieces[index + 1]!.canonicalStartWordIndex - 1]!.alignmentStartMs;
       const wordStart = piece.canonicalStartWordIndex - 1;
-      const wordEnd = piece.canonicalEndWordIndex;
+      const sourceStart = displayWords?.[wordStart]?.sourceWordStart ?? wordStart;
+      const sourceEnd = displayWords?.[piece.canonicalEndWordIndex - 1]?.sourceWordEnd ?? piece.canonicalEndWordIndex;
       return {
         id: `${boundary.verseKey}#${index + 1}`,
         contentKind: "ayah",
         verseKeys: [boundary.verseKey],
         startMs,
         endMs,
-        arabic: canonicalWords.slice(wordStart, wordEnd).join(" "),
+        arabic: canonicalWords.slice(sourceStart, sourceEnd).join(" "),
         // Translation/transliteration remain whole-parent-ayah text until a
         // semantic word-range mapping is introduced in a later milestone.
         translation: verse?.translation ?? null,
         transliteration: verse?.transliteration ?? null,
-        wordStart,
-        wordEnd,
-        wordCount: wordEnd - wordStart,
+        wordStart: sourceStart,
+        wordEnd: sourceEnd,
+        wordCount: sourceEnd - sourceStart,
         showVerseNumberAtEnd: isFinal,
         timingEvidence: {
           start: { timestampMs: startMs, source: boundary.evidence.source },
