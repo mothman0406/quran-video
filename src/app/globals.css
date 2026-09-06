@@ -149,7 +149,7 @@ body {
 .editor-track-label { display: flex; align-items: center; min-height: 31px; border-right: 1px solid #d8ded8; color: #637269; font-size: 9px; font-weight: 700; padding-left: 7px; text-transform: uppercase; }
 .editor-timeline-track { position: relative; min-width: 0; min-height: 31px; border-bottom: 1px solid rgba(205, 216, 207, .7); }
 .editor-timeline-track-audio { border-bottom: 0; }
-.editor-playhead { position: absolute; z-index: 4; top: 0; bottom: 0; width: 2px; border: 0; background: var(--editor-accent); box-shadow: 0 0 0 1px rgba(255,255,255,.45); cursor: ew-resize; padding: 0; }
+.editor-playhead { position: absolute; z-index: 7; top: 0; bottom: 0; width: 2px; border: 0; background: var(--editor-accent); box-shadow: 0 0 0 1px rgba(255,255,255,.45); cursor: ew-resize; padding: 0; }
 .editor-caption-block, .editor-media-block { position: absolute; top: 2px; bottom: 2px; overflow: visible; border: 1px solid #b8cabc; border-radius: 4px; background: #cedbd0; color: #355544; text-align: left; }
 .editor-caption-block { cursor: grab; }
 .editor-media-block { overflow: hidden; background: #b9c4d7; border-color: #95a7c3; color: #31445d; }
@@ -161,10 +161,11 @@ body {
 .editor-caption-block span:first-child { display: block; overflow: hidden; padding: 4px 6px 1px; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .editor-caption-block-range { display: block; padding: 0 6px; color: #688071; font-size: 8px; white-space: nowrap; }
 .editor-audio-canvas { background: #101612; }.editor-audio-element { position: absolute; z-index: 2; right: 18px; bottom: 18px; left: 18px; width: calc(100% - 36px); }
-.editor-timing-handle { position: absolute; z-index: 5; top: 0; bottom: 0; width: 7px; cursor: ew-resize; }
+.editor-timing-handle { position: absolute; z-index: 5; top: 0; bottom: 0; width: 10px; cursor: ew-resize; opacity: 0; transition: opacity .12s ease; }
+.editor-caption-block:hover .editor-timing-handle, .editor-caption-block.is-selected .editor-timing-handle { opacity: 1; }
 .editor-timing-handle-start { left: -2px; }.editor-timing-handle-end { right: -2px; }
 .editor-timing-handle::after { position: absolute; top: 9px; bottom: 9px; left: 2px; width: 2px; border-radius: 2px; background: #315846; content: ""; }
-.editor-timeline-tooltip { position: absolute; z-index: 8; top: -27px; left: 50%; transform: translateX(-50%); border: 1px solid #b8cabc; border-radius: 5px; background: #173c32; color: white; font-family: "Courier New", monospace; font-size: 10px; padding: 4px 6px; pointer-events: none; }
+.editor-timeline-tooltip { position: absolute; z-index: 8; top: -27px; transform: translateX(-50%); border: 1px solid #b8cabc; border-radius: 5px; background: #173c32; color: white; font-family: "Courier New", monospace; font-size: 10px; padding: 4px 6px; pointer-events: none; }
 .editor-time-readout { display: flex; justify-content: space-between; margin: 10px 0; border: 1px solid var(--editor-line); border-radius: 6px; background: #f4f6f2; padding: 8px; color: var(--editor-muted); font-size: 10px; }
 .editor-time-readout b { display: block; color: var(--editor-ink); font-family: "Courier New", monospace; font-size: 11px; }
 .editor-segment-reset-actions { display: flex; justify-content: space-between; gap: 8px; }

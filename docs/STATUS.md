@@ -1,5 +1,30 @@
 # Status
 
+## Current milestone: Precision caption-boundary editing
+
+Complete:
+
+- Added TEXT-only caption-edge resizing with a centralized 100 ms minimum
+  duration. A contiguous ayah boundary now updates both neighboring display
+  intervals atomically, preserving half-open timing with no gap or overlap;
+  basmalah preludes retain their independent timing behavior.
+- Kept the playhead and preview independent of caption editing. Beginning an
+  edge drag pauses active playback at its current timestamp, and resizing does
+  not seek media or change `currentTimeMs`.
+- Added an 8 CSS-pixel, screen-space snap target for the stationary playhead,
+  using the shared timed-content geometry. The playhead remains visually above
+  caption blocks; resize handles appear on hover/selection and show a compact
+  boundary tooltip, including its snap state.
+- Added regressions for shared-boundary updates, exact no-gap/no-overlap
+  semantics, stationary playhead behavior, and pixel-space snap/release.
+
+Verification: `npm test` (153 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. Lint retains four existing
+unused legacy-timing helper warnings; the build retains the existing non-fatal
+VAD ONNX Runtime dynamic-require warning. No browser media fixture is present
+in this workspace, so the required final audio-only and video browser passes
+remain pending.
+
 ## Current milestone: Timeline playhead content-origin alignment
 
 Complete:

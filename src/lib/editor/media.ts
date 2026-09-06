@@ -38,6 +38,24 @@ export type TimelineTrack = {
   items: TimelineItem[];
 };
 
+/** Screen-space threshold keeps caption/playhead snapping stable across zoom. */
+export const CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX = 8;
+
+export function snapCaptionBoundaryToPlayhead(
+  boundaryTimeMs: number,
+  pointerClientX: number,
+  contentLeftPx: number,
+  contentWidthPx: number,
+  playheadTimeMs: number,
+  durationMs: number,
+): { timeMs: number; snapped: boolean } {
+  const playheadX = contentLeftPx + timeToTimelinePosition(playheadTimeMs, durationMs) * contentWidthPx;
+  if (Number.isFinite(pointerClientX) && Math.abs(pointerClientX - playheadX) <= CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX) {
+    return { timeMs: playheadTimeMs, snapped: true };
+  }
+  return { timeMs: boundaryTimeMs, snapped: false };
+}
+
 export function mediaKindForFile(file: Pick<File, "type">): MediaKind | null {
   if (file.type.startsWith("video/")) return "video";
   if (file.type.startsWith("audio/")) return "audio";

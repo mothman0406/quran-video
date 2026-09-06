@@ -33,6 +33,7 @@ import {
   resetAllCaptionSegmentTiming,
   resetCaptionSegmentTiming,
   resetTypography as resetTypographyDefaults,
+  resizeCaptionBoundary,
   resizeCaptionWidth,
   splitCaptionSegment,
   updateCaptionPosition,
@@ -101,7 +102,7 @@ import type { Session } from "@supabase/supabase-js";
 import { recordAuthenticatedUsage } from "@/lib/usage/client";
 import { getCloudProjectLimit, getCustomStyleLimit, getPlanEntitlements, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
-import { mediaKindForFile, mediaSourceFromFile, projectDurationMs, timelineContentPosition, timelinePositionToTime, type MediaSource } from "@/lib/editor/media";
+import { mediaKindForFile, mediaSourceFromFile, projectDurationMs, snapCaptionBoundaryToPlayhead, timelineContentPosition, timelinePositionToTime, type MediaSource } from "@/lib/editor/media";
 import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
@@ -170,7 +171,7 @@ export default function Home() {
     {},
   );
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
-  const [timelineTooltip, setTimelineTooltip] = useState<string | null>(null);
+  const [timelineTooltip, setTimelineTooltip] = useState<{ label: string; position: number } | null>(null);
   const [segments, setSegments] = useState<CaptionSegment[]>([]);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(
     null,
@@ -1173,10 +1174,15 @@ export default function Home() {
     segment: CaptionSegment,
   ) {
     event.stopPropagation();
-    selectSegment(segment);
     timelineInteraction.current = { id: segment.id, mode: edge, pointerStartMs: timelineTimeFromPointer(event), initialStartMs: segment.startMs, initialEndMs: segment.endMs };
     draggingEdge.current = edge;
-    setTimelineTooltip(formatTimelineTime(edge === "start" ? segment.startMs : segment.endMs));
+    setSelectedSegmentId(segment.id);
+    setSelectedObject(null);
+    setSplitBoundary(Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)));
+    const video = videoRef.current;
+    if (video && !video.paused) video.pause();
+    const boundary = edge === "start" ? segment.startMs : segment.endMs;
+    setTimelineTooltip({ label: formatTimelineTime(boundary), position: boundary / Math.max(1, projectDurationMs(mediaSource)) });
     event.currentTarget.setPointerCapture(event.pointerId);
   }
   function handleEdgeMove(event: PointerEvent<HTMLElement>) {
@@ -1187,7 +1193,11 @@ export default function Home() {
     const interaction = timelineInteraction.current;
     if (!interaction) return;
     const nextTime = timelineTimeFromPointer(event);
-    const snapped = snapTimelineTime(nextTime, interaction.id);
+    const rect = timelineRef.current?.getBoundingClientRect();
+    const playheadSnap = interaction.mode === "body" || !rect
+      ? { timeMs: nextTime, snapped: false }
+      : snapCaptionBoundaryToPlayhead(nextTime, event.clientX, rect.left, rect.width, currentTimeMs, projectDurationMs(mediaSource));
+    const snapped = interaction.mode === "body" ? snapTimelineTime(nextTime, interaction.id) : playheadSnap.timeMs;
     const delta = snapped - interaction.pointerStartMs;
     const nextPatch = interaction.mode === "body"
       ? (() => {
@@ -1196,15 +1206,11 @@ export default function Home() {
           return { startMs, endMs: startMs + duration };
         })()
       : interaction.mode === "start" ? { startMs: snapped } : { endMs: snapped };
-    setSegments((current) =>
-      updateCaptionSegmentTiming(
-        current,
-        interaction.id,
-        nextPatch,
-        projectDurationMs(mediaSource),
-      ),
-    );
-    setTimelineTooltip(formatTimelineTime(interaction.mode === "end" ? nextPatch.endMs ?? snapped : nextPatch.startMs ?? snapped));
+    setSegments((current) => interaction.mode === "body"
+      ? updateCaptionSegmentTiming(current, interaction.id, nextPatch, projectDurationMs(mediaSource))
+      : resizeCaptionBoundary(current, interaction.id, interaction.mode, snapped, projectDurationMs(mediaSource)));
+    const boundary = interaction.mode === "end" ? nextPatch.endMs ?? snapped : nextPatch.startMs ?? snapped;
+    setTimelineTooltip({ label: `${formatTimelineTime(boundary)}${playheadSnap.snapped ? " · Snap: Playhead" : ""}`, position: boundary / Math.max(1, projectDurationMs(mediaSource)) });
   }
   function handleEdgeUp() {
     draggingEdge.current = null;

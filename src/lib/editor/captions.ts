@@ -416,6 +416,47 @@ export type OptionalPreludeTiming = {
 
 export type CaptionTimingPatch = { startMs?: number; endMs?: number };
 
+/** The smallest valid display interval for a manually resized caption. */
+export const MINIMUM_CAPTION_DURATION_MS = 100;
+
+/**
+ * Moves one TEXT-track edge. Contiguous ayah segments share an edge so their
+ * display intervals stay gap-free and non-overlapping; a basmalah prelude
+ * deliberately remains independently timed.
+ */
+export function resizeCaptionBoundary(
+  segments: readonly CaptionSegment[],
+  id: string,
+  edge: "start" | "end",
+  boundaryMs: number,
+  durationMs: number,
+): CaptionSegment[] {
+  const index = segments.findIndex((segment) => segment.id === id);
+  if (index < 0) return [...segments];
+  const current = segments[index]!;
+  const maximumTime = Math.max(1, Number.isFinite(durationMs) ? Math.round(durationMs) : 1);
+  const requested = Number.isFinite(boundaryMs) ? Math.round(boundaryMs) : edge === "start" ? current.startMs : current.endMs;
+  const previous = segments[index - 1];
+  const next = segments[index + 1];
+  const sharedPrevious = edge === "start" && current.contentKind === "ayah" && previous?.contentKind === "ayah" && previous.endMs === current.startMs;
+  const sharedNext = edge === "end" && current.contentKind === "ayah" && next?.contentKind === "ayah" && next.startMs === current.endMs;
+  const minimum = MINIMUM_CAPTION_DURATION_MS;
+  const lower = edge === "start"
+    ? sharedPrevious ? previous.startMs + minimum : 0
+    : current.startMs + minimum;
+  const upper = edge === "start"
+    ? current.endMs - minimum
+    : sharedNext ? next.endMs - minimum : maximumTime;
+  const boundary = Math.max(lower, Math.min(upper, requested));
+
+  return segments.map((segment, segmentIndex) => {
+    if (segmentIndex === index) return edge === "start" ? { ...segment, startMs: boundary } : { ...segment, endMs: boundary };
+    if (sharedPrevious && segmentIndex === index - 1) return { ...segment, endMs: boundary };
+    if (sharedNext && segmentIndex === index + 1) return { ...segment, startMs: boundary };
+    return segment;
+  });
+}
+
 /**
  * CaptionSegment timing is the editable display model. Recognition evidence is
  * retained separately in timingEvidence so a manual edit is never mistaken for

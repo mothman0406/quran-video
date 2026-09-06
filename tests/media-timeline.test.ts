@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getActiveCaptionSegment } from "../src/lib/editor/captions.ts";
-import { mediaSourceFromFile, projectDurationMs, timeToTimelinePosition, timelineContentPosition, timelinePositionToTime, timelineRulerTicks, timelineTracks } from "../src/lib/editor/media.ts";
+import { getActiveCaptionSegment, resizeCaptionBoundary } from "../src/lib/editor/captions.ts";
+import { CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX, mediaSourceFromFile, projectDurationMs, snapCaptionBoundaryToPlayhead, timeToTimelinePosition, timelineContentPosition, timelinePositionToTime, timelineRulerTicks, timelineTracks } from "../src/lib/editor/media.ts";
 import { MediaPlaybackClock } from "../src/lib/editor/playback-clock.ts";
 import { loadSavedProject } from "../src/lib/project-storage.ts";
 
@@ -152,6 +152,28 @@ test("timeline blocks use exact CaptionSegment edges and the shared active segme
   assert.equal(getActiveCaptionSegment([first, second], 21_730)?.id, "second");
   assert.equal(first.startMs, 10_540, "clock and timeline never mutate CaptionSegment timing");
   assert.equal(second.endMs, 35_640, "clock and timeline never mutate CaptionSegment timing");
+});
+
+test("caption edge resize moves a contiguous shared Quran boundary without moving the playhead", () => {
+  const first = { ...segment, id: "first", startMs: 10_540, endMs: 21_730 };
+  const second = { ...segment, id: "second", startMs: 21_730, endMs: 35_640 };
+  const currentTimeMs = 22_150;
+  const resized = resizeCaptionBoundary([first, second], second.id, "start", currentTimeMs, 40_000);
+
+  assert.deepEqual(resized.map(({ startMs, endMs }) => [startMs, endMs]), [[10_540, 22_150], [22_150, 35_640]]);
+  assert.equal(resized[0]?.endMs, resized[1]?.startMs, "the shared boundary has no gap or overlap");
+  assert.equal(currentTimeMs, 22_150, "resizing changes caption timing only; the playhead remains stationary");
+});
+
+test("caption playhead snapping is screen-space and uses the exact stationary timestamp", () => {
+  const durationMs = 40_000;
+  const contentLeftPx = 50;
+  const contentWidthPx = 800;
+  const currentTimeMs = 22_150;
+  const playheadX = contentLeftPx + timeToTimelinePosition(currentTimeMs, durationMs) * contentWidthPx;
+
+  assert.deepEqual(snapCaptionBoundaryToPlayhead(22_000, playheadX + CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX, contentLeftPx, contentWidthPx, currentTimeMs, durationMs), { timeMs: currentTimeMs, snapped: true });
+  assert.deepEqual(snapCaptionBoundaryToPlayhead(22_000, playheadX + CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX + 1, contentLeftPx, contentWidthPx, currentTimeMs, durationMs), { timeMs: 22_000, snapped: false });
 });
 
 test("legacy video metadata migrates to the common media source without bytes or object URLs", () => {
