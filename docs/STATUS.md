@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Compact desktop editor redesign
+
+Complete:
+
+- Reworked the editor visual system around a restrained graphite palette, compact control sizing, subtle dividers, and one desaturated blue accent. The prior light, card-heavy treatment and oversized controls are removed.
+- Locked the editor shell to `100dvh` with zero document overflow. The header, left media/source sidebar, center canvas, right contextual inspector, and full-width lower timeline remain accessible together at desktop viewport sizes; long side-panel content is contained within its own panel.
+- Promoted the existing timeline to a compact full-width bottom workspace without changing its measured element or interaction callbacks. Ruler, centralized track-label gutter, waveform, stationary playhead, caption handles, trim handles, zoom, and pan continue to use the established geometry.
+- Kept media import, YouTube import, recognition, caption rendering and manipulation, styling, export, and all editor state/event flows unchanged. Preview retains source aspect ratio and a black audio-only canvas.
+- Browser screenshot automation is not installed in this workspace. The existing local development server responds at `http://localhost:3000`, but no supported headless browser binary is available to produce screenshots; manual visual viewport review remains pending.
+
+Verification: `npx tsc --noEmit`, `npm test` (165 passing), `npm run lint`, `npm run build`, and `git diff --check` pass. Lint retains four existing unused legacy-timing helper warnings; the build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Local YouTube URL import
 
 Complete:
