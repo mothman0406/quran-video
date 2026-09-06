@@ -1,5 +1,36 @@
 # Status
 
+## Current milestone: Audio-only playback synchronization
+
+Complete:
+
+- Traced the runtime clock path: video and audio both previously updated the
+  shared editor `currentTimeMs` only from native `timeupdate` and `seeked`.
+  `CaptionPreview`, timeline playhead, active text blocks, and transition
+  interpolation already consume that one state and the shared half-open
+  `getActiveCaptionSegment` selector; no recognition or caption timing path
+  participates in playback rendering.
+- Added `MediaPlaybackClock`, a reusable media-clock sampler that reads the
+  active `HTMLMediaElement.currentTime` on one `requestAnimationFrame` loop
+  while playing. It is used for both audio and video, starts once on play,
+  stops and takes a final authoritative sample on pause/end, and cancels on
+  source replacement or unmount. Native `timeupdate` remains a synchronized
+  fallback rather than the audio animation clock.
+- Seeking through the timeline, native controls, caption selection, or code
+  now samples the media element immediately. The existing `CaptionSegment`
+  timing, active-interval semantics, text-track geometry, and transition
+  definitions remain unchanged.
+- Added playback-clock regressions for frame sampling, single-loop lifecycle,
+  pause/end/replacement/unmount cleanup, immediate seeks, exact block edges,
+  and the shared half-open caption transition.
+
+Verification: `npm test` (150 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. Lint retains four existing
+unused legacy-timing helper warnings; the build retains the existing non-fatal
+VAD ONNX Runtime dynamic-require warning. Browser media fixtures are not
+present in this workspace, so the required final audio-only and video browser
+passes remain pending.
+
 ## Current milestone: Media and multi-track timeline foundation
 
 Complete:

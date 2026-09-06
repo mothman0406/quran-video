@@ -76,6 +76,10 @@ type EditorWorkspaceProps = {
   onVideoSelect: (event: ChangeEvent<HTMLInputElement>) => void;
   onLoadedMetadata: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onVideoTimeUpdate: (event: SyntheticEvent<HTMLMediaElement>) => void;
+  onMediaPlay: (event: SyntheticEvent<HTMLMediaElement>) => void;
+  onMediaPause: (event: SyntheticEvent<HTMLMediaElement>) => void;
+  onMediaEnded: (event: SyntheticEvent<HTMLMediaElement>) => void;
+  onMediaSeeking: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onVideoError: () => void;
   onSelectObject: (kind: CaptionObject | null) => void;
   onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, kind: CaptionObject) => void;
@@ -152,7 +156,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     transitionSettings, showVerseNumber, showSafeArea, projectName, dirty, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage, timingWarning,
     showCorrection, surah, startAyah, endAyah, entitlements, selectedFormatDefinition, timelineTooltip,
-    onProjectNameChange, onVideoSelect, onLoadedMetadata, onVideoTimeUpdate, onVideoError, onSelectObject,
+    onProjectNameChange, onVideoSelect, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown,
     onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onChangeFormat, onDetect, onCopyAlignmentDebug,
     onCorrectDetection, onToggleCorrection, onClearVideo, onSaveProject, onSaveToAccount, onOpenProjects,
@@ -227,7 +231,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
         <div className="editor-stage-header"><div><SectionLabel>Canvas</SectionLabel><h1>{videoFile ? "Caption composition" : "Begin with a recitation"}</h1></div><div className="editor-stage-info"><span>{selectedFormatDefinition.label}</span><span>{formatDuration(durationMs / 1000)}</span></div></div>
         <div className="editor-canvas-well">
           {videoUrl ? <div ref={previewRef} className={`project-preview-canvas editor-canvas ${mediaSource?.hasVideo ? "" : "editor-audio-canvas"}`} data-project-aspect-ratio={selectedFormatDefinition.aspectRatio} data-project-format={projectFormat.preset} style={{ aspectRatio: `${projectFormat.width} / ${projectFormat.height}` }} onPointerDown={onCanvasBackgroundPointerDown}>
-            {mediaSource?.hasVideo ? <video ref={videoRef} className="h-full w-full object-cover" controls playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onSeeked={onVideoTimeUpdate} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={(node) => { (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node as unknown as HTMLVideoElement; }} className="editor-audio-element" controls preload="metadata" src={videoUrl} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onSeeked={onVideoTimeUpdate} onError={onVideoError}>Your browser does not support audio playback.</audio>}
+            {mediaSource?.hasVideo ? <video ref={videoRef} className="h-full w-full object-cover" controls playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={(node) => { (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node as unknown as HTMLVideoElement; }} className="editor-audio-element" controls preload="metadata" src={videoUrl} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support audio playback.</audio>}
             {showSafeArea && <SafeAreaOverlay format={projectFormat} />}
             <CaptionPreview currentTimeMs={currentTimeMs} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} />
           </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}

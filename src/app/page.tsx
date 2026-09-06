@@ -102,6 +102,7 @@ import { recordAuthenticatedUsage } from "@/lib/usage/client";
 import { getCloudProjectLimit, getCustomStyleLimit, getPlanEntitlements, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
 import { mediaKindForFile, mediaSourceFromFile, projectDurationMs, timelinePositionToTime, type MediaSource } from "@/lib/editor/media";
+import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -254,6 +255,24 @@ export default function Home() {
   } | null>(null);
   const exportAbort = useRef<AbortController | null>(null);
   const exportCoordinator = useRef(new ExportCoordinator());
+  const playbackClock = useRef<MediaPlaybackClock | null>(null);
+
+  useEffect(() => {
+    const clock = new MediaPlaybackClock({
+      onSample: (timeMs) => {
+        setCurrentTimeMs((current) => current === timeMs ? current : timeMs);
+      },
+    });
+    playbackClock.current = clock;
+    return () => {
+      clock.dispose();
+      if (playbackClock.current === clock) playbackClock.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    playbackClock.current?.setMedia(videoUrl ? videoRef.current : null);
+  }, [videoUrl]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() =>
@@ -1001,7 +1020,37 @@ export default function Home() {
     }
   }
   function updateTime(event: SyntheticEvent<HTMLMediaElement>) {
-    setCurrentTimeMs(event.currentTarget.currentTime * 1000);
+    const clock = playbackClock.current;
+    if (!clock) {
+      setCurrentTimeMs(event.currentTarget.currentTime * 1000);
+      return;
+    }
+    clock.setMedia(event.currentTarget);
+    clock.sync("timeupdate");
+  }
+  function startPlaybackClock(event: SyntheticEvent<HTMLMediaElement>) {
+    const clock = playbackClock.current;
+    if (!clock) return;
+    clock.setMedia(event.currentTarget);
+    clock.start();
+  }
+  function stopPlaybackClock(event: SyntheticEvent<HTMLMediaElement>, source: "pause" | "ended") {
+    const clock = playbackClock.current;
+    if (!clock) {
+      setCurrentTimeMs(event.currentTarget.currentTime * 1000);
+      return;
+    }
+    clock.setMedia(event.currentTarget);
+    clock.stop(source);
+  }
+  function seekPlaybackClock(event: SyntheticEvent<HTMLMediaElement>) {
+    const clock = playbackClock.current;
+    if (!clock) {
+      setCurrentTimeMs(event.currentTarget.currentTime * 1000);
+      return;
+    }
+    clock.setMedia(event.currentTarget);
+    clock.sync("seek");
   }
   const seekTo = useCallback(
     (ms: number) => {
@@ -1012,7 +1061,13 @@ export default function Home() {
           0,
           Math.min(ms, projectDurationMs(mediaSource)),
         ) / 1000;
-      setCurrentTimeMs(video.currentTime * 1000);
+      const clock = playbackClock.current;
+      if (clock) {
+        clock.setMedia(video);
+        clock.sync("seek");
+      } else {
+        setCurrentTimeMs(video.currentTime * 1000);
+      }
     },
     [mediaSource],
   );
@@ -1419,6 +1474,10 @@ export default function Home() {
         onVideoSelect={selectVideo}
         onLoadedMetadata={loadedVideoMetadata}
         onVideoTimeUpdate={updateTime}
+        onMediaPlay={startPlaybackClock}
+        onMediaPause={(event) => stopPlaybackClock(event, "pause")}
+        onMediaEnded={(event) => stopPlaybackClock(event, "ended")}
+        onMediaSeeking={seekPlaybackClock}
         onVideoError={() => setErrorMessage("This video could not be previewed in your browser.")}
         onSelectObject={setSelectedObject}
         onObjectPointerDown={handleObjectPointerDown}
