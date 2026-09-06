@@ -18,6 +18,11 @@ export const MediaSourceSchema = z.discriminatedUnion("kind", [
   MediaMetadataSchema.extend({ kind: z.literal("audio"), hasVideo: z.literal(false), hasAudio: z.literal(true) }),
 ]);
 
+export const MediaTrimSchema = z.strictObject({
+  startMs: PositiveNumber,
+  endMs: PositiveNumber,
+});
+
 export const ProjectFormatSchema = z.strictObject({
   preset: z.enum(["vertical", "square", "landscape"]),
   width: PositiveInteger,
@@ -158,6 +163,7 @@ export const ProjectSchema = z.strictObject({
   id: z.string().min(1),
   title: z.string().min(1),
   sourceMedia: MediaSourceSchema.nullable(),
+  mediaTrim: MediaTrimSchema,
   format: ProjectFormatSchema,
   verseAlignments: z.array(VerseAlignmentSchema),
   captionSegments: z.array(CaptionSegmentSchema),

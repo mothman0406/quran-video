@@ -1,6 +1,17 @@
 # Status
 
-## Current milestone: Timeline zoom, navigation, and local waveform
+## Current milestone: Non-destructive media trimming
+
+Complete:
+
+- Added persisted absolute-source `mediaTrim` bounds with legacy full-duration migration, a 250 ms centralized minimum, source-bound clamping, reset action, and reset-on-new-source behavior.
+- Video and Audio rows share the same trim state for video sources; audio-only projects expose the Audio trim only. Trim handles use the existing zoom/pan-aware pointer conversion and exact 8 CSS-pixel stationary-playhead snap without moving the playhead, preview, or caption timings.
+- Normal playback begins at the trim start when necessary and stops cleanly at its end; direct seeking still inspects the full original source. Waveform data stays full-source. Video export renders the selected source interval and evaluates captions at absolute source time; audio-only export remains unavailable.
+- Added trim, linked-track, bounds, snap, playback, persistence migration, and caption-invariance regressions. Browser validation remains pending because no media fixture is available in this workspace.
+
+Verification: `npx tsc --noEmit` and `npm test` (160 passing) pass. Full lint/build checks are in progress.
+
+## Previous milestone: Timeline zoom, navigation, and local waveform
 
 Complete:
 

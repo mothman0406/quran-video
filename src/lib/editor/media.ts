@@ -2,6 +2,12 @@ import type { CaptionSegment } from "./captions.ts";
 
 export type MediaKind = "video" | "audio";
 
+/** One non-destructive source-time range shared by every representation of a source. */
+export type MediaTrim = {
+  startMs: number;
+  endMs: number;
+};
+
 /** Metadata-only durable source. The File and object URL remain browser-local. */
 export type MediaSource = ({
   kind: "video";
@@ -40,6 +46,7 @@ export type TimelineTrack = {
 
 /** Screen-space threshold keeps caption/playhead snapping stable across zoom. */
 export const CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX = 8;
+export const minimumMediaTrimDurationMs = 250;
 export const TIMELINE_MIN_ZOOM = 1;
 export const TIMELINE_MAX_ZOOM = 128;
 
@@ -130,6 +137,49 @@ export function projectDurationMs(source: MediaSource | null): number {
   return Math.max(0, Math.round(source?.durationMs ?? 0));
 }
 
+export function createMediaTrim(durationMs: number): MediaTrim {
+  const duration = Math.max(0, Math.round(Number.isFinite(durationMs) ? durationMs : 0));
+  return { startMs: 0, endMs: duration };
+}
+
+/** Coerces persisted or pointer-derived trim state without rebasing source time. */
+export function clampMediaTrim(trim: MediaTrim | null | undefined, durationMs: number): MediaTrim {
+  const duration = Math.max(0, Math.round(Number.isFinite(durationMs) ? durationMs : 0));
+  if (duration <= 0) return createMediaTrim(0);
+  const minimum = Math.min(minimumMediaTrimDurationMs, duration);
+  const requestedStart = typeof trim?.startMs === "number" && Number.isFinite(trim.startMs) ? Math.round(trim.startMs) : 0;
+  const requestedEnd = typeof trim?.endMs === "number" && Number.isFinite(trim.endMs) ? Math.round(trim.endMs) : duration;
+  const startMs = Math.max(0, Math.min(duration - minimum, requestedStart));
+  const endMs = Math.max(startMs + minimum, Math.min(duration, requestedEnd));
+  return { startMs, endMs };
+}
+
+export function resizeMediaTrim(trim: MediaTrim, edge: "start" | "end", valueMs: number, durationMs: number): MediaTrim {
+  const current = clampMediaTrim(trim, durationMs);
+  const duration = Math.max(0, Math.round(Number.isFinite(durationMs) ? durationMs : 0));
+  const minimum = Math.min(minimumMediaTrimDurationMs, duration);
+  if (duration <= 0) return current;
+  if (edge === "start") return { ...current, startMs: Math.max(0, Math.min(current.endMs - minimum, Math.round(valueMs))) };
+  return { ...current, endMs: Math.max(current.startMs + minimum, Math.min(duration, Math.round(valueMs))) };
+}
+
+/** Inspection seeks stay absolute; only normal playback is constrained to trim. */
+export function playbackStartForMediaTrim(currentTimeMs: number, trim: MediaTrim, durationMs: number): number {
+  const range = clampMediaTrim(trim, durationMs);
+  return currentTimeMs < range.startMs || currentTimeMs >= range.endMs ? range.startMs : Math.max(0, Math.min(Math.round(currentTimeMs), Math.max(0, Math.round(durationMs))));
+}
+
+export function shouldStopMediaPlayback(currentTimeMs: number, trim: MediaTrim, durationMs: number): boolean {
+  const range = clampMediaTrim(trim, durationMs);
+  return range.endMs > range.startMs && currentTimeMs >= range.endMs;
+}
+
+/** Export output time is zero-based, while caption data remains absolute source time. */
+export function exportOutputTimeToSourceTime(outputTimeMs: number, trim: MediaTrim, durationMs: number): number {
+  const range = clampMediaTrim(trim, durationMs);
+  return Math.max(range.startMs, Math.min(range.endMs, range.startMs + Math.max(0, outputTimeMs)));
+}
+
 export function timeToTimelinePosition(timeMs: number, durationMs: number, startMs = 0): number {
   if (!Number.isFinite(durationMs) || durationMs <= 0) return 0;
   return Math.max(0, Math.min(1, (timeMs - startMs) / durationMs));
@@ -162,12 +212,13 @@ export function timelineContentPosition(clientX: number, contentLeftPx: number, 
   return Math.max(0, Math.min(1, (clientX - contentLeftPx) / contentWidthPx));
 }
 
-export function timelineTracks(source: MediaSource | null, segments: readonly CaptionSegment[]): TimelineTrack[] {
+export function timelineTracks(source: MediaSource | null, segments: readonly CaptionSegment[], mediaTrim = createMediaTrim(projectDurationMs(source))): TimelineTrack[] {
   const durationMs = projectDurationMs(source);
+  const trim = clampMediaTrim(mediaTrim, durationMs);
   return [
     { kind: "text", label: "Text", items: segments.map((segment) => ({ id: `text:${segment.id}`, track: "text", startMs: segment.startMs, endMs: segment.endMs, label: segment.contentKind === "basmalah-prelude" ? "Basmalah" : segment.verseKeys[0] ?? "Caption", captionSegmentId: segment.id })) },
-    { kind: "video", label: "Video", items: source?.hasVideo && durationMs > 0 ? [{ id: "video:source", track: "video", startMs: 0, endMs: durationMs, label: source.fileName || "Video" }] : [] },
-    { kind: "audio", label: "Audio", items: source?.hasAudio && durationMs > 0 ? [{ id: "audio:source", track: "audio", startMs: 0, endMs: durationMs, label: source.fileName || "Audio" }] : [] },
+    { kind: "video", label: "Video", items: source?.hasVideo && durationMs > 0 ? [{ id: "video:source", track: "video", startMs: trim.startMs, endMs: trim.endMs, label: source.fileName || "Video" }] : [] },
+    { kind: "audio", label: "Audio", items: source?.hasAudio && durationMs > 0 ? [{ id: "audio:source", track: "audio", startMs: trim.startMs, endMs: trim.endMs, label: source.fileName || "Audio" }] : [] },
   ];
 }
 

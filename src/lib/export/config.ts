@@ -2,6 +2,7 @@ import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionS
 import type { ProjectFormat } from "../schemas/project.ts";
 import type { LocalExportConfiguration } from "./types.ts";
 import { exportFormatForPlan, getPlanEntitlements, type Plan } from "../entitlements.ts";
+import type { MediaTrim } from "../editor/media.ts";
 
 export function createLocalExportConfiguration(input: {
   format: ProjectFormat;
@@ -11,6 +12,7 @@ export function createLocalExportConfiguration(input: {
   positioning: CaptionPositioning;
   transitionSettings: TransitionSettings;
   showVerseNumber: boolean;
+  mediaTrim?: MediaTrim;
   plan?: Plan;
 }): LocalExportConfiguration {
   const entitlements = getPlanEntitlements(input.plan ?? "Free");
@@ -24,6 +26,7 @@ export function createLocalExportConfiguration(input: {
     transitionSettings: { ...input.transitionSettings },
     showVerseNumber: input.showVerseNumber,
     watermarkRequired: entitlements.watermarkRequired,
+    ...(input.mediaTrim ? { mediaTrim: { ...input.mediaTrim } } : {}),
   };
 }
 

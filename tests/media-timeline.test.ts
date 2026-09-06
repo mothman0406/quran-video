@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getActiveCaptionSegment, resizeCaptionBoundary } from "../src/lib/editor/captions.ts";
-import { CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX, createTimelineViewport, mediaSourceFromFile, panTimelineViewport, projectDurationMs, snapCaptionBoundaryToPlayhead, timeToTimelinePosition, timelineContentPosition, timelineItemGeometry, timelinePositionToTime, timelineRulerTicks, timelineTracks, timeToViewportPosition, viewportPositionToTime, zoomTimelineViewport } from "../src/lib/editor/media.ts";
+import { CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX, clampMediaTrim, createMediaTrim, createTimelineViewport, exportOutputTimeToSourceTime, mediaSourceFromFile, panTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, shouldStopMediaPlayback, snapCaptionBoundaryToPlayhead, timeToTimelinePosition, timelineContentPosition, timelineItemGeometry, timelinePositionToTime, timelineRulerTicks, timelineTracks, timeToViewportPosition, viewportPositionToTime, zoomTimelineViewport } from "../src/lib/editor/media.ts";
 import { MediaPlaybackClock } from "../src/lib/editor/playback-clock.ts";
 import { loadSavedProject } from "../src/lib/project-storage.ts";
 import { waveformPeaksForViewport, waveformPeaksFromPcm } from "../src/lib/editor/waveform.ts";
@@ -44,6 +44,41 @@ test("audio-only source creates an empty video track and a local audio track", (
   const tracks = timelineTracks(source, [segment]);
   assert.deepEqual(tracks.map((track) => [track.kind, track.items.length]), [["text", 1], ["video", 0], ["audio", 1]]);
   assert.equal(tracks[2]?.items[0]?.endMs, 8_500);
+});
+
+test("media trim defaults to the source range and remains one linked video/audio range", () => {
+  const source = mediaSourceFromFile({ name: "recitation.mp4", size: 4, type: "video/mp4" }, "video", { durationMs: 80_000 });
+  const trim = createMediaTrim(80_000);
+  assert.deepEqual(trim, { startMs: 0, endMs: 80_000 });
+  const tracks = timelineTracks(source, [segment], { startMs: 5_000, endMs: 70_000 });
+  assert.deepEqual(tracks.slice(1).map((track) => track.items[0] && [track.items[0].startMs, track.items[0].endMs]), [[5_000, 70_000], [5_000, 70_000]], "video and audio expose the same source trim");
+});
+
+test("audio trim, source limits, and minimum duration are clamped without touching captions or waveform", () => {
+  const trim = resizeMediaTrim({ startMs: 5_000, endMs: 70_000 }, "start", 69_999, 80_000);
+  assert.deepEqual(trim, { startMs: 69_750, endMs: 70_000 });
+  assert.deepEqual(resizeMediaTrim(trim, "end", 100_000, 80_000), { startMs: 69_750, endMs: 80_000 });
+  assert.deepEqual(clampMediaTrim({ startMs: Number.NaN, endMs: Infinity }, 80_000), { startMs: 0, endMs: 80_000 });
+  assert.deepEqual([segment.startMs, segment.endMs], [1_000, 3_000], "trim never rebases caption timestamps");
+});
+
+test("trim snapping uses the shared zoomed viewport and leaves the playhead independent", () => {
+  const viewport = panTimelineViewport(createTimelineViewport(80_000, 8), 80_000, 20_000);
+  const playheadMs = 23_450;
+  const playheadX = 50 + timeToViewportPosition(playheadMs, viewport) * 800;
+  assert.deepEqual(snapCaptionBoundaryToPlayhead(23_000, playheadX + 8, 50, 800, playheadMs, viewport.visibleEndMs - viewport.visibleStartMs, viewport.visibleStartMs), { timeMs: playheadMs, snapped: true });
+  assert.equal(playheadMs, 23_450, "snapping a trim edge never changes the stationary playhead");
+});
+
+test("normal playback honors trim while inspection seeks remain source-time based", () => {
+  const trim = { startMs: 5_000, endMs: 70_000 };
+  assert.equal(playbackStartForMediaTrim(2_000, trim, 80_000), 5_000);
+  assert.equal(playbackStartForMediaTrim(22_150, trim, 80_000), 22_150);
+  assert.equal(playbackStartForMediaTrim(70_000, trim, 80_000), 5_000);
+  assert.equal(shouldStopMediaPlayback(70_000, trim, 80_000), true);
+  assert.equal(shouldStopMediaPlayback(69_999, trim, 80_000), false);
+  assert.equal(timelinePositionToTime(.025, 80_000), 2_000, "timeline inspection seeking stays outside the trim when requested");
+  assert.equal(exportOutputTimeToSourceTime(16_000, trim, 80_000), 21_000, "trimmed export evaluates a 21s source caption at 16s output time");
 });
 
 test("timeline position conversion is shared, accurate, and preserves active half-open captions", () => {
@@ -213,5 +248,6 @@ test("legacy video metadata migrates to the common media source without bytes or
   };
   const migrated = loadSavedProject(legacy);
   assert.deepEqual(migrated.sourceMedia && [migrated.sourceMedia.kind, migrated.sourceMedia.durationMs, migrated.sourceMedia.hasVideo, migrated.sourceMedia.hasAudio], ["video", 4_000, true, true]);
+  assert.deepEqual(migrated.mediaTrim, { startMs: 0, endMs: 4_000 });
   assert.equal(JSON.stringify(migrated).includes("sourceVideo"), false);
 });

@@ -18,6 +18,7 @@ import {
 import { quranFontDefinitions } from "../quran/content.ts";
 import { mediabunnyVideoTransform, sourceVideoFitForMediabunny } from "../editor/formats.ts";
 import { drawExportCaptions } from "./caption-canvas.ts";
+import { clampMediaTrim, exportOutputTimeToSourceTime } from "../editor/media.ts";
 import { audioOutputIsValid, selectOutputProfile } from "./output.ts";
 import { generateExportFileName } from "./filename.ts";
 import { exportQualityPreset } from "./quality.ts";
@@ -136,7 +137,10 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
       const [sourceVideoCodec, sourceAudioCodec, frameRateMetrics, outputCapabilities] = await Promise.all([videoTrack.getCodec(), audioTrack?.getCodec() ?? null, videoTrack.computeFrameRateMetrics(), capabilities(request.format.width, request.format.height, quality)]);
       const profile = selectOutputProfile(outputCapabilities, sourceHasAudio, quality);
       if (!profile) throw new Error(sourceHasAudio ? "This browser cannot encode an audio/video combination for a local export. H.264/AAC and VP9/Opus were both unavailable." : "This browser cannot encode H.264 or VP9 for local export.");
-      const sourceDuration = sourceEnd - sourceStart;
+      const fullSourceDuration = sourceEnd - sourceStart;
+      const trim = clampMediaTrim(request.mediaTrim, Math.round(fullSourceDuration * 1_000));
+      const sourceStartForTrim = sourceStart + trim.startMs / 1_000;
+      const sourceDuration = (trim.endMs - trim.startMs) / 1_000;
       const targetFps = resolveExportFrameRate(frameRateMetrics.underlyingFrameRate);
       const timeline = frameTimeline(sourceDuration, targetFps);
       if (!timeline.length) throw new Error("The source duration could not be determined for deterministic export.");
@@ -149,17 +153,17 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
       output.addVideoTrack(videoSource, { frameRate: targetFps });
       if (audioTrack && profile.audioCodec) {
         // Audio is appended from file packets/samples, never from an HTMLMediaElement stream.
-        await copyOrEncodeAudio({ audioTrack, output, outputAudioCodec: profile.audioCodec, sourceStart, sourceDuration, audioBitrate: profile.audioBitrate, signal: request.signal });
+        await copyOrEncodeAudio({ audioTrack, output, outputAudioCodec: profile.audioCodec, sourceStart: sourceStartForTrim, sourceDuration, audioBitrate: profile.audioBitrate, signal: request.signal });
       } else await output.start();
       const sink = new VideoSampleSink(videoTrack);
       let renderedFrameCount = 0;
-      for await (const sample of sink.samplesAtTimestamps(timeline.map(({ timestamp }) => sourceStart + timestamp))) {
+      for await (const sample of sink.samplesAtTimestamps(timeline.map(({ timestamp }) => sourceStartForTrim + timestamp))) {
         ensureNotAborted(request.signal);
         const frame = timeline[renderedFrameCount]; if (!frame) break;
         try {
           context.clearRect(0, 0, canvas.width, canvas.height);
           if (sample) sample.drawWithFit(context, { fit: sourceVideoFitForMediabunny() });
-          drawExportCaptions(context, request, frame.timestamp * 1_000, arabicFont);
+          drawExportCaptions(context, request, exportOutputTimeToSourceTime(frame.timestamp * 1_000, trim, Math.round(fullSourceDuration * 1_000)), arabicFont);
           report("rendering", renderedFrameCount / timeline.length);
           report("encoding", renderedFrameCount / timeline.length);
           await videoSource.add(frame.timestamp, frame.duration);

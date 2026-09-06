@@ -1,6 +1,7 @@
 import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "../editor/captions.ts";
 import type { ProjectFormat } from "../schemas/project.ts";
 import type { ExportQuality } from "./quality.ts";
+import type { MediaTrim } from "../editor/media.ts";
 
 export type ExportPhase = "preparing" | "decoding" | "rendering" | "encoding" | "muxing" | "finalizing";
 
@@ -32,6 +33,8 @@ export type LocalExportConfiguration = {
   transitionSettings: TransitionSettings;
   showVerseNumber: boolean;
   watermarkRequired: boolean;
+  /** Source-time bounds. Omitted legacy snapshots export the full source. */
+  mediaTrim?: MediaTrim;
 };
 
 export type LocalExportRequest = LocalExportConfiguration & {

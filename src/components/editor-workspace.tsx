@@ -16,7 +16,7 @@ import AccountPanel from "@/components/account-panel";
 import { DEFAULT_SOURCE_VIDEO_FIT, PROJECT_FORMATS, projectFormatDefinition } from "@/lib/editor/formats";
 import { BUILT_IN_STYLES, type BuiltInStyleName, type CaptionStyle } from "@/lib/editor/styles";
 import { quranFontDefinitions } from "@/lib/quran/content";
-import { formatTimelineClock, projectDurationMs, timeToViewportPosition, timelineItemGeometry, timelineRulerTicks, timelineTracks, type MediaSource, type TimelineItem, type TimelineViewport } from "@/lib/editor/media";
+import { formatTimelineClock, projectDurationMs, timeToViewportPosition, timelineItemGeometry, timelineRulerTicks, timelineTracks, type MediaSource, type MediaTrim, type TimelineItem, type TimelineViewport } from "@/lib/editor/media";
 import { waveformPeaksForViewport, type WaveformData } from "@/lib/editor/waveform";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
@@ -28,6 +28,7 @@ type EditorWorkspaceProps = {
   videoUrl: string | null;
   videoMetadata: VideoMetadata | null;
   mediaSource: MediaSource | null;
+  mediaTrim: MediaTrim;
   videoRef: React.RefObject<HTMLVideoElement | null>;
   previewRef: React.RefObject<HTMLDivElement | null>;
   timelineRef: React.RefObject<HTMLDivElement | null>;
@@ -97,6 +98,8 @@ type EditorWorkspaceProps = {
   onTimelinePointerMove: (event: PointerEvent<HTMLElement>) => void;
   onEdgeDown: (event: PointerEvent<HTMLElement>, edge: "start" | "end", segment: CaptionSegment) => void;
   onEdgeUp: () => void;
+  onMediaTrimPointerDown: (event: PointerEvent<HTMLElement>, edge: "start" | "end") => void;
+  onResetMediaTrim: () => void;
   onTimelineZoom: (zoom: number) => void;
   onTimelinePan: (visibleStartMs: number) => void;
   onChangeFormat: (preset: ProjectFormatPreset) => void;
@@ -155,7 +158,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [timelineWidth, setTimelineWidth] = useState(600);
   const {
-    videoFile, videoUrl, videoMetadata, mediaSource, videoRef, previewRef, timelineRef, stage, progress, support,
+    videoFile, videoUrl, videoMetadata, mediaSource, mediaTrim, videoRef, previewRef, timelineRef, stage, progress, support,
     alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
     selectedObject, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, showVerseNumber, showSafeArea, projectName, dirty, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
@@ -163,7 +166,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     showCorrection, surah, startAyah, endAyah, entitlements, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
     onProjectNameChange, onVideoSelect, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown,
-    onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
+    onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
     onCorrectDetection, onToggleCorrection, onClearVideo, onSaveProject, onSaveToAccount, onOpenProjects,
     onOpenCloudProjects, onSessionChange, onPlanChange, onDiscard, onNewProject, onExportOpen, onExport, onCancelExport, onDownloadExport,
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange,
@@ -172,7 +175,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     onMergeNext, onResetTiming, onResetAllTiming,
   } = props;
   const durationMs = projectDurationMs(mediaSource);
-  const tracks = timelineTracks(mediaSource, segments);
+  const tracks = timelineTracks(mediaSource, segments, mediaTrim);
   const rulerTicks = timelineRulerTicks(timelineViewport, timelineWidth);
   const waveform = useMemo(() => waveformPeaksForViewport(waveformData, timelineViewport, Math.max(96, Math.floor(timelineWidth))), [timelineViewport, timelineWidth, waveformData]);
   const visibleDuration = Math.max(1, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs);
@@ -191,7 +194,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     const geometry = timelineItemGeometry(item.startMs, item.endMs, timelineViewport);
     if (!geometry) return null;
     const style = { width: `${Math.max(1, geometry.width * 100)}%`, left: `${geometry.left * 100}%` };
-    if (!item.captionSegmentId) return <div key={item.id} className="editor-media-block" style={style}><span>{item.label}</span></div>;
+    if (!item.captionSegmentId) return <div key={item.id} className="editor-media-block" style={style}><span>{item.label}</span><button type="button" className="editor-media-trim-handle editor-media-trim-handle-start" aria-label={`Trim ${item.label} start`} onPointerDown={(event) => onMediaTrimPointerDown(event, "start")} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /><button type="button" className="editor-media-trim-handle editor-media-trim-handle-end" aria-label={`Trim ${item.label} end`} onPointerDown={(event) => onMediaTrimPointerDown(event, "end")} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /></div>;
     const segment = segments.find((value) => value.id === item.captionSegmentId);
     if (!segment) return null;
     return <button key={item.id} type="button" aria-label={`Caption ${captionSegmentLabel(segment)}`} onPointerDown={(event) => onSegmentPointerDown(event, segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.stopPropagation(); onSelectSegment(segment); }} className={`editor-caption-block ${segment.id === selectedSegmentId ? "is-selected" : ""} ${getActiveCaptionSegment(segments, currentTimeMs)?.id === segment.id ? "is-active" : ""}`} style={style}><span>{item.label}</span><span className="editor-caption-block-range">{(item.startMs / 1000).toFixed(2)}–{(item.endMs / 1000).toFixed(2)}s</span><span className="editor-timing-handle editor-timing-handle-start" aria-label={`Resize ${captionSegmentLabel(segment)} start`} onPointerDown={(event) => onEdgeDown(event, "start", segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /><span className="editor-timing-handle editor-timing-handle-end" aria-label={`Resize ${captionSegmentLabel(segment)} end`} onPointerDown={(event) => onEdgeDown(event, "end", segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /></button>;
@@ -252,7 +255,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
         </div>
         <div className="editor-playback-row"><span className="editor-playback-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(durationMs / 1000)}</span><span className="editor-playback-hint">Space to play · ← → to nudge</span></div>
-        {videoUrl && <div className="editor-timeline-panel"><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><div className="editor-timeline-controls"><button type="button" aria-label="Zoom out timeline" onClick={() => onTimelineZoom(timelineViewport.zoom / 2)}>−</button><input aria-label="Timeline zoom" type="range" min="1" max="128" step="1" value={timelineViewport.zoom} onChange={(event) => onTimelineZoom(Number(event.target.value))} /><button type="button" aria-label="Zoom in timeline" onClick={() => onTimelineZoom(timelineViewport.zoom * 2)}>+</button><button type="button" onClick={() => onTimelineZoom(1)}>Fit project</button></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
+        {videoUrl && <div className="editor-timeline-panel"><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><div className="editor-timeline-controls"><button type="button" aria-label="Zoom out timeline" onClick={() => onTimelineZoom(timelineViewport.zoom / 2)}>−</button><input aria-label="Timeline zoom" type="range" min="1" max="128" step="1" value={timelineViewport.zoom} onChange={(event) => onTimelineZoom(Number(event.target.value))} /><button type="button" aria-label="Zoom in timeline" onClick={() => onTimelineZoom(timelineViewport.zoom * 2)}>+</button><button type="button" onClick={() => onTimelineZoom(1)}>Fit project</button><button type="button" onClick={onResetMediaTrim}>Reset trim</button></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
           <div className="editor-timeline-labels">{tracks.map((track) => <span className="editor-track-label" key={track.kind}>{track.label}</span>)}</div>
           <div ref={timelineRef} className="editor-timeline-content" onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove}>
             <div className="editor-timeline-ruler">{rulerTicks.map((tick) => <span key={tick} style={{ left: `${timeToViewportPosition(tick, timelineViewport) * 100}%` }}>{formatTimelineClock(tick, visibleDuration < 2_000)}</span>)}</div>
