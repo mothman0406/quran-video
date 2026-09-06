@@ -1,6 +1,29 @@
 # Status
 
-## Current milestone: Remove legacy Quran timing pipeline
+## Current milestone: Display detected FastConformer basmalah prelude
+
+Complete:
+
+- Extended the shared editable `CaptionSegment` model with explicit Quran
+  `contentKind` values. A `basmalah-prelude` has no fake ayah/verse key and
+  uses canonical Hafs Arabic from the Quran content module.
+- After valid FastConformer timing has been promoted, the editor creates that
+  segment only when its optional prelude is available, acoustically selected,
+  finite, positive-length, and strictly before the first canonical ayah. Ayah
+  timing remains unchanged; an acoustic pause is left caption-free.
+- A first canonical ayah that is itself the basmalah is recognized by canonical
+  content semantics, so no second prelude is generated. An absent selection
+  creates no placeholder.
+- Preview, timeline, manual timing editing, and export consume the same
+  segment. The timeline labels it “Basmalah”; it uses normal Quran caption
+  styling and has no ayah-number label. Debug now reports `DISPLAY_PRELUDE`.
+
+Verification: `npm test` (127 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. The build retains the existing
+non-fatal VAD ONNX Runtime dynamic-require warning; lint retains four existing
+unused legacy-timing helper warnings.
+
+## Previous milestone: Remove legacy Quran timing pipeline
 
 Complete:
 

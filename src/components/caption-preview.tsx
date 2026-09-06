@@ -110,8 +110,8 @@ function CaptionPreview({
   return <>
     {segments.map((segment) => {
       const item = content[segment.verseKeys[0]];
-      if (item?.status !== "ready") return null;
-      const translation = segment.translation ?? item.verse.translation;
+      if (segment.contentKind === "ayah" && item?.status !== "ready") return null;
+      const translation = segment.translation ?? (item?.status === "ready" ? item.verse.translation : null);
       const hasTranslation = typography.translationVisible && Boolean(translation);
       const background = captionBackgroundStyle(captionBackground);
       const arabicWidth = `${positioning.maxWidthPercent * 100}%`;
@@ -127,7 +127,7 @@ function CaptionPreview({
         <span className="caption-handle caption-handle-bottom-right" aria-hidden="true" />
       </> : null;
       return <div key={segment.id} ref={registerLayer(segment.id)} className="absolute inset-0 pointer-events-none" data-caption-segment={segment.id} data-caption-opacity="0" style={{ opacity: 0, visibility: "hidden", willChange: "opacity, filter" }}>
-        {showVerseNumber && <p className="pointer-events-none absolute left-1/2 top-[calc(50%-72px)] -translate-x-1/2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#f7d88b]" data-caption-verse-number>{captionVerseNumberLabel(segment)}</p>}
+        {showVerseNumber && segment.contentKind === "ayah" && <p className="pointer-events-none absolute left-1/2 top-[calc(50%-72px)] -translate-x-1/2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#f7d88b]" data-caption-verse-number>{captionVerseNumberLabel(segment)}</p>}
         <div
           className={objectClass("arabic")}
           data-caption-object="arabic"

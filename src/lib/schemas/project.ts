@@ -40,7 +40,9 @@ export const VerseAlignmentSchema = VerseKeySchema.extend({
 
 export const CaptionSegmentSchema = z.strictObject({
   id: z.string().min(1),
-  verseKeys: z.array(z.string().regex(/^\d{1,3}:\d{1,3}$/)).min(1),
+  /** Defaults preserve saved ayah captions created before prelude support. */
+  contentKind: z.enum(["ayah", "basmalah-prelude"]).default("ayah"),
+  verseKeys: z.array(z.string().regex(/^\d{1,3}:\d{1,3}$/)),
   startMs: PositiveNumber,
   endMs: PositiveNumber,
   arabic: z.string().min(1),
@@ -54,6 +56,13 @@ export const CaptionSegmentSchema = z.strictObject({
     end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["fastconformer", "word-audio-refined", "word-timestamp", "merged-token-word1", "bounded-recovery", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown", "forced-alignment", "derived"]) }),
     derived: z.boolean(),
   }).optional(),
+}).superRefine((segment, context) => {
+  if (segment.contentKind === "ayah" && segment.verseKeys.length === 0) {
+    context.addIssue({ code: "custom", path: ["verseKeys"], message: "Ayah captions require at least one canonical verse key." });
+  }
+  if (segment.contentKind === "basmalah-prelude" && segment.verseKeys.length > 0) {
+    context.addIssue({ code: "custom", path: ["verseKeys"], message: "Basmalah preludes must not claim canonical verse ownership." });
+  }
 });
 
 export const CaptionVisibilitySchema = z.strictObject({

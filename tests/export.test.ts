@@ -11,7 +11,7 @@ import { generateExportFileName } from "../src/lib/export/filename.ts";
 import { ExportCoordinator } from "../src/lib/export/lifecycle.ts";
 import { validateLocalExportInputs } from "../src/lib/export/validation.ts";
 
-const segment = { id: "93:1#1", verseKeys: ["93:1"], startMs: 1_000, endMs: 2_000, arabic: "وَالضُّحَى", translation: "By the morning brightness", transliteration: "Wa ad-duha", wordStart: 0, wordEnd: 1, wordCount: 1, timingEvidence: { start: { timestampMs: 1_000, source: "direct-asr-word" as const }, end: { timestampMs: 2_000, source: "chunk-text-alignment" as const }, derived: false } };
+const segment = { id: "93:1#1", contentKind: "ayah" as const, verseKeys: ["93:1"], startMs: 1_000, endMs: 2_000, arabic: "وَالضُّحَى", translation: "By the morning brightness", transliteration: "Wa ad-duha", wordStart: 0, wordEnd: 1, wordCount: 1, timingEvidence: { start: { timestampMs: 1_000, source: "direct-asr-word" as const }, end: { timestampMs: 2_000, source: "chunk-text-alignment" as const }, derived: false } };
 
 function config(overrides = {}) { return createLocalExportConfiguration({ format: DEFAULT_PROJECT_FORMAT, segments: [segment], typography: DEFAULT_TYPOGRAPHY, captionBackground: DEFAULT_CAPTION_BACKGROUND, positioning: DEFAULT_CAPTION_POSITIONING, transitionSettings: DEFAULT_TRANSITION_SETTINGS, showVerseNumber: false, ...overrides }); }
 
@@ -41,6 +41,14 @@ test("export reuses the preview transition interpolation without a second timing
   const value = config();
   assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings), captionVisualStatesAtTime([segment], 1_112, DEFAULT_TRANSITION_SETTINGS));
   assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings).map(({ opacity, blurPx }) => ({ opacity, blurPx })), [{ opacity: 112 / 225, blurPx: 0 }]);
+});
+
+test("export snapshots preserve the exact basmalah display segment used by preview and timeline", () => {
+  const prelude = { ...segment, id: "basmalah-prelude#1", contentKind: "basmalah-prelude" as const, verseKeys: [], startMs: 500, endMs: 900, arabic: "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", translation: null, transliteration: null };
+  const value = config({ segments: [prelude] });
+  assert.deepEqual(value.segments[0], prelude);
+  assert.equal(captionVisualStatesAtTime(value.segments, 700, value.transitionSettings)[0]?.segment.id, prelude.id);
+  assert.equal(captionVisualStatesAtTime(value.segments, 900, value.transitionSettings).length, 0);
 });
 
 test("deterministic frame timeline uses timestamps rather than wall-clock playback", () => {

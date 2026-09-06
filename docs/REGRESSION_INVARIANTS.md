@@ -24,6 +24,11 @@ separate approved milestone intentionally changes the display contract.
   next ayah's start; no automatic gap, overlap, or one-millisecond repair is
   allowed after Quran onset. Optional prelude words never own canonical ayah
   one's start.
+- An acoustically selected optional basmalah is an explicit
+  `basmalah-prelude` display segment with no canonical verse key. Its interval
+  is exactly FastConformer's selected prelude interval; ayah one retains its
+  canonical onset, and an absent or already-canonical basmalah creates no
+  additional display segment.
 - A pause may refine a known canonical word boundary only. It never determines
   Quran identity and cannot introduce an intra-ayah caption split.
 - Forced-alignment output is deterministic for equal audio, canonical target,

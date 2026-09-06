@@ -1,4 +1,4 @@
-import { quranDisplayText } from "../quran/content.ts";
+import { CANONICAL_BASMALAH_ARABIC, quranDisplayText } from "../quran/content.ts";
 import type { QuranVerseContent } from "../quran/content.ts";
 import type { VerseAlignment } from "./recognition.ts";
 import type { VerseBoundary } from "../recognition/core.ts";
@@ -15,6 +15,9 @@ export type CaptionPresentationSettings = { showVerseNumber: boolean };
 export const DEFAULT_CAPTION_PRESENTATION: CaptionPresentationSettings = {
   showVerseNumber: false,
 };
+
+/** Canonical Hafs display text for the acoustically selected opening prelude. */
+export { CANONICAL_BASMALAH_ARABIC } from "../quran/content.ts";
 
 const DEFAULT_VERTICAL_CAPTION_POSITIONING: CaptionPositioning = {
   anchor: "bottom",
@@ -265,9 +268,8 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
 // more specific two-stage evidence values.
 export type CaptionTimingSource = "fastconformer" | "word-audio-refined" | "word-timestamp" | "merged-token-word1" | "bounded-recovery" | "token-interpolated" | "chunk-interpolated" | "low-confidence-fallback" | "direct-asr-word" | "chunk-text-alignment" | "interpolation" | "interpolated" | "low-confidence" | "micro-asr" | "pcm-refined" | "chunk-coarse" | "unknown" | "forced-alignment" | "derived";
 
-export type CaptionSegment = {
+type CaptionSegmentBase = {
   id: string;
-  verseKeys: string[];
   startMs: number;
   endMs: number;
   arabic: string;
@@ -281,6 +283,20 @@ export type CaptionSegment = {
     end: { timestampMs: number; source: CaptionTimingSource };
     derived: boolean;
   };
+};
+
+/** Quran content is either canonically owned by ayat or an acoustic prelude. */
+export type CaptionSegment = CaptionSegmentBase & {
+  contentKind: "ayah" | "basmalah-prelude";
+  /** Empty only for Quran preludes, which deliberately have no ayah owner. */
+  verseKeys: string[];
+};
+
+export type OptionalPreludeTiming = {
+  available: boolean;
+  selected: "present" | "absent";
+  startMs: number | null;
+  endMs: number | null;
 };
 
 export type CaptionTimingPatch = { startMs?: number; endMs?: number };
@@ -379,6 +395,7 @@ export function createCaptionSegments(
     if (!verseWords.length) return [];
     return [{
       id: `${alignment.verseKey}#1`,
+      contentKind: "ayah" as const,
       verseKeys: [alignment.verseKey],
       startMs: alignment.startMs,
       endMs: alignment.endMs,
@@ -398,13 +415,74 @@ export function createCaptionSegments(
   return continuousDisplayTiming(generated);
 }
 
+function canonicalArabicForComparison(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/[\u0610-\u061a\u064b-\u065f\u0670\u06d6-\u06ed]/gu, "")
+    .replace(/[ۖۗۚۛۜۙۘ۝۞]/gu, "")
+    .replace(/[ٱأإآ]/gu, "ا")
+    .replace(/ى/gu, "ي")
+    .replace(/ـ/gu, "")
+    .replace(/[^\u0621-\u063a\u0641-\u064a]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function isCanonicalBasmalah(verse: QuranVerseContent): boolean {
+  return canonicalArabicForComparison(quranDisplayText(verse))
+    === canonicalArabicForComparison(CANONICAL_BASMALAH_ARABIC);
+}
+
+function createBasmalahPreludeSegment(
+  optionalPrelude: OptionalPreludeTiming | undefined,
+  firstCanonicalSegment: CaptionSegment | undefined,
+  content: Readonly<Record<string, QuranVerseContent | undefined>>,
+): CaptionSegment | null {
+  const startMs = optionalPrelude?.startMs;
+  const endMs = optionalPrelude?.endMs;
+  const firstVerseKey = firstCanonicalSegment?.contentKind === "ayah" ? firstCanonicalSegment.verseKeys[0] : undefined;
+  const firstVerse = firstVerseKey ? content[firstVerseKey] : undefined;
+  if (!optionalPrelude?.available
+    || optionalPrelude.selected !== "present"
+    || typeof startMs !== "number"
+    || typeof endMs !== "number"
+    || !Number.isFinite(startMs)
+    || !Number.isFinite(endMs)
+    || startMs >= endMs
+    || !firstCanonicalSegment
+    || endMs > firstCanonicalSegment.startMs
+    || !firstVerse
+    || isCanonicalBasmalah(firstVerse)) return null;
+
+  const wordCount = words(CANONICAL_BASMALAH_ARABIC).length;
+  return {
+    id: "basmalah-prelude#1",
+    contentKind: "basmalah-prelude",
+    verseKeys: [],
+    startMs,
+    endMs,
+    arabic: CANONICAL_BASMALAH_ARABIC,
+    translation: null,
+    transliteration: null,
+    wordStart: 0,
+    wordEnd: wordCount,
+    wordCount,
+    timingEvidence: {
+      start: { timestampMs: startMs, source: "fastconformer" },
+      end: { timestampMs: endMs, source: "fastconformer" },
+      derived: false,
+    },
+  };
+}
+
 /** Builds the editor's single generated display array directly from the pure
  * resolver output. VerseAlignment-shaped values are diagnostics only. */
 export function createCaptionSegmentsFromVerseBoundaries(
   boundaries: readonly VerseBoundary[],
   content: Readonly<Record<string, QuranVerseContent | undefined>>,
+  optionalPrelude?: OptionalPreludeTiming,
 ): CaptionSegment[] {
-  return createCaptionSegments(boundaries.map((boundary) => {
+  const ayahSegments = createCaptionSegments(boundaries.map((boundary) => {
     const [surahNumber, ayahNumber] = boundary.verseKey.split(":").map(Number);
     return {
       verseKey: boundary.verseKey,
@@ -420,6 +498,8 @@ export function createCaptionSegmentsFromVerseBoundaries(
       },
     };
   }), content);
+  const prelude = createBasmalahPreludeSegment(optionalPrelude, ayahSegments[0], content);
+  return prelude ? [prelude, ...ayahSegments] : ayahSegments;
 }
 
 export type GeneratedCaptionBoundaryTrace = {
@@ -462,6 +542,7 @@ export function assertDerivedTimingMatchesCaptions(
 }
 
 export function splitCaptionSegment(segment: CaptionSegment, boundary: number): CaptionSegment[] {
+  if (segment.contentKind !== "ayah") return [segment];
   const verseWords = words(segment.arabic);
   if (!Number.isInteger(boundary) || boundary <= 0 || boundary >= verseWords.length) return [segment];
   const duration = segment.endMs - segment.startMs;
@@ -486,6 +567,7 @@ export function splitCaptionSegment(segment: CaptionSegment, boundary: number): 
 }
 
 function mergeSegments(left: CaptionSegment, right: CaptionSegment): CaptionSegment {
+  if (left.contentKind !== "ayah" || right.contentKind !== "ayah") throw new Error("Only ayah caption segments can be merged.");
   return {
     ...left,
     id: `${left.id}+${right.id}`,
@@ -506,10 +588,16 @@ function mergeSegments(left: CaptionSegment, right: CaptionSegment): CaptionSegm
 
 export function mergeCaptionWithPrevious(segments: readonly CaptionSegment[], index: number): CaptionSegment[] {
   if (index <= 0 || index >= segments.length) return [...segments];
+  if (segments[index - 1]?.contentKind !== "ayah" || segments[index]?.contentKind !== "ayah") return [...segments];
   return [...segments.slice(0, index - 1), mergeSegments(segments[index - 1], segments[index]), ...segments.slice(index + 1)];
 }
 
 export function mergeCaptionWithNext(segments: readonly CaptionSegment[], index: number): CaptionSegment[] {
   if (index < 0 || index >= segments.length - 1) return [...segments];
+  if (segments[index]?.contentKind !== "ayah" || segments[index + 1]?.contentKind !== "ayah") return [...segments];
   return [...segments.slice(0, index), mergeSegments(segments[index], segments[index + 1]), ...segments.slice(index + 2)];
+}
+
+export function captionSegmentLabel(segment: Pick<CaptionSegment, "contentKind" | "verseKeys">): string {
+  return segment.contentKind === "basmalah-prelude" ? "Basmalah" : segment.verseKeys[0] ?? "Ayah";
 }

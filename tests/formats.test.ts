@@ -61,11 +61,29 @@ test("safe-area configuration is centralized for every project format", () => {
 
 test("format-only changes do not mutate recognition or caption timing data", () => {
   const alignment = { verseKey: "93:1", startMs: 100, endMs: 1_100 };
-  const segment = { id: "caption", verseKeys: ["93:1"], startMs: 100, endMs: 1_100, arabic: "وَالضُّحَى", translation: null, transliteration: null, wordStart: 0, wordEnd: 1, wordCount: 1 };
+  const segment = { id: "caption", contentKind: "ayah" as const, verseKeys: ["93:1"], startMs: 100, endMs: 1_100, arabic: "وَالضُّحَى", translation: null, transliteration: null, wordStart: 0, wordEnd: 1, wordCount: 1 };
   const alignmentSnapshot = { ...alignment };
   const segmentSnapshot = { ...segment, verseKeys: [...segment.verseKeys] };
   clampCaptionPositioning({ ...DEFAULT_CAPTION_POSITIONING, x: 0.9 }, PROJECT_FORMATS.square);
   assert.deepEqual(alignment, alignmentSnapshot);
   assert.deepEqual(segment, segmentSnapshot);
   assert.deepEqual(CaptionSegmentSchema.parse(segment), segment);
+});
+
+test("a basmalah prelude persists without a fake canonical verse key", () => {
+  const prelude = {
+    id: "basmalah-prelude#1",
+    contentKind: "basmalah-prelude",
+    verseKeys: [],
+    startMs: 100,
+    endMs: 900,
+    arabic: "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ",
+    translation: null,
+    transliteration: null,
+    wordStart: 0,
+    wordEnd: 4,
+    wordCount: 4,
+  };
+  assert.deepEqual(CaptionSegmentSchema.parse(prelude), prelude);
+  assert.throws(() => CaptionSegmentSchema.parse({ ...prelude, verseKeys: ["1:1"] }));
 });

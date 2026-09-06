@@ -1,6 +1,8 @@
 export const DEFAULT_TRANSLATION_ID = 20;
 export const TRANSLITERATION_ID = 57;
 export const DEFAULT_TRANSLATION_KEY = "english_saheeh";
+/** Canonical Hafs display representation for a selected opening basmalah. */
+export const CANONICAL_BASMALAH_ARABIC = "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ";
 
 export const quranScriptValues = [
   "uthmani",

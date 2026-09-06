@@ -779,7 +779,12 @@ export default function Home() {
       );
       // One generated display authority: pure boundaries -> CaptionSegment[].
       // VerseAlignment and forced alignment remain diagnostics only.
-      const nextSegments = createCaptionSegmentsFromVerseBoundaries(analysis.verseBoundaries, verseContent);
+      const nextSegments = createCaptionSegmentsFromVerseBoundaries(
+        analysis.verseBoundaries,
+        verseContent,
+        fastConformerAlignment?.optionalPrelude,
+      );
+      const displayPrelude = nextSegments.find((segment) => segment.contentKind === "basmalah-prelude") ?? null;
       setAlignments(next);
       setSegments(nextSegments);
       alignmentDebug.current = {
@@ -820,11 +825,24 @@ export default function Home() {
         })),
         AUTHORITATIVE_CAPTIONS: nextSegments.map((segment) => ({
           id: segment.id,
+          contentKind: segment.contentKind,
           verseKeys: segment.verseKeys,
+          arabic: segment.arabic,
           startMs: segment.startMs,
           endMs: segment.endMs,
           revision: `${segment.id}:${segment.startMs}-${segment.endMs}`,
         })),
+        DISPLAY_PRELUDE: {
+          present: Boolean(displayPrelude),
+          type: displayPrelude ? "basmalah" : null,
+          startMs: displayPrelude?.startMs ?? null,
+          endMs: displayPrelude?.endMs ?? null,
+          text: displayPrelude?.arabic ?? null,
+          manuallyEdited: displayPrelude
+            ? displayPrelude.startMs !== displayPrelude.timingEvidence.start.timestampMs
+              || displayPrelude.endMs !== displayPrelude.timingEvidence.end.timestampMs
+            : false,
+        },
         FASTCONFORMER_ALIGNMENT: fastConformerAlignment && {
           model: FASTCONFORMER_MODEL,
           license: FASTCONFORMER_MODEL_LICENSE,

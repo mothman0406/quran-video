@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { captionBackgroundStyle, captionOpacityAtTime, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { CANONICAL_BASMALAH_ARABIC, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -80,13 +80,62 @@ test("automatic editor integration retains the selected 6:76 -> 6:77 boundary th
   const verses = {
     "6:76": { ...content["93:1"], verseKey: "6:76" },
     "6:77": { ...content["93:1"], verseKey: "6:77" },
-  } as Record<string, QuranVerseContent>;
+  } as unknown as Record<string, QuranVerseContent>;
 
   // This is the production path: resolver -> CaptionSegments -> shared selector.
   const editorSegments = createCaptionSegmentsFromVerseBoundaries(boundaries, verses);
   assert.deepEqual(editorSegments.map((segment) => [segment.verseKeys[0], segment.startMs, segment.endMs]), [["6:76", 32_000, boundaryMs], ["6:77", boundaryMs, 66_000]]);
   assert.equal(getActiveCaptionSegment(editorSegments, boundaryMs - 1)?.verseKeys[0], "6:76");
   assert.equal(getActiveCaptionSegment(editorSegments, boundaryMs)?.verseKeys[0], "6:77");
+});
+
+test("a selected acoustic basmalah becomes the first shared display segment without moving ayah one", () => {
+  const boundaries = [
+    { verseKey: "93:1", startMs: 1_700, endMs: 2_800, evidence: { source: "fastconformer" as const, selectedWord: null, candidates: [] } },
+    { verseKey: "93:2", startMs: 2_800, endMs: 3_700, evidence: { source: "fastconformer" as const, selectedWord: null, candidates: [] } },
+  ];
+  const verses = {
+    "93:1": content["93:1"],
+    "93:2": { ...content["93:1"], verseKey: "93:2", arabic: { uthmani: "وَاللَّيْلِ إِذَا سَجَى" } },
+  } as unknown as Record<string, QuranVerseContent>;
+  const segments = createCaptionSegmentsFromVerseBoundaries(boundaries, verses, {
+    available: true, selected: "present", startMs: 1_000, endMs: 1_600,
+  });
+
+  assert.deepEqual(segments.map((segment) => segment.contentKind), ["basmalah-prelude", "ayah", "ayah"]);
+  assert.deepEqual(segments[0]?.verseKeys, []);
+  assert.equal(segments[0]?.arabic, CANONICAL_BASMALAH_ARABIC);
+  assert.deepEqual([segments[0]?.startMs, segments[0]?.endMs], [1_000, 1_600]);
+  assert.deepEqual([segments[1]?.startMs, segments[1]?.endMs], [1_700, 2_800], "first ayah timing remains FastConformer timing");
+  assert.equal(captionSegmentLabel(segments[0]!), "Basmalah", "the timeline uses a non-ayah label");
+  assert.equal(getActiveCaptionSegment(segments, 1_000)?.contentKind, "basmalah-prelude");
+  assert.equal(captionVisualStatesAtTime(segments, 1_200)[0]?.segment.id, segments[0]?.id, "preview uses the same prelude segment");
+  assert.equal(getActiveCaptionSegment(segments, 1_600), null, "the acoustic pause remains caption-free");
+  assert.equal(getActiveCaptionSegment(segments, 1_700)?.verseKeys[0], "93:1");
+
+  const edited = updateCaptionSegmentTiming(segments, segments[0]!.id, { startMs: 1_050, endMs: 1_550 }, 4_000);
+  assert.deepEqual([edited[0]?.startMs, edited[0]?.endMs], [1_050, 1_550]);
+  assert.deepEqual([edited[1]?.startMs, edited[1]?.endMs], [1_700, 2_800], "manual prelude edits do not alter ayah one");
+  assert.deepEqual(resetCaptionSegmentTiming(edited, edited[0]!.id, 4_000).slice(0, 2).map((segment) => [segment.startMs, segment.endMs]), [[1_000, 1_600], [1_700, 2_800]]);
+});
+
+test("an absent or canonical basmalah creates no optional display placeholder", () => {
+  const boundary = [{ verseKey: "93:1", startMs: 1_700, endMs: 2_800, evidence: { source: "fastconformer" as const, selectedWord: null, candidates: [] } }];
+  const absent = createCaptionSegmentsFromVerseBoundaries(boundary, content, {
+    available: true, selected: "absent", startMs: null, endMs: null,
+  });
+  assert.deepEqual(absent.map((segment) => segment.contentKind), ["ayah"]);
+  assert.equal(absent[0]?.startMs, 1_700);
+
+  const canonicalBasmalah = {
+    "1:1": { ...content["93:1"], verseKey: "1:1", arabic: { uthmani: "بِسْمِ ٱللَّهِ ٱلرَّحْمَـٰنِ ٱلرَّحِيمِ" } },
+  } as unknown as Record<string, QuranVerseContent>;
+  const nonDuplicated = createCaptionSegmentsFromVerseBoundaries(
+    [{ ...boundary[0], verseKey: "1:1" }],
+    canonicalBasmalah,
+    { available: true, selected: "present", startMs: 1_000, endMs: 1_600 },
+  );
+  assert.deepEqual(nonDuplicated.map((segment) => [segment.contentKind, segment.verseKeys]), [["ayah", ["1:1"]]]);
 });
 
 test("ASR alignment gaps never remove canonical words from an ayah caption", () => {
