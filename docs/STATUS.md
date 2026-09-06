@@ -1,6 +1,35 @@
 # Status
 
-## Current milestone: Precision caption-boundary editing
+## Current milestone: Timeline zoom, navigation, and local waveform
+
+Complete:
+
+- Added one editor-only `TimelineViewport` (`zoom`, `visibleStartMs`, and
+  `visibleEndMs`) shared by the ruler, Text / Video / Audio blocks, playhead,
+  seek/drag pointer conversion, caption snap geometry, and waveform.
+  Zoom is bounded from fit-project (1x) through 128x precision, anchors on a
+  visible playhead, clamps at source bounds, supports a compact zoom control,
+  a Fit project reset, and one shared horizontal pan control. Playback advances
+  the viewport only when the playhead reaches the trailing region; caption-edge
+  drags never auto-pan it.
+- Ruler ticks now choose a compact nice interval from 10 ms through 10 min for
+  the visible window and show millisecond labels for sub-two-second windows.
+  All source clips and caption intervals are visually clipped rather than
+  changing their authoritative times.
+- Added entirely local asynchronous Web Audio decoding for both audio-only and
+  video sources. PCM is immediately reduced to an in-memory 8,192 min/max peak
+  cache; rendering downsamples only the current viewport. It never uploads,
+  persists source PCM, blocks import/recognition/playback, or alters Quran
+  recognition/timing. The next planned milestone is media trimming.
+- Preserved stationary-playhead edge editing, the 8 CSS-pixel screen-space snap
+  (now evaluated through the visible window), contiguous-boundary atomic edits,
+  and the 100 ms minimum duration.
+
+Verification: targeted timeline/waveform regressions and `npx tsc --noEmit`
+pass. Full project checks are pending. No browser media fixture is present in
+this workspace, so audio-only and video visual validation remain pending.
+
+## Previous milestone: Precision caption-boundary editing
 
 Complete:
 

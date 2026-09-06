@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getActiveCaptionSegment, resizeCaptionBoundary } from "../src/lib/editor/captions.ts";
-import { CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX, mediaSourceFromFile, projectDurationMs, snapCaptionBoundaryToPlayhead, timeToTimelinePosition, timelineContentPosition, timelinePositionToTime, timelineRulerTicks, timelineTracks } from "../src/lib/editor/media.ts";
+import { CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX, createTimelineViewport, mediaSourceFromFile, panTimelineViewport, projectDurationMs, snapCaptionBoundaryToPlayhead, timeToTimelinePosition, timelineContentPosition, timelineItemGeometry, timelinePositionToTime, timelineRulerTicks, timelineTracks, timeToViewportPosition, viewportPositionToTime, zoomTimelineViewport } from "../src/lib/editor/media.ts";
 import { MediaPlaybackClock } from "../src/lib/editor/playback-clock.ts";
 import { loadSavedProject } from "../src/lib/project-storage.ts";
+import { waveformPeaksForViewport, waveformPeaksFromPcm } from "../src/lib/editor/waveform.ts";
 
 const segment = { id: "18:57.1", contentKind: "ayah" as const, verseKeys: ["18:57"], startMs: 1_000, endMs: 3_000, arabic: "قُلْ", translation: null, transliteration: null, wordStart: 0, wordEnd: 1, wordCount: 1, timingEvidence: { start: { timestampMs: 1_000, source: "fastconformer" as const }, end: { timestampMs: 3_000, source: "fastconformer" as const }, derived: false } };
 
@@ -64,7 +65,7 @@ test("playhead, ruler, blocks, and seeking use the timed-content origin in audio
   const videoSource = mediaSourceFromFile({ name: "recitation.mp4", size: 4, type: "video/mp4" }, "video", { durationMs });
   const tracks = timelineTracks(videoSource, [{ ...segment, startMs: 0 }]);
   assert.deepEqual(tracks.map((track) => xForTime(track.items[0]?.startMs ?? 0)), [contentLeftPx, contentLeftPx, contentLeftPx], "Text, Video, and Audio tracks share the content origin");
-  assert.equal(xForTime(timelineRulerTicks(durationMs, contentWidthPx)[0]!), xForTime(0), "the zero ruler tick shares the playhead origin");
+  assert.equal(xForTime(timelineRulerTicks(createTimelineViewport(durationMs), contentWidthPx)[0]!), xForTime(0), "the zero ruler tick shares the playhead origin");
   assert.equal(timelineContentPosition(contentLeftPx, contentLeftPx, contentWidthPx), 0, "the first content pixel seeks to zero");
   assert.equal(timelineContentPosition(contentLeftPx + contentWidthPx / 2, contentLeftPx, contentWidthPx), .5, "the content midpoint seeks to half time");
   assert.equal(timelineContentPosition(contentLeftPx + contentWidthPx, contentLeftPx, contentWidthPx), 1, "the content edge seeks to duration");
@@ -75,6 +76,32 @@ test("playhead, ruler, blocks, and seeking use the timed-content origin in audio
     const source = mediaSourceFromFile({ name: `recitation.${kind === "audio" ? "mp3" : "mp4"}`, size: 4, type: kind === "audio" ? "audio/mpeg" : "video/mp4" }, kind, { durationMs });
     assert.equal(timeToTimelinePosition(projectDurationMs(source) / 2, projectDurationMs(source)), .5, `${kind} uses the same timed-content geometry`);
   }
+});
+
+test("zoomed viewport maps all timeline geometry through one visible time window", () => {
+  const viewport = panTimelineViewport(createTimelineViewport(60_000, 6), 60_000, 20_000);
+  assert.deepEqual([viewport.visibleStartMs, viewport.visibleEndMs], [20_000, 30_000]);
+  assert.equal(timeToViewportPosition(20_000, viewport), 0);
+  assert.equal(timeToViewportPosition(25_000, viewport), .5);
+  assert.equal(timeToViewportPosition(30_000, viewport), 1);
+  assert.equal(viewportPositionToTime(.5, viewport), 25_000, "zoomed midpoint seeks to its absolute source time");
+  assert.deepEqual(timelineItemGeometry(19_000, 21_000, viewport), { left: 0, width: .1 }, "caption/video/audio clips at the same viewport edge");
+  assert.ok(timelineRulerTicks(viewport, 800).every((tick) => tick >= 20_000 && tick <= 30_000));
+  const anchored = zoomTimelineViewport(viewport, 60_000, 12, 25_000);
+  assert.equal(timeToViewportPosition(25_000, anchored), .5, "zoom retains the playhead position when it is visible");
+});
+
+test("zoomed screen-space playhead snapping still resolves to the exact stationary time", () => {
+  const viewport = panTimelineViewport(createTimelineViewport(60_000, 6), 60_000, 20_000);
+  const playheadX = 50 + timeToViewportPosition(22_150, viewport) * 800;
+  assert.deepEqual(snapCaptionBoundaryToPlayhead(22_000, playheadX + 8, 50, 800, 22_150, 10_000, 20_000), { timeMs: 22_150, snapped: true });
+});
+
+test("waveform envelopes retain local PCM amplitude and choose the visible source subsection", () => {
+  const peaks = waveformPeaksFromPcm([new Float32Array([0, .25, -.75, .5, 0, .125, -.125, .875])], 4);
+  assert.deepEqual(peaks, [{ min: 0, max: .25 }, { min: -.75, max: .5 }, { min: 0, max: .125 }, { min: -.125, max: .875 }]);
+  const viewport = panTimelineViewport(createTimelineViewport(8_000, 2), 8_000, 4_000);
+  assert.deepEqual(waveformPeaksForViewport({ peaks, durationMs: 8_000 }, viewport, 2), [{ min: 0, max: .125 }, { min: -.125, max: .875 }]);
 });
 
 test("audio playback samples the media clock on animation frames instead of relying on timeupdate", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ChangeEvent, type PointerEvent, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useState, type ChangeEvent, type PointerEvent, type SyntheticEvent } from "react";
 import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "@/lib/editor/captions";
 import type { ProjectFormat, ProjectFormatPreset } from "@/lib/schemas/project";
 import type { ExportQuality } from "@/lib/export/quality";
@@ -16,7 +16,8 @@ import AccountPanel from "@/components/account-panel";
 import { DEFAULT_SOURCE_VIDEO_FIT, PROJECT_FORMATS, projectFormatDefinition } from "@/lib/editor/formats";
 import { BUILT_IN_STYLES, type BuiltInStyleName, type CaptionStyle } from "@/lib/editor/styles";
 import { quranFontDefinitions } from "@/lib/quran/content";
-import { formatTimelineClock, projectDurationMs, timeToTimelinePosition, timelineRulerTicks, timelineTracks, type MediaSource } from "@/lib/editor/media";
+import { formatTimelineClock, projectDurationMs, timeToViewportPosition, timelineItemGeometry, timelineRulerTicks, timelineTracks, type MediaSource, type TimelineItem, type TimelineViewport } from "@/lib/editor/media";
+import { waveformPeaksForViewport, type WaveformData } from "@/lib/editor/waveform";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage = "idle" | "preparing" | "detecting-speech" | "loading-model" | "transcribing" | "matching" | "captions" | "complete" | "error";
@@ -66,6 +67,8 @@ type EditorWorkspaceProps = {
   errorMessage: string | null;
   timingWarning: string | null;
   timelineTooltip: { label: string; position: number } | null;
+  timelineViewport: TimelineViewport;
+  waveformData: WaveformData | null;
   showCorrection: boolean;
   surah: number;
   startAyah: number;
@@ -94,6 +97,8 @@ type EditorWorkspaceProps = {
   onTimelinePointerMove: (event: PointerEvent<HTMLElement>) => void;
   onEdgeDown: (event: PointerEvent<HTMLElement>, edge: "start" | "end", segment: CaptionSegment) => void;
   onEdgeUp: () => void;
+  onTimelineZoom: (zoom: number) => void;
+  onTimelinePan: (visibleStartMs: number) => void;
   onChangeFormat: (preset: ProjectFormatPreset) => void;
   onDetect: () => void;
   onCopyAlignmentDebug: () => void;
@@ -155,10 +160,10 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     selectedObject, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, showVerseNumber, showSafeArea, projectName, dirty, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage, timingWarning,
-    showCorrection, surah, startAyah, endAyah, entitlements, selectedFormatDefinition, timelineTooltip,
+    showCorrection, surah, startAyah, endAyah, entitlements, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
     onProjectNameChange, onVideoSelect, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown,
-    onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onChangeFormat, onDetect, onCopyAlignmentDebug,
+    onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
     onCorrectDetection, onToggleCorrection, onClearVideo, onSaveProject, onSaveToAccount, onOpenProjects,
     onOpenCloudProjects, onSessionChange, onPlanChange, onDiscard, onNewProject, onExportOpen, onExport, onCancelExport, onDownloadExport,
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange,
@@ -167,9 +172,10 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     onMergeNext, onResetTiming, onResetAllTiming,
   } = props;
   const durationMs = projectDurationMs(mediaSource);
-  const maxTime = Math.max(1, durationMs);
   const tracks = timelineTracks(mediaSource, segments);
-  const rulerTicks = timelineRulerTicks(durationMs, timelineWidth);
+  const rulerTicks = timelineRulerTicks(timelineViewport, timelineWidth);
+  const waveform = useMemo(() => waveformPeaksForViewport(waveformData, timelineViewport, Math.max(96, Math.floor(timelineWidth))), [timelineViewport, timelineWidth, waveformData]);
+  const visibleDuration = Math.max(1, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs);
   useEffect(() => {
     const node = timelineRef.current;
     if (!node) return;
@@ -181,6 +187,15 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   }, [timelineRef, videoUrl]);
   const objectLabel = selectedObject === "arabic" ? "Arabic" : selectedObject === "translation" ? "Translation" : null;
   const updateObjectTypography = <K extends keyof Typography>(key: K, value: Typography[K]) => onTypographyChange(key, value);
+  const renderTimelineItem = (item: TimelineItem) => {
+    const geometry = timelineItemGeometry(item.startMs, item.endMs, timelineViewport);
+    if (!geometry) return null;
+    const style = { width: `${Math.max(1, geometry.width * 100)}%`, left: `${geometry.left * 100}%` };
+    if (!item.captionSegmentId) return <div key={item.id} className="editor-media-block" style={style}><span>{item.label}</span></div>;
+    const segment = segments.find((value) => value.id === item.captionSegmentId);
+    if (!segment) return null;
+    return <button key={item.id} type="button" aria-label={`Caption ${captionSegmentLabel(segment)}`} onPointerDown={(event) => onSegmentPointerDown(event, segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.stopPropagation(); onSelectSegment(segment); }} className={`editor-caption-block ${segment.id === selectedSegmentId ? "is-selected" : ""} ${getActiveCaptionSegment(segments, currentTimeMs)?.id === segment.id ? "is-active" : ""}`} style={style}><span>{item.label}</span><span className="editor-caption-block-range">{(item.startMs / 1000).toFixed(2)}–{(item.endMs / 1000).toFixed(2)}s</span><span className="editor-timing-handle editor-timing-handle-start" aria-label={`Resize ${captionSegmentLabel(segment)} start`} onPointerDown={(event) => onEdgeDown(event, "start", segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /><span className="editor-timing-handle editor-timing-handle-end" aria-label={`Resize ${captionSegmentLabel(segment)} end`} onPointerDown={(event) => onEdgeDown(event, "end", segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /></button>;
+  };
 
   return <div className="editor-shell">
     <header className="editor-topbar">
@@ -237,15 +252,15 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
         </div>
         <div className="editor-playback-row"><span className="editor-playback-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(durationMs / 1000)}</span><span className="editor-playback-hint">Space to play · ← → to nudge</span></div>
-        {videoUrl && <div className="editor-timeline-panel"><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
+        {videoUrl && <div className="editor-timeline-panel"><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><div className="editor-timeline-controls"><button type="button" aria-label="Zoom out timeline" onClick={() => onTimelineZoom(timelineViewport.zoom / 2)}>−</button><input aria-label="Timeline zoom" type="range" min="1" max="128" step="1" value={timelineViewport.zoom} onChange={(event) => onTimelineZoom(Number(event.target.value))} /><button type="button" aria-label="Zoom in timeline" onClick={() => onTimelineZoom(timelineViewport.zoom * 2)}>+</button><button type="button" onClick={() => onTimelineZoom(1)}>Fit project</button></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
           <div className="editor-timeline-labels">{tracks.map((track) => <span className="editor-track-label" key={track.kind}>{track.label}</span>)}</div>
           <div ref={timelineRef} className="editor-timeline-content" onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove}>
-            <div className="editor-timeline-ruler">{rulerTicks.map((tick) => <span key={tick} style={{ left: `${timeToTimelinePosition(tick, maxTime) * 100}%` }}>{formatTimelineClock(tick)}</span>)}</div>
-            <button className="editor-playhead" aria-label="Drag playhead to seek" type="button" onPointerDown={onPlayheadPointerDown} style={{ left: `${timeToTimelinePosition(currentTimeMs, maxTime) * 100}%` }} />
-            <div className="editor-timeline-tracks">{tracks.map((track) => <div className={`editor-timeline-track editor-timeline-track-${track.kind}`} key={track.kind}>{track.items.map((item) => item.captionSegmentId ? (() => { const segment = segments.find((value) => value.id === item.captionSegmentId)!; return <button key={item.id} type="button" aria-label={`Caption ${captionSegmentLabel(segment)}`} onPointerDown={(event) => onSegmentPointerDown(event, segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.stopPropagation(); onSelectSegment(segment); }} className={`editor-caption-block ${segment.id === selectedSegmentId ? "is-selected" : ""} ${getActiveCaptionSegment(segments, currentTimeMs)?.id === segment.id ? "is-active" : ""}`} style={{ width: `${Math.max(1, timeToTimelinePosition(item.endMs - item.startMs, maxTime) * 100)}%`, left: `${timeToTimelinePosition(item.startMs, maxTime) * 100}%` }}><span>{item.label}</span><span className="editor-caption-block-range">{(item.startMs / 1000).toFixed(2)}–{(item.endMs / 1000).toFixed(2)}s</span><span className="editor-timing-handle editor-timing-handle-start" aria-label={`Resize ${captionSegmentLabel(segment)} start`} onPointerDown={(event) => onEdgeDown(event, "start", segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /><span className="editor-timing-handle editor-timing-handle-end" aria-label={`Resize ${captionSegmentLabel(segment)} end`} onPointerDown={(event) => onEdgeDown(event, "end", segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /></button>; })() : <div key={item.id} className="editor-media-block" style={{ width: `${timeToTimelinePosition(item.endMs - item.startMs, maxTime) * 100}%`, left: `${timeToTimelinePosition(item.startMs, maxTime) * 100}%` }}><span>{item.label}</span></div>)}</div>)}</div>
-            {timelineTooltip && <div className="editor-timeline-tooltip" role="status" style={{ left: `${timelineTooltip.position * 100}%` }}>{timelineTooltip.label}</div>}
+            <div className="editor-timeline-ruler">{rulerTicks.map((tick) => <span key={tick} style={{ left: `${timeToViewportPosition(tick, timelineViewport) * 100}%` }}>{formatTimelineClock(tick, visibleDuration < 2_000)}</span>)}</div>
+            {currentTimeMs >= timelineViewport.visibleStartMs && currentTimeMs <= timelineViewport.visibleEndMs && <button className="editor-playhead" aria-label="Drag playhead to seek" type="button" onPointerDown={onPlayheadPointerDown} style={{ left: `${timeToViewportPosition(currentTimeMs, timelineViewport) * 100}%` }} />}
+            <div className="editor-timeline-tracks">{tracks.map((track) => <div className={`editor-timeline-track editor-timeline-track-${track.kind}`} key={track.kind}>{track.kind === "audio" && <div className="editor-waveform" aria-label={waveform.length ? "Audio waveform" : "Audio waveform loading"}>{waveform.length ? <svg preserveAspectRatio="none" viewBox={`0 0 ${waveform.length} 100`}><path d={waveform.map((peak, index) => `M${index} ${50 - Math.min(48, peak.max * 48)}V${50 - Math.max(-48, peak.min * 48)}`).join("")} /></svg> : <span>Audio · loading waveform</span>}</div>}{track.items.map(renderTimelineItem)}</div>)}</div>
+            {timelineTooltip && timelineTooltip.position >= 0 && timelineTooltip.position <= 1 && <div className="editor-timeline-tooltip" role="status" style={{ left: `${timelineTooltip.position * 100}%` }}>{timelineTooltip.label}</div>}
           </div>
-        </div></div>}
+        </div>{timelineViewport.zoom > 1 && <input className="editor-timeline-pan" aria-label="Pan timeline" type="range" min="0" max={Math.max(0, durationMs - visibleDuration)} value={Math.min(timelineViewport.visibleStartMs, Math.max(0, durationMs - visibleDuration))} onChange={(event) => onTimelinePan(Number(event.target.value))} />}</div>}
         {(busy || (stage === "complete" && alignments.length > 0) || showCorrection || errorMessage || timingWarning || exportState) && <div className="editor-notices">
           {busy && <div className="editor-notice"><strong>{stage === "detecting-speech" ? "Checking local speech" : stage === "loading-model" ? "Loading recognition model" : stage === "transcribing" ? "Transcribing locally" : stage === "matching" ? "Matching Quran" : "Preparing captions"}</strong><span>Audio stays in this browser{progress?.total ? ` · ${progress.completed ?? 0}/${progress.total} chunks` : ""}.</span></div>}
           {stage === "complete" && alignments.length > 0 && <div className="editor-notice editor-notice-success"><strong>Detected Surah {alignments[0].surahNumber} · ayat {alignments[0].ayahNumber}–{alignments.at(-1)?.ayahNumber}</strong><span>{Math.round((alignments.reduce((sum, item) => sum + item.confidence, 0) / alignments.length) * 100)}% overall confidence</span></div>}

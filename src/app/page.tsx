@@ -102,8 +102,9 @@ import type { Session } from "@supabase/supabase-js";
 import { recordAuthenticatedUsage } from "@/lib/usage/client";
 import { getCloudProjectLimit, getCustomStyleLimit, getPlanEntitlements, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
-import { mediaKindForFile, mediaSourceFromFile, projectDurationMs, snapCaptionBoundaryToPlayhead, timelineContentPosition, timelinePositionToTime, type MediaSource } from "@/lib/editor/media";
+import { clampTimelineViewport, createTimelineViewport, mediaKindForFile, mediaSourceFromFile, panTimelineViewport, projectDurationMs, snapCaptionBoundaryToPlayhead, timelineContentPosition, viewportPositionToTime, zoomTimelineViewport, type MediaSource, type TimelineViewport } from "@/lib/editor/media";
 import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
+import { waveformPeaksFromPcm, type WaveformData } from "@/lib/editor/waveform";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -172,6 +173,8 @@ export default function Home() {
   );
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
   const [timelineTooltip, setTimelineTooltip] = useState<{ label: string; position: number } | null>(null);
+  const [timelineViewport, setTimelineViewport] = useState<TimelineViewport>({ zoom: 1, visibleStartMs: 0, visibleEndMs: 0 });
+  const [waveformData, setWaveformData] = useState<WaveformData | null>(null);
   const [segments, setSegments] = useState<CaptionSegment[]>([]);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(
     null,
@@ -254,6 +257,7 @@ export default function Home() {
     initialStartMs: number;
     initialEndMs: number;
   } | null>(null);
+  const waveformGeneration = useRef(0);
   const exportAbort = useRef<AbortController | null>(null);
   const exportCoordinator = useRef(new ExportCoordinator());
   const playbackClock = useRef<MediaPlaybackClock | null>(null);
@@ -274,6 +278,17 @@ export default function Home() {
   useEffect(() => {
     playbackClock.current?.setMedia(videoUrl ? videoRef.current : null);
   }, [videoUrl]);
+
+  useEffect(() => {
+    const durationMs = projectDurationMs(mediaSource);
+    if (!durationMs || draggingEdge.current || videoRef.current?.paused) return;
+    setTimelineViewport((current) => {
+      const viewport = clampTimelineViewport(current, durationMs);
+      const windowMs = viewport.visibleEndMs - viewport.visibleStartMs;
+      if (!windowMs || (currentTimeMs >= viewport.visibleStartMs && currentTimeMs <= viewport.visibleStartMs + windowMs * .85)) return viewport;
+      return panTimelineViewport(viewport, durationMs, currentTimeMs - windowMs * .6);
+    });
+  }, [currentTimeMs, mediaSource]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() =>
@@ -442,6 +457,7 @@ export default function Home() {
   function resetEditorState() {
     exportAbort.current?.abort();
     generation.current += 1;
+    waveformGeneration.current += 1;
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoFile(null);
     setVideoUrl(null);
@@ -452,6 +468,8 @@ export default function Home() {
     setContent({});
     setCurrentTimeMs(0);
     setTimelineTooltip(null);
+    setTimelineViewport(createTimelineViewport(0));
+    setWaveformData(null);
     setSelectedSegmentId(null);
     setSelectedObject(null);
     setStage("idle");
@@ -687,6 +705,26 @@ export default function Home() {
       return;
     resetEditorState();
   }
+  async function loadWaveform(file: File, job: number) {
+    try {
+      const AudioContextConstructor = window.AudioContext;
+      if (!AudioContextConstructor) return;
+      const context = new AudioContextConstructor();
+      try {
+        const audio = await context.decodeAudioData(await file.arrayBuffer());
+        if (job !== waveformGeneration.current) return;
+        setWaveformData({
+          durationMs: Math.round(audio.duration * 1_000),
+          peaks: waveformPeaksFromPcm(Array.from({ length: audio.numberOfChannels }, (_, index) => audio.getChannelData(index))),
+        });
+      } finally {
+        await context.close();
+      }
+    } catch {
+      // A previewable file can still have a browser decoder unavailable to Web Audio.
+      if (job === waveformGeneration.current) setWaveformData(null);
+    }
+  }
   function selectVideo(event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0];
     if (!next) return;
@@ -696,11 +734,15 @@ export default function Home() {
     }
     exportAbort.current?.abort();
     generation.current += 1;
+    const waveformJob = ++waveformGeneration.current;
+    setWaveformData(null);
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     const opening = pendingOpenProject;
     setVideoFile(next);
     setVideoUrl(URL.createObjectURL(next));
     setMediaSource(mediaSourceFromFile(next, mediaKindForFile(next)!));
+    setTimelineViewport(createTimelineViewport(0));
+    void loadWaveform(next, waveformJob);
     setVideoMetadata(null);
     setErrorMessage(
       opening
@@ -730,6 +772,7 @@ export default function Home() {
     };
     setVideoMetadata(metadata);
     setMediaSource((current) => current ? { ...current, durationMs: Math.round(metadata.durationSeconds * 1_000), ...(current.hasVideo ? { width: metadata.width, height: metadata.height } : {}) } : current);
+    setTimelineViewport((current) => current.visibleEndMs > 0 ? clampTimelineViewport(current, Math.round(metadata.durationSeconds * 1_000)) : createTimelineViewport(Math.round(metadata.durationSeconds * 1_000)));
     if (pendingOpenProject) {
       const result = verifySourceFile(
         videoFile!,
@@ -939,6 +982,9 @@ export default function Home() {
   function clearVideo() {
     exportAbort.current?.abort();
     generation.current += 1;
+    waveformGeneration.current += 1;
+    setWaveformData(null);
+    setTimelineViewport(createTimelineViewport(0));
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     setVideoFile(null);
     setVideoUrl(null);
@@ -1136,7 +1182,7 @@ export default function Home() {
   function timelineTimeFromPointer(event: PointerEvent<HTMLElement>) {
     const rect = timelineRef.current?.getBoundingClientRect();
     if (!rect) return 0;
-    return timelinePositionToTime(timelineContentPosition(event.clientX, rect.left, rect.width), projectDurationMs(mediaSource));
+    return viewportPositionToTime(timelineContentPosition(event.clientX, rect.left, rect.width), timelineViewport);
   }
   function seekTimeline(event: PointerEvent<HTMLElement>) {
     seekTo(timelineTimeFromPointer(event));
@@ -1182,7 +1228,7 @@ export default function Home() {
     const video = videoRef.current;
     if (video && !video.paused) video.pause();
     const boundary = edge === "start" ? segment.startMs : segment.endMs;
-    setTimelineTooltip({ label: formatTimelineTime(boundary), position: boundary / Math.max(1, projectDurationMs(mediaSource)) });
+    setTimelineTooltip({ label: formatTimelineTime(boundary), position: (boundary - timelineViewport.visibleStartMs) / Math.max(1, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs) });
     event.currentTarget.setPointerCapture(event.pointerId);
   }
   function handleEdgeMove(event: PointerEvent<HTMLElement>) {
@@ -1196,7 +1242,7 @@ export default function Home() {
     const rect = timelineRef.current?.getBoundingClientRect();
     const playheadSnap = interaction.mode === "body" || !rect
       ? { timeMs: nextTime, snapped: false }
-      : snapCaptionBoundaryToPlayhead(nextTime, event.clientX, rect.left, rect.width, currentTimeMs, projectDurationMs(mediaSource));
+      : snapCaptionBoundaryToPlayhead(nextTime, event.clientX, rect.left, rect.width, currentTimeMs, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs, timelineViewport.visibleStartMs);
     const snapped = interaction.mode === "body" ? snapTimelineTime(nextTime, interaction.id) : playheadSnap.timeMs;
     const delta = snapped - interaction.pointerStartMs;
     const nextPatch = interaction.mode === "body"
@@ -1210,13 +1256,22 @@ export default function Home() {
       ? updateCaptionSegmentTiming(current, interaction.id, nextPatch, projectDurationMs(mediaSource))
       : resizeCaptionBoundary(current, interaction.id, interaction.mode, snapped, projectDurationMs(mediaSource)));
     const boundary = interaction.mode === "end" ? nextPatch.endMs ?? snapped : nextPatch.startMs ?? snapped;
-    setTimelineTooltip({ label: `${formatTimelineTime(boundary)}${playheadSnap.snapped ? " · Snap: Playhead" : ""}`, position: boundary / Math.max(1, projectDurationMs(mediaSource)) });
+    setTimelineTooltip({ label: `${formatTimelineTime(boundary)}${playheadSnap.snapped ? " · Snap: Playhead" : ""}`, position: (boundary - timelineViewport.visibleStartMs) / Math.max(1, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs) });
   }
   function handleEdgeUp() {
     draggingEdge.current = null;
     draggingPlayhead.current = false;
     timelineInteraction.current = null;
     setTimelineTooltip(null);
+  }
+  function setTimelineZoom(zoom: number) {
+    const durationMs = projectDurationMs(mediaSource);
+    const playheadIsVisible = currentTimeMs >= timelineViewport.visibleStartMs && currentTimeMs <= timelineViewport.visibleEndMs;
+    const anchor = playheadIsVisible ? currentTimeMs : (timelineViewport.visibleStartMs + timelineViewport.visibleEndMs) / 2;
+    setTimelineViewport(zoomTimelineViewport(timelineViewport, durationMs, zoom, anchor));
+  }
+  function panTimelineTo(visibleStartMs: number) {
+    setTimelineViewport(panTimelineViewport(timelineViewport, projectDurationMs(mediaSource), visibleStartMs));
   }
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -1470,6 +1525,8 @@ export default function Home() {
         errorMessage={errorMessage}
         timingWarning={timingWarning}
         timelineTooltip={timelineTooltip}
+        timelineViewport={timelineViewport}
+        waveformData={waveformData}
         showCorrection={showCorrection}
         surah={surah}
         startAyah={startAyah}
@@ -1498,6 +1555,8 @@ export default function Home() {
         onTimelinePointerMove={handleEdgeMove}
         onEdgeDown={handleEdgeDown}
         onEdgeUp={handleEdgeUp}
+        onTimelineZoom={setTimelineZoom}
+        onTimelinePan={panTimelineTo}
         onChangeFormat={changeFormat}
         onDetect={() => void detect()}
         onCopyAlignmentDebug={() => { void copyAlignmentDebug(); }}
