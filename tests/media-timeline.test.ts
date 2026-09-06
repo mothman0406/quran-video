@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getActiveCaptionSegment } from "../src/lib/editor/captions.ts";
-import { mediaSourceFromFile, projectDurationMs, timeToTimelinePosition, timelinePositionToTime, timelineTracks } from "../src/lib/editor/media.ts";
+import { mediaSourceFromFile, projectDurationMs, timeToTimelinePosition, timelineContentPosition, timelinePositionToTime, timelineRulerTicks, timelineTracks } from "../src/lib/editor/media.ts";
 import { MediaPlaybackClock } from "../src/lib/editor/playback-clock.ts";
 import { loadSavedProject } from "../src/lib/project-storage.ts";
 
@@ -50,6 +50,31 @@ test("timeline position conversion is shared, accurate, and preserves active hal
   assert.equal(timelinePositionToTime(0.25, 10_000), 2_500);
   assert.equal(getActiveCaptionSegment([segment], timelinePositionToTime(0.1, 10_000))?.id, segment.id);
   assert.equal(getActiveCaptionSegment([segment], timelinePositionToTime(0.3, 10_000)), null);
+});
+
+test("playhead, ruler, blocks, and seeking use the timed-content origin in audio and video modes", () => {
+  const durationMs = 60_000;
+  const contentLeftPx = 50;
+  const contentWidthPx = 950;
+  const xForTime = (timeMs: number) => contentLeftPx + timeToTimelinePosition(timeMs, durationMs) * contentWidthPx;
+
+  assert.equal(xForTime(0), contentLeftPx, "zero-time playhead and ruler start at the timed-content origin");
+  assert.equal(xForTime(durationMs), contentLeftPx + contentWidthPx, "duration-time playhead reaches the timed-content edge");
+  assert.equal(xForTime(durationMs / 2), contentLeftPx + contentWidthPx / 2, "half time reaches the content midpoint");
+  const videoSource = mediaSourceFromFile({ name: "recitation.mp4", size: 4, type: "video/mp4" }, "video", { durationMs });
+  const tracks = timelineTracks(videoSource, [{ ...segment, startMs: 0 }]);
+  assert.deepEqual(tracks.map((track) => xForTime(track.items[0]?.startMs ?? 0)), [contentLeftPx, contentLeftPx, contentLeftPx], "Text, Video, and Audio tracks share the content origin");
+  assert.equal(xForTime(timelineRulerTicks(durationMs, contentWidthPx)[0]!), xForTime(0), "the zero ruler tick shares the playhead origin");
+  assert.equal(timelineContentPosition(contentLeftPx, contentLeftPx, contentWidthPx), 0, "the first content pixel seeks to zero");
+  assert.equal(timelineContentPosition(contentLeftPx + contentWidthPx / 2, contentLeftPx, contentWidthPx), .5, "the content midpoint seeks to half time");
+  assert.equal(timelineContentPosition(contentLeftPx + contentWidthPx, contentLeftPx, contentWidthPx), 1, "the content edge seeks to duration");
+  assert.equal(timelineContentPosition(0, contentLeftPx, contentWidthPx), 0, "the label gutter cannot seek before zero");
+  assert.equal(timelineContentPosition(200, 50, contentWidthPx), timelineContentPosition(222, 72, contentWidthPx), "changing gutter width does not change a content-relative position");
+
+  for (const kind of ["audio", "video"] as const) {
+    const source = mediaSourceFromFile({ name: `recitation.${kind === "audio" ? "mp3" : "mp4"}`, size: 4, type: kind === "audio" ? "audio/mpeg" : "video/mp4" }, kind, { durationMs });
+    assert.equal(timeToTimelinePosition(projectDurationMs(source) / 2, projectDurationMs(source)), .5, `${kind} uses the same timed-content geometry`);
+  }
 });
 
 test("audio playback samples the media clock on animation frames instead of relying on timeupdate", () => {

@@ -140,13 +140,14 @@ body {
 .editor-timeline-panel { flex: 0 0 auto; margin-top: 11px; border: 1px solid var(--editor-line); border-radius: 9px; background: rgba(251, 252, 250, .9); padding: 11px 12px 13px; }
 .editor-timeline-heading { justify-content: space-between; color: var(--editor-muted); font-size: 10px; }
 .editor-timeline-heading strong { display: block; color: var(--editor-ink); font-size: 11px; }
-.editor-timeline { position: relative; margin-top: 9px; cursor: pointer; overflow: hidden; border-radius: 5px; background: #e8ece7; padding: 24px 0 5px; }
-.editor-timeline-ruler { position: absolute; top: 0; right: 0; left: 50px; height: 22px; border-bottom: 1px solid #d8ded8; color: #738076; font-size: 8px; font-variant-numeric: tabular-nums; }
+.editor-timeline { --editor-timeline-label-width: 50px; display: grid; grid-template-columns: var(--editor-timeline-label-width) minmax(0, 1fr); position: relative; margin-top: 9px; overflow: hidden; border-radius: 5px; background: #e8ece7; }
+.editor-timeline-labels { display: grid; gap: 3px; padding-top: 24px; padding-bottom: 5px; }
+.editor-timeline-content { position: relative; min-width: 0; cursor: pointer; padding: 24px 0 5px; }
+.editor-timeline-ruler { position: absolute; top: 0; right: 0; left: 0; height: 22px; border-bottom: 1px solid #d8ded8; color: #738076; font-size: 8px; font-variant-numeric: tabular-nums; }
 .editor-timeline-ruler span { position: absolute; top: 5px; transform: translateX(-50%); white-space: nowrap; }
 .editor-timeline-tracks { display: grid; gap: 3px; }
-.editor-timeline-row { display: grid; min-height: 31px; grid-template-columns: 50px minmax(0, 1fr); }
-.editor-track-label { display: flex; align-items: center; border-right: 1px solid #d8ded8; color: #637269; font-size: 9px; font-weight: 700; padding-left: 7px; text-transform: uppercase; }
-.editor-timeline-track { position: relative; min-width: 0; border-bottom: 1px solid rgba(205, 216, 207, .7); }
+.editor-track-label { display: flex; align-items: center; min-height: 31px; border-right: 1px solid #d8ded8; color: #637269; font-size: 9px; font-weight: 700; padding-left: 7px; text-transform: uppercase; }
+.editor-timeline-track { position: relative; min-width: 0; min-height: 31px; border-bottom: 1px solid rgba(205, 216, 207, .7); }
 .editor-timeline-track-audio { border-bottom: 0; }
 .editor-playhead { position: absolute; z-index: 4; top: 0; bottom: 0; width: 2px; border: 0; background: var(--editor-accent); box-shadow: 0 0 0 1px rgba(255,255,255,.45); cursor: ew-resize; padding: 0; }
 .editor-caption-block, .editor-media-block { position: absolute; top: 2px; bottom: 2px; overflow: visible; border: 1px solid #b8cabc; border-radius: 4px; background: #cedbd0; color: #355544; text-align: left; }

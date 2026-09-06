@@ -101,7 +101,7 @@ import type { Session } from "@supabase/supabase-js";
 import { recordAuthenticatedUsage } from "@/lib/usage/client";
 import { getCloudProjectLimit, getCustomStyleLimit, getPlanEntitlements, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
-import { mediaKindForFile, mediaSourceFromFile, projectDurationMs, timelinePositionToTime, type MediaSource } from "@/lib/editor/media";
+import { mediaKindForFile, mediaSourceFromFile, projectDurationMs, timelineContentPosition, timelinePositionToTime, type MediaSource } from "@/lib/editor/media";
 import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
@@ -1135,7 +1135,7 @@ export default function Home() {
   function timelineTimeFromPointer(event: PointerEvent<HTMLElement>) {
     const rect = timelineRef.current?.getBoundingClientRect();
     if (!rect) return 0;
-    return timelinePositionToTime((event.clientX - rect.left) / rect.width, projectDurationMs(mediaSource));
+    return timelinePositionToTime(timelineContentPosition(event.clientX, rect.left, rect.width), projectDurationMs(mediaSource));
   }
   function seekTimeline(event: PointerEvent<HTMLElement>) {
     seekTo(timelineTimeFromPointer(event));

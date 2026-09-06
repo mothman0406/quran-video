@@ -1,5 +1,28 @@
 # Status
 
+## Current milestone: Timeline playhead content-origin alignment
+
+Complete:
+
+- Moved the ruler, playhead, timed tracks, width measurement, and pointer-time
+  conversion into one timed-content viewport. The Text / Video / Audio label
+  gutter is now a sibling and cannot offset the shared time origin or receive
+  timeline seek interactions.
+- Centralized the gutter width as an editor timeline layout token. At 0:00 the
+  ruler, blocks, and playhead share the timed-content left edge; at midpoint
+  and duration they share the corresponding content coordinates in both audio
+  and video modes.
+- Kept the playback clock, caption intervals, recognition, seeking authority,
+  track data, and animation behavior unchanged.
+- Added geometry regressions for origin, midpoint/end placement, ruler/block
+  alignment, gutter-safe pointer conversion, and audio/video parity.
+
+Verification: `npm test` (151 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. Lint retains four existing
+unused legacy-timing helper warnings; the build retains the existing non-fatal
+VAD ONNX Runtime dynamic-require warning. No browser media fixture is present
+in this workspace, so the required audio-only browser pass remains pending.
+
 ## Current milestone: Audio-only playback synchronization
 
 Complete:

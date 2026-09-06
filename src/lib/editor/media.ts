@@ -76,6 +76,12 @@ export function timelinePositionToTime(position: number, durationMs: number): nu
   return Math.round(Math.max(0, Math.min(1, position)) * Math.max(0, durationMs));
 }
 
+/** Converts a pointer coordinate using the timed-content viewport only. */
+export function timelineContentPosition(clientX: number, contentLeftPx: number, contentWidthPx: number): number {
+  if (!Number.isFinite(clientX) || !Number.isFinite(contentLeftPx) || !Number.isFinite(contentWidthPx) || contentWidthPx <= 0) return 0;
+  return Math.max(0, Math.min(1, (clientX - contentLeftPx) / contentWidthPx));
+}
+
 export function timelineTracks(source: MediaSource | null, segments: readonly CaptionSegment[]): TimelineTrack[] {
   const durationMs = projectDurationMs(source);
   return [
