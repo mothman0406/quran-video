@@ -1,5 +1,29 @@
 # Status
 
+## Current milestone: Split long Quran ayahs for display
+
+Complete:
+
+- Added deterministic, display-only canonical-word segmentation with a central
+  80 visible-Arabic-character default. Whole ayat remain one segment unless
+  they exceed that limit; oversized ayat use globally planned waqf-aware cuts.
+- Passed FastConformer canonical word timings into the existing display
+  `CaptionSegment` authority. Each internal transition is exactly the next
+  canonical word's FastConformer start, and the final piece alone owns the
+  inline ayah ornament. Basmalah preludes remain whole and numberless.
+- Audited the bundled Tanzil Uthmani stop signs and documented their attached
+  word encoding and display-cut categories. Canonical source text, passage
+  identity, recognition, and export timing semantics remain unchanged.
+- Made verse numbers default on for new state and for missing legacy saved
+  state while retaining every explicitly saved `false` preference.
+- Added Unicode, planner, timing, manual-compatible display-array, and real
+  corpus stress tests, including 4:3, 2:255, and 2:282.
+
+Verification: `npm test` (140 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. Lint retains four existing unused
+legacy-timing helper warnings; the production build retains the existing
+non-fatal VAD ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Remove duplicate inline ayah ornament
 
 Complete:

@@ -29,6 +29,9 @@ function migrateSavedProject(value: unknown): unknown {
 
   return {
     ...project,
+    // Projects created before inline ayah numbers had no explicit preference.
+    // Preserve saved false, but give missing legacy state the new default.
+    ...(typeof project.showVerseNumber === "boolean" ? {} : { showVerseNumber: true }),
     verseAlignments: project.verseAlignments.map((alignment) => {
       if (!alignment || typeof alignment !== "object" || Array.isArray(alignment)) return alignment;
       const current = alignment as Record<string, unknown>;

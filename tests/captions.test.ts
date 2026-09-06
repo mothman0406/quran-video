@@ -32,7 +32,7 @@ test("automatically creates one whole-ayah display set regardless of preferred l
 test("verse numbers are optional presentation metadata and never part of Arabic text", () => {
   const marked = { "93:1": { ...content["93:1"], arabic: { ...content["93:1"].arabic, uthmani: "وَالضُّحَىٰ ۝١" } } };
   const segments = createCaptionSegments([alignment], marked, 99);
-  assert.equal(DEFAULT_CAPTION_PRESENTATION.showVerseNumber, false);
+  assert.equal(DEFAULT_CAPTION_PRESENTATION.showVerseNumber, true);
   assert.equal(segments[0].arabic, "وَالضُّحَىٰ");
   assert.equal(marked["93:1"].arabic.uthmani, "وَالضُّحَىٰ ۝١");
   assert.equal(captionVerseNumberLabel(segments[0]), "1");

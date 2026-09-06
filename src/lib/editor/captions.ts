@@ -1,4 +1,5 @@
 import { CANONICAL_BASMALAH_ARABIC, quranDisplayText } from "../quran/content.ts";
+import { canonicalDisplayWords, DEFAULT_MAX_ARABIC_VISIBLE_CHARS, planAyahDisplaySplit, type CanonicalDisplayWord } from "./ayah-display-splitting.ts";
 import type { QuranVerseContent } from "../quran/content.ts";
 import type { VerseAlignment } from "./recognition.ts";
 import type { VerseBoundary } from "../recognition/core.ts";
@@ -13,7 +14,7 @@ export type TransitionSettings = z.infer<typeof TransitionSettingsSchema>;
 export type CaptionPresentationSettings = { showVerseNumber: boolean };
 
 export const DEFAULT_CAPTION_PRESENTATION: CaptionPresentationSettings = {
-  showVerseNumber: false,
+  showVerseNumber: true,
 };
 
 const ARABIC_INDIC_DIGITS = ["٠", "١", "٢", "٣", "٤", "٥", "٦", "٧", "٨", "٩"] as const;
@@ -416,6 +417,8 @@ export function translationForCaptionSegment(
  * second timed caption set.
  */
 export const DEFAULT_MAX_WORDS_PER_SEGMENT = 8;
+/** Central display-only threshold. It does not affect Quran recognition or alignment. */
+export { DEFAULT_MAX_ARABIC_VISIBLE_CHARS } from "./ayah-display-splitting.ts";
 
 function words(value: string): string[] {
   return value.trim().split(/\s+/).filter(Boolean);
@@ -545,23 +548,86 @@ export function createCaptionSegmentsFromVerseBoundaries(
   boundaries: readonly VerseBoundary[],
   content: Readonly<Record<string, QuranVerseContent | undefined>>,
   optionalPrelude?: OptionalPreludeTiming,
+  fastConformerWords?: readonly {
+    verseKey: string;
+    canonicalWordIndex: number;
+    canonicalArabic: string;
+    startMs: number;
+    endMs: number;
+  }[],
 ): CaptionSegment[] {
-  const ayahSegments = createCaptionSegments(boundaries.map((boundary) => {
-    const [surahNumber, ayahNumber] = boundary.verseKey.split(":").map(Number);
-    return {
-      verseKey: boundary.verseKey,
-      surahNumber,
-      ayahNumber,
-      startMs: boundary.startMs,
-      endMs: boundary.endMs,
-      confidence: boundary.evidence.selectedWord?.confidence ?? 0,
-      timingEvidence: {
-        start: { timestampMs: boundary.startMs, source: boundary.evidence.source },
-        end: { timestampMs: boundary.endMs, source: boundary.evidence.source },
-        matchedText: "",
-      },
-    };
-  }), content);
+  const ayahSegments = boundaries.flatMap((boundary) => {
+    const verse = content[boundary.verseKey];
+    const arabic = verse ? quranDisplayText(verse) : "";
+    const canonicalWords = words(arabic);
+    if (!canonicalWords.length) return [];
+    const aligned = fastConformerWords?.filter((word) => word.verseKey === boundary.verseKey) ?? [];
+    const ordered = aligned.slice().sort((left, right) => left.canonicalWordIndex - right.canonicalWordIndex);
+    const hasExactFastConformerWords = ordered.length === canonicalWords.length
+      && ordered.every((word, index) => word.canonicalWordIndex === index + 1
+        && word.canonicalArabic === canonicalWords[index]
+        && Number.isFinite(word.startMs)
+        && Number.isFinite(word.endMs)
+        && word.startMs <= word.endMs);
+    const displayWords: CanonicalDisplayWord[] = hasExactFastConformerWords
+      ? canonicalDisplayWords(ordered)
+      : [];
+    const plan = displayWords.length
+      ? planAyahDisplaySplit(displayWords, DEFAULT_MAX_ARABIC_VISIBLE_CHARS)
+      : null;
+    // Missing/mismatched word alignment is intentionally safe: retain the
+    // complete ayah rather than inventing a display-transition timestamp.
+    const pieces = plan?.pieces.length ? plan.pieces : [{
+      canonicalStartWordIndex: 1,
+      canonicalEndWordIndex: canonicalWords.length,
+      visibleCharCount: 0,
+      endingWaqfType: "ordinary" as const,
+    }];
+    if (plan?.requiredSplit && process.env.NODE_ENV === "development") {
+      console.debug("AYAH_DISPLAY_SPLIT", {
+        verseKey: boundary.verseKey,
+        totalVisibleChars: plan.totalVisibleChars,
+        maxVisibleChars: plan.maxVisibleChars,
+        requiredSplit: plan.requiredSplit,
+        candidateCuts: plan.candidateCuts,
+        selectedCuts: plan.selectedCuts,
+        pieces: pieces.map((piece, index) => ({
+          ...piece,
+          startMs: index === 0 ? boundary.startMs : displayWords[piece.canonicalStartWordIndex - 1]!.alignmentStartMs,
+          endMs: index === pieces.length - 1 ? boundary.endMs : displayWords[pieces[index + 1]!.canonicalStartWordIndex - 1]!.alignmentStartMs,
+          showVerseNumberAtEnd: index === pieces.length - 1,
+        })),
+      });
+    }
+    return pieces.map((piece, index): CaptionSegment => {
+      const isFinal = index === pieces.length - 1;
+      const startMs = index === 0 ? boundary.startMs : displayWords[piece.canonicalStartWordIndex - 1]!.alignmentStartMs;
+      const endMs = isFinal ? boundary.endMs : displayWords[pieces[index + 1]!.canonicalStartWordIndex - 1]!.alignmentStartMs;
+      const wordStart = piece.canonicalStartWordIndex - 1;
+      const wordEnd = piece.canonicalEndWordIndex;
+      return {
+        id: `${boundary.verseKey}#${index + 1}`,
+        contentKind: "ayah",
+        verseKeys: [boundary.verseKey],
+        startMs,
+        endMs,
+        arabic: canonicalWords.slice(wordStart, wordEnd).join(" "),
+        // Translation/transliteration remain whole-parent-ayah text until a
+        // semantic word-range mapping is introduced in a later milestone.
+        translation: verse?.translation ?? null,
+        transliteration: verse?.transliteration ?? null,
+        wordStart,
+        wordEnd,
+        wordCount: wordEnd - wordStart,
+        showVerseNumberAtEnd: isFinal,
+        timingEvidence: {
+          start: { timestampMs: startMs, source: boundary.evidence.source },
+          end: { timestampMs: endMs, source: boundary.evidence.source },
+          derived: false,
+        },
+      };
+    });
+  });
   const prelude = createBasmalahPreludeSegment(optionalPrelude, ayahSegments[0], content);
   return prelude ? [prelude, ...ayahSegments] : ayahSegments;
 }

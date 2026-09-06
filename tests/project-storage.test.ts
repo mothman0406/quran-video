@@ -73,6 +73,12 @@ test("legacy seconds alignment payloads migrate to exact milliseconds once", () 
   assert.throws(() => validateSavedProject({ ...migrated, verseAlignments: [{ ...migrated.verseAlignments[0], invalid: true }] }), /unrecognized|invalid/i);
 });
 
+test("missing legacy verse-number state receives the new default without overwriting false", () => {
+  const legacy = { ...project(), showVerseNumber: undefined } as unknown as SavedProject;
+  assert.equal(loadSavedProject(legacy).showVerseNumber, true);
+  assert.equal(loadSavedProject(project({ showVerseNumber: false })).showVerseNumber, false);
+});
+
 test("source verification accepts matching metadata and reports mismatch without attaching it silently", () => {
   const source = project().sourceVideo;
   const matching = { name: "recitation.mp4", size: 42, type: "video/mp4" };

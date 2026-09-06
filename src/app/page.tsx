@@ -783,6 +783,7 @@ export default function Home() {
         analysis.verseBoundaries,
         verseContent,
         fastConformerAlignment?.optionalPrelude,
+        analysis.authoritativeTimingEngine.wordTimings,
       );
       const displayPrelude = nextSegments.find((segment) => segment.contentKind === "basmalah-prelude") ?? null;
       setAlignments(next);

@@ -5,7 +5,9 @@ separate approved milestone intentionally changes the display contract.
 
 - The first caption begins only when Quran recitation begins, never during
   earlier background audio.
-- Automatic display uses one complete canonical ayah per caption set.
+- Automatic display preserves every complete canonical ayah, using one caption
+  segment when it fits the display limit and contiguous canonical word-range
+  segments only when it exceeds that limit.
 - Every displayed ayah is complete: no first, internal, or final canonical
   word may be omitted because ASR missed it.
 - Passage identification uses the whole-recording Whisper transcript and does
