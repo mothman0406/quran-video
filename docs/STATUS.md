@@ -1,5 +1,34 @@
 # Status
 
+## Current milestone: Quran word-timing benchmark and experimentation harness
+
+Complete:
+
+- Added a development-only `tools/timing-benchmark/` harness with deterministic
+  references, normalized timing-engine contracts, JSON/Markdown reports,
+  structural validity gates, word-start/end metrics, ayah-boundary metrics,
+  coverage, error percentiles, bias, and per-word worst-boundary diagnostics.
+  It is not imported by the application and production timing behavior is
+  unchanged.
+- Preserved the supplied 6:74–77, 69:19–32, 93:1–5, and 3:33–35 history.
+  The available reviewed values are stored strictly as ayah-boundary evidence;
+  no individual word labels were fabricated. The unchanged FastConformer output
+  has an explicit `fastconformer-current` adapter for benchmark runs.
+- Added raw CTC-path boundary experiments, token/posterior/frame diagnostics,
+  local-only acoustic refinement, deterministic degradation helpers, and
+  speed-reference mapping. Candidate methods retain the immutable canonical
+  alignment and cannot affect passage identity or display segmentation.
+- Documented the actual current CTC endpoint policy, frame conversion audit,
+  external `cpfair/quran-align` source/data licensing boundary, and the
+  phoneme-DP/MFA research feasibility. No external timing/audio was vendored:
+  matching reciter/audio licensing still requires fixture-level verification.
+
+Verification: `npx tsc --noEmit`, targeted `npm test --
+tests/timing-benchmark.test.ts` (6 passing), full `npm test` (192 passing),
+`npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The
+build retains the pre-existing non-fatal VAD ONNX Runtime dynamic-require
+warning.
+
 ## Current milestone: Timeline caption labels and source-safe media fit
 
 Complete:

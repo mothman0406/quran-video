@@ -1,0 +1,57 @@
+[
+  {
+    "fixtureId": "surah-6-74-77-reviewed-boundaries",
+    "source": "Existing user-reviewed ayah-start reference supplied for timing evaluation",
+    "surah": 6,
+    "ayahRange": { "start": 74, "end": 77 },
+    "words": [],
+    "boundaries": [
+      { "verseKey": "6:74", "expectedStartMs": 9660, "provenance": "human-reviewed" },
+      { "verseKey": "6:75", "expectedStartMs": 21696, "provenance": "human-reviewed" },
+      { "verseKey": "6:76", "expectedStartMs": 32064, "provenance": "human-reviewed" },
+      { "verseKey": "6:77", "expectedStartMs": 44832, "provenance": "human-reviewed" }
+    ],
+    "notes": "Ayah starts only. Do not infer individual word labels from these boundaries.",
+    "historical": { "fastconformerCurrentStartsMs": [9600, 21668, 31978, 44765], "breathsApproximateMs": [16000, 38000] }
+  },
+  {
+    "fixtureId": "surah-69-19-32-historical",
+    "source": "Existing historical timing summary supplied for timing evaluation",
+    "surah": 69,
+    "ayahRange": { "start": 19, "end": 32 },
+    "words": [],
+    "boundaries": [],
+    "notes": "No immutable per-boundary labels are available. This fixture preserves history but cannot score a new run until labels are supplied.",
+    "historical": { "fastconformerCurrent": { "medianAbsoluteBoundaryErrorMs": 189, "meanAbsoluteBoundaryErrorMs": 239, "p90AbsoluteBoundaryErrorMs": 462, "maxAbsoluteBoundaryErrorMs": 648 } }
+  },
+  {
+    "fixtureId": "surah-93-1-5-reviewed-boundaries",
+    "source": "Existing user-reviewed ayah-start reference supplied for timing evaluation",
+    "surah": 93,
+    "ayahRange": { "start": 1, "end": 5 },
+    "words": [],
+    "boundaries": [
+      { "verseKey": "93:1", "expectedStartMs": 1640, "provenance": "human-reviewed" },
+      { "verseKey": "93:2", "expectedStartMs": 2800, "provenance": "human-reviewed" },
+      { "verseKey": "93:3", "expectedStartMs": 5460, "provenance": "human-reviewed" },
+      { "verseKey": "93:4", "expectedStartMs": 9400, "provenance": "human-reviewed" },
+      { "verseKey": "93:5", "expectedStartMs": 14680, "provenance": "human-reviewed" }
+    ],
+    "notes": "Ayah starts only. Do not infer individual word labels from these boundaries.",
+    "historical": { "fastconformerCurrentStartsMs": [1631, 3070, 5948, 10104, 15060] }
+  },
+  {
+    "fixtureId": "surah-3-33-35-reviewed-boundaries",
+    "source": "Existing user-reviewed ayah-start reference supplied for timing evaluation",
+    "surah": 3,
+    "ayahRange": { "start": 33, "end": 35 },
+    "words": [],
+    "boundaries": [
+      { "verseKey": "3:33", "expectedStartMs": 2550, "provenance": "human-reviewed" },
+      { "verseKey": "3:34", "expectedStartMs": 9060, "provenance": "human-reviewed" },
+      { "verseKey": "3:35", "expectedStartMs": 14080, "provenance": "human-reviewed" }
+    ],
+    "notes": "Ayah starts only. Do not infer individual word labels from these boundaries.",
+    "historical": { "fastconformerCurrentStartsMs": [2496, 9194, 14537] }
+  }
+]
