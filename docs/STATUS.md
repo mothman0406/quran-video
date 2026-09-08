@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Pre-production real-video Quran regression
+
+Complete:
+
+- Added `npm run regression:quran`, a development-only runner that executes the integrated Quran invariant probes and the ignored local quran-align/EveryAyah real-audio timing benchmark when media is available. It emits explicit PASS/FAIL/SKIPPED status and writes a dated report without private paths or source media.
+- Registered the historical Al-Ma'arij, noisy Surah 74, 6:74-77, 69:19-32, 93:1-5, 3:33-35, 18:57, portrait, and audio-only cases in a typed evidence manifest. User-reviewed boundaries, external machine references, and historical diagnostics are kept distinct; unavailable original recordings remain manual retests.
+- Corrected the benchmark harness to score the actual production FastConformer word-end policy instead of forcing the retired first-aligned-token ends. The real 45-ayah / 242-word run retained 100% canonical coverage, word starts of 79ms median / 275ms p90, and transition-derived word ends of 92ms median / 461ms p90.
+- Added a compact 10–15 minute browser checklist for retained real clips, long-ayah splitting/translation/highlighting, portrait and audio-only behavior, safe zones, speed, 1080p download, and configuring another export version.
+
+Verification: `npm run regression:quran`, `npx tsc --noEmit`, focused regression probes, `npm test`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. Original user recordings and browser-only export validation remain intentionally manual; no copyrighted/private media is committed.
+
 ## Current milestone: Cohesive editor UX polish
 
 Complete:

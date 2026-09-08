@@ -12,6 +12,7 @@
     "timing:benchmark": "node --experimental-strip-types tools/timing-benchmark/run.ts",
     "timing:benchmark:real": "node --expose-gc --experimental-strip-types tools/timing-benchmark/real-run.ts",
     "timing:benchmark:merge": "node --experimental-strip-types tools/timing-benchmark/merge-real-runs.ts",
+    "regression:quran": "node --experimental-strip-types tools/regression/run-quran.ts",
     "check:translation:live": "LIVE_TRANSLATION_CHECK=1 node --experimental-strip-types scripts/check-translation.ts",
     "start": "next start",
     "lint": "eslint"

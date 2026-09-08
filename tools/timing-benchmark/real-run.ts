@@ -207,7 +207,10 @@ async function main() {
       input.audio,
       [{ startMs: 0, endMs: input.fixture.audioDurationMs!, durationMs: input.fixture.audioDurationMs!, confidence: 1 }],
       `timing-benchmark-${input.fixture.fixtureId}`,
-      { includeTransitionBoundaryDiagnostics: true, wordEndPolicy: "first-aligned-token" },
+      // Exercise the actual production default. Transition diagnostics remain
+      // available below for comparison, but must not replace the timing used
+      // to score the current engine.
+      { includeTransitionBoundaryDiagnostics: true },
     );
     const verse = hafsVerses.find((candidate) => candidate.verseKey === `${input.fixture.surah}:${input.fixture.ayahRange.start}`);
     if (!verse) throw new Error(`Canonical verse missing for ${input.fixture.fixtureId}.`);
