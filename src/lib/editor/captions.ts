@@ -95,6 +95,69 @@ export function composeArabicCaptionText(segment: Pick<CaptionSegment, "arabic" 
   return arabicCaptionDisplay(segment, showVerseNumber).text;
 }
 
+function validWordTiming(timing: CaptionWordTiming, sourceWordCount: number): boolean {
+  return Number.isInteger(timing.canonicalWordIndex)
+    && timing.canonicalWordIndex > 0
+    && Number.isInteger(timing.sourceWordStart)
+    && Number.isInteger(timing.sourceWordEnd)
+    && timing.sourceWordStart >= 0
+    && timing.sourceWordStart < timing.sourceWordEnd
+    && timing.sourceWordEnd <= sourceWordCount
+    && Number.isFinite(timing.startMs)
+    && Number.isFinite(timing.endMs)
+    && timing.startMs < timing.endMs;
+}
+
+/** Pure, half-open canonical acoustic-word selection shared by preview/export. */
+export function isCaptionWordHighlighted(
+  segment: Pick<CaptionSegment, "startMs" | "endMs">,
+  timing: CaptionWordTiming,
+  timeMs: number,
+  mode: WordHighlightMode,
+): boolean {
+  if (mode === "off" || !Number.isFinite(timeMs) || timeMs < segment.startMs || timeMs >= segment.endMs) return false;
+  if (!Number.isFinite(timing.startMs) || !Number.isFinite(timing.endMs) || timing.startMs >= timing.endMs) return false;
+  return mode === "current-word"
+    ? timeMs >= timing.startMs && timeMs < timing.endMs
+    : timeMs >= timing.startMs;
+}
+
+/**
+ * Maps immutable Quran source words to display spans. The renderer never
+ * writes markup into Quran strings: standalone waqf/annotation source tokens
+ * remain presentation-only content attached to their canonical owner.
+ */
+export function arabicCaptionPresentationWords(
+  segment: Pick<CaptionSegment, "arabic" | "contentKind" | "verseKeys" | "showVerseNumberAtEnd" | "startMs" | "endMs" | "wordTimings">,
+  showVerseNumber: boolean,
+  timeMs: number,
+  mode: WordHighlightMode,
+): ArabicPresentationWord[] {
+  const sourceText = showVerseNumber || segment.contentKind === "basmalah-prelude"
+    ? withoutTerminalAyahMarker(segment.arabic)
+    : segment.arabic;
+  const sourceWords = sourceText.trim().split(/\s+/u).filter(Boolean);
+  const result: ArabicPresentationWord[] = [];
+  const appendNormal = (start: number, end: number) => {
+    for (const sourceWord of sourceWords.slice(start, end)) {
+      const text = cleanQuranArabicForDisplay(sourceWord);
+      if (text) result.push({ text, highlighted: false, kind: "quran-word" });
+    }
+  };
+  let cursor = 0;
+  for (const timing of [...(segment.wordTimings ?? [])].sort((left, right) => left.sourceWordStart - right.sourceWordStart || left.canonicalWordIndex - right.canonicalWordIndex)) {
+    if (!validWordTiming(timing, sourceWords.length) || timing.sourceWordStart < cursor) continue;
+    appendNormal(cursor, timing.sourceWordStart);
+    const text = cleanQuranArabicForDisplay(sourceWords.slice(timing.sourceWordStart, timing.sourceWordEnd).join(" "));
+    if (text) result.push({ text, highlighted: isCaptionWordHighlighted(segment, timing, timeMs, mode), kind: "quran-word" });
+    cursor = timing.sourceWordEnd;
+  }
+  appendNormal(cursor, sourceWords.length);
+  const verseNumber = inlineVerseNumber(segment, showVerseNumber);
+  if (verseNumber) result.push({ text: verseNumber, highlighted: false, kind: "verse-number" });
+  return result;
+}
+
 /** Canonical Hafs display text for the acoustically selected opening prelude. */
 export { CANONICAL_BASMALAH_ARABIC } from "../quran/content.ts";
 
@@ -127,6 +190,8 @@ export const DEFAULT_TYPOGRAPHY: Typography = {
   translationFontSize: 15,
   transliterationFontSize: 14,
   textColor: "#ffffff",
+  wordHighlightMode: "off",
+  wordHighlightColor: "#f4dfab",
   arabicOutlineEnabled: false,
   arabicOutlineWidth: 1,
   arabicOutlineColor: "#000000",
@@ -391,11 +456,34 @@ type CaptionSegmentBase = {
   wordStart: number;
   wordEnd: number;
   wordCount: number;
+  /**
+   * Canonical FastConformer words represented by this display piece. Source
+   * offsets are half-open and local to `arabic`; they let display-only waqf
+   * tokens stay attached without changing Quran text or acoustic ownership.
+   */
+  wordTimings?: CaptionWordTiming[];
   timingEvidence: {
     start: { timestampMs: number; source: CaptionTimingSource };
     end: { timestampMs: number; source: CaptionTimingSource };
     derived: boolean;
   };
+};
+
+export type CaptionWordTiming = {
+  canonicalWordIndex: number;
+  sourceWordStart: number;
+  sourceWordEnd: number;
+  startMs: number;
+  endMs: number;
+};
+
+export type WordHighlightMode = Typography["wordHighlightMode"];
+
+export type ArabicPresentationWord = {
+  text: string;
+  highlighted: boolean;
+  /** The generated ayah ornament is deliberately never a Quran word. */
+  kind: "quran-word" | "verse-number";
 };
 
 /** Quran content is either canonically owned by ayat or an acoustic prelude. */
@@ -736,6 +824,13 @@ export function createCaptionSegmentsFromVerseBoundaries(
       const wordStart = piece.canonicalStartWordIndex - 1;
       const sourceStart = displayWords?.[wordStart]?.sourceWordStart ?? wordStart;
       const sourceEnd = displayWords?.[piece.canonicalEndWordIndex - 1]?.sourceWordEnd ?? piece.canonicalEndWordIndex;
+      const wordTimings = displayWords.slice(piece.canonicalStartWordIndex - 1, piece.canonicalEndWordIndex).map((word) => ({
+        canonicalWordIndex: word.wordIndex,
+        sourceWordStart: (word.sourceWordStart ?? 0) - sourceStart,
+        sourceWordEnd: (word.sourceWordEnd ?? 0) - sourceStart,
+        startMs: word.alignmentStartMs,
+        endMs: word.alignmentEndMs,
+      }));
       return {
         id: `${boundary.verseKey}#${index + 1}`,
         contentKind: "ayah",
@@ -750,6 +845,7 @@ export function createCaptionSegmentsFromVerseBoundaries(
         wordStart: sourceStart,
         wordEnd: sourceEnd,
         wordCount: sourceEnd - sourceStart,
+        ...(wordTimings.length ? { wordTimings } : {}),
         showVerseNumberAtEnd: isFinal,
         timingEvidence: {
           start: { timestampMs: startMs, source: boundary.evidence.source },
@@ -818,6 +914,11 @@ export function splitCaptionSegment(segment: CaptionSegment, boundary: number): 
     transliteration: null,
     wordStart: segment.wordStart + start,
     wordEnd: segment.wordStart + end,
+    ...(segment.wordTimings ? {
+      wordTimings: segment.wordTimings.flatMap((timing) => timing.sourceWordStart >= start && timing.sourceWordEnd <= end
+        ? [{ ...timing, sourceWordStart: timing.sourceWordStart - start, sourceWordEnd: timing.sourceWordEnd - start }]
+        : []),
+    } : {}),
     showVerseNumberAtEnd: end === verseWords.length ? segment.showVerseNumberAtEnd : false,
     timingEvidence: {
       start: { timestampMs: startMs, source: start === 0 ? segment.timingEvidence.start.source : "derived" },
@@ -840,6 +941,16 @@ function mergeSegments(left: CaptionSegment, right: CaptionSegment): CaptionSegm
     transliteration: null,
     wordEnd: right.wordEnd,
     wordCount: left.wordCount + right.wordCount,
+    ...(left.wordTimings || right.wordTimings ? {
+      wordTimings: [
+        ...(left.wordTimings ?? []).map((timing) => ({ ...timing })),
+        ...(right.wordTimings ?? []).map((timing) => ({
+          ...timing,
+          sourceWordStart: timing.sourceWordStart + words(left.arabic).length,
+          sourceWordEnd: timing.sourceWordEnd + words(left.arabic).length,
+        })),
+      ],
+    } : {}),
     showVerseNumberAtEnd: right.showVerseNumberAtEnd,
     timingEvidence: {
       start: left.timingEvidence.start,

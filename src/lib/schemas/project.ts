@@ -82,6 +82,14 @@ export const CaptionSegmentSchema = z.strictObject({
   wordStart: z.number().int().nonnegative(),
   wordEnd: z.number().int().positive(),
   wordCount: z.number().int().positive(),
+  /** Canonical FastConformer timings owned by this display piece. */
+  wordTimings: z.array(z.strictObject({
+    canonicalWordIndex: z.number().int().positive(),
+    sourceWordStart: z.number().int().nonnegative(),
+    sourceWordEnd: z.number().int().positive(),
+    startMs: PositiveNumber,
+    endMs: PositiveNumber,
+  })).optional(),
   /**
    * Presentation metadata for an inline ayah-end ornament. Undefined keeps
    * legacy one-segment-per-ayah captions visible when the project toggle is on.
@@ -140,6 +148,9 @@ export const TypographySchema = z.strictObject({
   transliterationFontSize: z.number().finite().positive(),
   /** Legacy typography snapshots predate the editable Arabic color control. */
   textColor: z.string().min(1).default("#ffffff"),
+  /** Word highlighting is presentation-only and defaults off for saved projects. */
+  wordHighlightMode: z.enum(["off", "current-word", "read-so-far"]).default("off"),
+  wordHighlightColor: z.string().min(1).default("#f4dfab"),
   arabicOutlineEnabled: z.boolean(),
   arabicOutlineWidth: z.number().finite().nonnegative(),
   arabicOutlineColor: z.string().min(1),

@@ -1,7 +1,7 @@
 "use client";
 
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
-import { arabicCaptionDisplay, captionBackgroundStyle, captionVisualStatesAtTime, getActiveCaptionSegment, linkedCaptionStackLayout, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
+import { arabicCaptionPresentationWords, captionBackgroundStyle, captionVisualStatesAtTime, getActiveCaptionSegment, linkedCaptionStackLayout, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import { quranFontDefinitions } from "@/lib/quran/content";
 import type { ProjectFormat } from "@/lib/schemas/project";
@@ -120,7 +120,7 @@ function CaptionPreview({
       if (segment.contentKind === "ayah" && item?.status !== "ready") return null;
       const translation = segment.translation ?? (item?.status === "ready" ? item.verse.translation : null);
       const hasTranslation = typography.translationVisible && Boolean(translation);
-      const arabicDisplay = arabicCaptionDisplay(segment, showVerseNumber);
+      const arabicWords = arabicCaptionPresentationWords(segment, showVerseNumber, currentTimeMs, typography.wordHighlightMode);
       const background = captionBackgroundStyle(captionBackground);
       const arabicWidth = `${positioning.maxWidthPercent * 100}%`;
       const translationWidth = `${(positioning.translationMaxWidthPercent ?? positioning.maxWidthPercent) * 100}%`;
@@ -143,7 +143,10 @@ function CaptionPreview({
         onPointerUp={onPointerUp}
         onClick={(event) => { event.stopPropagation(); onSelectObject("arabic"); }}
       >
-        <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic"), color: typography.textColor, fontFamily: quranFontDefinitions[typography.quranStyle].family, fontSize: typography.arabicFontSize, lineHeight: typography.arabicLineSpacing, opacity: typography.arabicOpacity }}><span data-caption-arabic-text>{arabicDisplay.text}</span></p>
+        <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic"), color: typography.textColor, fontFamily: quranFontDefinitions[typography.quranStyle].family, fontSize: typography.arabicFontSize, lineHeight: typography.arabicLineSpacing, opacity: typography.arabicOpacity }}><span data-caption-arabic-text>{arabicWords.map((word, index) => <Fragment key={`${segment.id}-${word.kind}-${index}`}>
+          {index > 0 && (word.kind === "verse-number" ? "\u00a0" : " ")}
+          <span data-caption-quran-word={word.kind === "quran-word" ? "true" : undefined} data-caption-word-highlighted={word.highlighted ? "true" : "false"} style={word.highlighted ? { color: typography.wordHighlightColor } : undefined}>{word.text}</span>
+        </Fragment>)}</span></p>
         {handles("arabic")}
       </div>;
       const translationObject = (linked: boolean) => hasTranslation && <div

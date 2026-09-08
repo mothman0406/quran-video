@@ -1,5 +1,26 @@
 # Status
 
+## Current milestone: Canonical Quran word highlighting
+
+Complete:
+
+- Added an optional persisted Quran caption setting with **Off** (the legacy
+  default), **Current word**, and **Read so far** modes plus an accent-compatible
+  highlight color. Built-in and existing saved styles remain off unless changed.
+- Caption generation now carries the existing canonical FastConformer word
+  start/end timings into each owned `CaptionSegment` display range. No model,
+  recognition pass, interpolation, or text-length timing is used. Manual display
+  timing clips the visible effect without rewriting acoustic word timestamps.
+- Preview and canvas export call the same pure display-word/highlight helper.
+  Current word uses `[wordStartMs, wordEndMs)`, so real acoustic gaps have no
+  active word; Read so far retains completed words. The final verse ornament is
+  a separate non-Quran presentation span and cannot highlight.
+- Long-ayah pieces retain only their own canonical timings; manual split/merge
+  transfers owned ranges without duplicating them. Basmalah preludes without
+  precise per-word FastConformer timings stay normally rendered rather than
+  receiving invented timing. Quran source strings remain immutable and the
+  existing Uthmani display-cleaning path is used for every rendered span.
+
 ## Current milestone: Quran passage-identification disambiguation
 
 Complete:

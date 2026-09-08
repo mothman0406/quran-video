@@ -1,10 +1,38 @@
-import { composeArabicCaptionText, captionVisualStatesAtTime, linkedCaptionStackLayout } from "../editor/captions.ts";
+import { arabicCaptionPresentationWords, composeArabicCaptionText, captionVisualStatesAtTime, linkedCaptionStackLayout, type ArabicPresentationWord } from "../editor/captions.ts";
 import type { LocalExportRequest } from "./types.ts";
 
 function alphaColor(color: string, opacity: number) { return color.startsWith("#") ? `${color}${Math.round(Math.max(0, Math.min(1, opacity)) * 255).toString(16).padStart(2, "0")}` : color; }
 function roundedRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) { const r = Math.min(radius, width / 2, height / 2); context.beginPath(); context.roundRect(x, y, width, height, r); context.fill(); }
 function wrap(context: CanvasRenderingContext2D, value: string, maxWidth: number): string[] { const words = value.trim().split(/[ \t\r\n]+/u); const lines: string[] = []; let line = ""; for (const word of words) { const next = line ? `${line} ${word}` : word; if (line && context.measureText(next).width > maxWidth) { lines.push(line); line = word; } else line = next; } if (line) lines.push(line); return lines; }
 function drawText(context: CanvasRenderingContext2D, lines: readonly string[], x: number, y: number, lineHeight: number, align: CanvasTextAlign, direction: CanvasDirection, fill: string, outline: boolean, outlineWidth: number, outlineColor: string, shadow: boolean, shadowBlur: number, shadowStrength: number) { context.save(); context.textAlign = align; context.direction = direction; context.fillStyle = fill; context.strokeStyle = outlineColor; context.lineWidth = outlineWidth; context.shadowColor = shadow ? `rgba(0,0,0,${shadowStrength})` : "transparent"; context.shadowBlur = shadow ? shadowBlur : 0; context.shadowOffsetY = shadow ? 2 : 0; lines.forEach((line, index) => { const baseline = y + index * lineHeight; if (outline) context.strokeText(line, x, baseline); context.fillText(line, x, baseline); }); context.restore(); }
+type ArabicWordLine = { words: readonly ArabicPresentationWord[]; width: number };
+function wrapArabicWords(context: CanvasRenderingContext2D, words: readonly ArabicPresentationWord[], maxWidth: number): ArabicWordLine[] {
+  const lines: ArabicWordLine[] = [];
+  let line: ArabicPresentationWord[] = [];
+  let width = 0;
+  for (const word of words) {
+    const gap = line.length ? context.measureText(word.kind === "verse-number" ? "\u00a0" : " ").width : 0;
+    const nextWidth = width + gap + context.measureText(word.text).width;
+    if (line.length && nextWidth > maxWidth) { lines.push({ words: line, width }); line = [word]; width = context.measureText(word.text).width; }
+    else { line.push(word); width = nextWidth; }
+  }
+  if (line.length) lines.push({ words: line, width });
+  return lines;
+}
+function drawArabicWords(context: CanvasRenderingContext2D, lines: readonly ArabicWordLine[], x: number, y: number, lineHeight: number, fill: string, highlightFill: string, outline: boolean, outlineWidth: number, outlineColor: string, shadow: boolean, shadowBlur: number, shadowStrength: number) {
+  context.save(); context.textAlign = "right"; context.direction = "rtl"; context.strokeStyle = outlineColor; context.lineWidth = outlineWidth; context.shadowColor = shadow ? `rgba(0,0,0,${shadowStrength})` : "transparent"; context.shadowBlur = shadow ? shadowBlur : 0; context.shadowOffsetY = shadow ? 2 : 0;
+  lines.forEach((line, lineIndex) => {
+    let cursor = x + line.width / 2;
+    for (const [index, word] of line.words.entries()) {
+      if (index > 0) cursor -= context.measureText(word.kind === "verse-number" ? "\u00a0" : " ").width;
+      context.fillStyle = word.highlighted ? highlightFill : fill;
+      if (outline) context.strokeText(word.text, cursor, y + lineIndex * lineHeight);
+      context.fillText(word.text, cursor, y + lineIndex * lineHeight);
+      cursor -= context.measureText(word.text).width;
+    }
+  });
+  context.restore();
+}
 
 /** Shared preview/export caption painter. Transition state always comes from captionVisualStatesAtTime. */
 export function drawExportCaptions(context: CanvasRenderingContext2D, request: LocalExportRequest, timeMs: number, arabicFont: string) {
@@ -13,7 +41,9 @@ export function drawExportCaptions(context: CanvasRenderingContext2D, request: L
     const { segment, opacity, blurPx } = state; const arabicSize = typography.arabicFontSize * scale; const translationSize = typography.translationFontSize * scale; const transliterationSize = typography.transliterationFontSize * scale;
     context.save(); context.filter = blurPx ? `blur(${blurPx * scale}px)` : "none"; context.globalAlpha = opacity;
     const arabicDisplayText = composeArabicCaptionText(segment, showVerseNumber);
-    context.font = `${arabicSize}px "${arabicFont}", serif`; const arabicLines = wrap(context, arabicDisplayText, maxWidth); const arabicHeight = arabicLines.length * arabicSize * typography.arabicLineSpacing;
+    const arabicWords = arabicCaptionPresentationWords(segment, showVerseNumber, timeMs, typography.wordHighlightMode);
+    const useWordRenderer = typography.wordHighlightMode !== "off" && arabicWords.length > 0;
+    context.font = `${arabicSize}px "${arabicFont}", serif`; const arabicWordLines = useWordRenderer ? wrapArabicWords(context, arabicWords, maxWidth) : null; const arabicLines = useWordRenderer ? null : wrap(context, arabicDisplayText, maxWidth); const arabicHeight = (arabicWordLines?.length ?? arabicLines?.length ?? 0) * arabicSize * typography.arabicLineSpacing;
     const translation = typography.translationVisible ? segment.translation : null; const transliteration = typography.transliterationVisible ? segment.transliteration : null;
     const translationMaxWidth = request.format.width * (positioning.translationMaxWidthPercent ?? positioning.maxWidthPercent);
     context.font = `${translationSize}px ${typography.translationFontFamily}`; const translationLines = translation ? wrap(context, translation, positioning.translationPositionLinked ? maxWidth : translationMaxWidth) : []; const translationHeight = translationLines.length * translationSize * 1.25;
@@ -27,7 +57,7 @@ export function drawExportCaptions(context: CanvasRenderingContext2D, request: L
       : positioning.y * request.format.height - totalHeight / 2;
     if (captionBackground.enabled && positioning.translationPositionLinked) { context.fillStyle = alphaColor(captionBackground.color, captionBackground.opacity); roundedRect(context, x - maxWidth / 2 - captionBackground.horizontalPadding * scale, linkedLayout.topY * request.format.height, maxWidth + captionBackground.horizontalPadding * scale * 2, totalHeight + linkedBackgroundPadding * 2, captionBackground.cornerRadius * scale); }
     let cursor = y;
-    context.font = `${arabicSize}px "${arabicFont}", serif`; drawText(context, arabicLines, x, cursor + arabicSize, arabicSize * typography.arabicLineSpacing, typography.textAlign, "rtl", alphaColor(typography.textColor, typography.arabicOpacity), typography.arabicOutlineEnabled, typography.arabicOutlineWidth * scale, typography.arabicOutlineColor, typography.arabicShadowEnabled, typography.arabicShadowBlur * scale, typography.arabicShadowStrength); cursor += arabicHeight;
+    context.font = `${arabicSize}px "${arabicFont}", serif`; if (arabicWordLines) drawArabicWords(context, arabicWordLines, x, cursor + arabicSize, arabicSize * typography.arabicLineSpacing, alphaColor(typography.textColor, typography.arabicOpacity), alphaColor(typography.wordHighlightColor, typography.arabicOpacity), typography.arabicOutlineEnabled, typography.arabicOutlineWidth * scale, typography.arabicOutlineColor, typography.arabicShadowEnabled, typography.arabicShadowBlur * scale, typography.arabicShadowStrength); else drawText(context, arabicLines ?? [], x, cursor + arabicSize, arabicSize * typography.arabicLineSpacing, typography.textAlign, "rtl", alphaColor(typography.textColor, typography.arabicOpacity), typography.arabicOutlineEnabled, typography.arabicOutlineWidth * scale, typography.arabicOutlineColor, typography.arabicShadowEnabled, typography.arabicShadowBlur * scale, typography.arabicShadowStrength); cursor += arabicHeight;
     if (translationLines.length && positioning.translationPositionLinked) { cursor += typography.translationSpacingBelowArabic * scale; context.font = `${translationSize}px ${typography.translationFontFamily}`; drawText(context, translationLines, x, cursor + translationSize, translationSize * 1.25, typography.translationTextAlign, "ltr", alphaColor(typography.translationTextColor, typography.translationOpacity), typography.translationOutlineEnabled, typography.translationOutlineWidth * scale, typography.translationOutlineColor, typography.translationShadowEnabled, typography.translationShadowBlur * scale, typography.translationShadowStrength); cursor += translationHeight; }
     if (transliterationLines.length) { cursor += 8 * scale; context.font = `${transliterationSize}px ${typography.transliterationFontFamily}`; drawText(context, transliterationLines, x, cursor + transliterationSize, transliterationSize * 1.25, "center", "ltr", alphaColor(typography.translationTextColor, typography.translationOpacity), false, 0, "transparent", false, 0, 0); }
     if (translationLines.length && !positioning.translationPositionLinked) { const tx = positioning.translationX * request.format.width; const ty = positioning.translationY * request.format.height; context.font = `${translationSize}px ${typography.translationFontFamily}`; const h = translationHeight; if (captionBackground.enabled) { context.fillStyle = alphaColor(captionBackground.color, captionBackground.opacity); roundedRect(context, tx - translationMaxWidth / 2 - captionBackground.horizontalPadding * scale, ty - h / 2 - captionBackground.verticalPadding * scale, translationMaxWidth + captionBackground.horizontalPadding * scale * 2, h + captionBackground.verticalPadding * scale * 2, captionBackground.cornerRadius * scale); } drawText(context, translationLines, tx, ty - h / 2 + translationSize, translationSize * 1.25, typography.translationTextAlign, "ltr", alphaColor(typography.translationTextColor, typography.translationOpacity), typography.translationOutlineEnabled, typography.translationOutlineWidth * scale, typography.translationOutlineColor, typography.translationShadowEnabled, typography.translationShadowBlur * scale, typography.translationShadowStrength); }

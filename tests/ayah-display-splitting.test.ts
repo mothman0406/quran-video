@@ -117,6 +117,12 @@ test("production FastConformer -> editor path splits 18:57 while retaining stand
   assert.equal(ayah57[1]!.arabic.includes("ۖ"), true, "the second standalone waqf remains with its preceding word range");
   assert.equal(ayah57[0]!.endMs, ayah57[1]!.startMs, "the cut is the next FastConformer lexical-word start");
   assert.deepEqual(ayah57.map((segment) => segment.showVerseNumberAtEnd), [false, true]);
+  assert.deepEqual(
+    ayah57.flatMap((segment) => segment.wordTimings?.map((word) => word.canonicalWordIndex) ?? []),
+    fastConformerWords.filter((word) => word.verseKey === "18:57").map((word) => word.canonicalWordIndex),
+    "each long-ayah piece owns its exact canonical FastConformer words once",
+  );
+  assert.equal(ayah57.every((segment) => (segment.wordTimings ?? []).every((word) => word.sourceWordStart >= 0 && word.sourceWordEnd <= segment.wordCount)), true);
   assert.equal(ayah57.flatMap((segment) => [...segment.arabic]).includes("۝"), false, "the corpus display pieces do not carry a terminal ayah ornament");
   assert.equal(arabicCaptionDisplay(ayah57[0]!, true).text.includes("۝"), false, "an intermediate piece has no ornament");
   assert.equal(arabicCaptionDisplay(ayah57[1]!, true).text, `${cleanQuranArabicForDisplay(ayah57[1]!.arabic)}\u00a0٥٧`, "the final piece removes annotations and has exactly the font's numbered ornament input");
