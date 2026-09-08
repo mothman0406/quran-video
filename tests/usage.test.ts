@@ -22,8 +22,8 @@ test("V1 entitlements centralize capabilities and quotas", () => {
   assert.equal(getPlanEntitlements("Free").watermarkRequired, true);
   assert.equal(getPlanEntitlements("Creator").watermarkRequired, false);
   assert.equal(getPlanEntitlements("Pro").watermarkRequired, false);
-  assert.equal(getCloudProjectLimit("Free"), 2);
-  assert.equal(getCloudProjectLimit("Creator"), 25);
+  assert.equal(getCloudProjectLimit("Free"), 3);
+  assert.equal(getCloudProjectLimit("Creator"), null);
   assert.equal(getCustomStyleLimit("Free"), 2);
   assert.equal(getCustomStyleLimit("Creator"), null);
   assert.equal(getPlanEntitlements("Free").exportCountQuota, null);
@@ -42,7 +42,8 @@ test("V1 entitlements centralize capabilities and quotas", () => {
 test("export usage remains unlimited while cloud project quota is finite", () => {
   assert.equal(canPerform("export", "Free", { export: 999, cloud_project_save: 0 }).allowed, true);
   assert.equal(canPerform("cloud_project_save", "Free", { export: 0, cloud_project_save: 1 }).allowed, true);
-  assert.equal(canPerform("cloud_project_save", "Free", { export: 0, cloud_project_save: 2 }).allowed, false);
+  assert.equal(canPerform("cloud_project_save", "Free", { export: 0, cloud_project_save: 2 }).allowed, true);
+  assert.equal(canPerform("cloud_project_save", "Free", { export: 0, cloud_project_save: 3 }).allowed, false);
 });
 
 test("usage event model does not accept media or project payloads in the client request", () => {

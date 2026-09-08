@@ -1,6 +1,18 @@
 # Status
 
-## Current milestone: Production authentication UX and export gate
+## Current milestone: Production cloud projects and project library
+
+Complete:
+
+- Evolved the existing user-owned `projects` table into a production cloud-project record with canonical Quran metadata, media/thumbnail paths, source bytes, duration, export metadata fields, and a private direct-to-Supabase Storage workflow.
+- Added database RLS, private Storage path policies, authenticated owner-validating RPCs, transactional Free three-project enforcement, safe replacement cleanup, project deletion cleanup, and per-user storage aggregation. No service-role key is used in browser code.
+- Made the editor's top Save an explicit cloud save while retaining IndexedDB checkpoints for local safety. First cloud saves confirm the suggested canonical name; guest saves survive passwordless auth and reopen that modal. Existing cloud projects save in place and retain dirty state on failure.
+- Added the authenticated `/projects` dashboard with a dark original project library, private signed thumbnails, metadata/duration cards, search, rename, delete, and cloud-editor restore at `/editor?project=…`.
+- Preserved export authentication, locally rendered exports, TikTok behavior, and all Quran recognition/timing behavior. Paid storage and export-quality restrictions remain intentionally deferred.
+
+Verification: `npm test` (278 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` retained its production invariant pass but the optional ignored local real-audio benchmark reported FAIL in this workspace; no recognition code was changed and the pre-existing checked-in benchmark report remains the last passing baseline. The build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning. Live Supabase/browser validation remains manual because this workspace has no configured cloud test account or browser automation.
+
+## Previous milestone: Production authentication UX and export gate
 
 Complete:
 

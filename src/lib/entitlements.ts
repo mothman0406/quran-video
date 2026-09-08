@@ -12,7 +12,8 @@ export type PlanEntitlements = {
   availableFontTier: FontTier;
   availableTranslationTier: "saheeh-international" | "all";
   availableTransitionTier: "basic" | "all";
-  cloudProjectLimit: number;
+  /** null deliberately means the paid-project policy has not been decided yet. */
+  cloudProjectLimit: number | null;
   customStyleLimit: number | null;
   supportsAdvancedWordAlignment: boolean;
   supports4KExport: boolean;
@@ -22,13 +23,13 @@ export type PlanEntitlements = {
 };
 
 export const PLAN_ENTITLEMENTS: Readonly<Record<Plan, PlanEntitlements>> = {
-  Free: { plan: "Free", maxExportResolution: "720p", watermarkRequired: true, availableFontTier: "basic", availableTranslationTier: "saheeh-international", availableTransitionTier: "basic", cloudProjectLimit: 2, customStyleLimit: 2, supportsAdvancedWordAlignment: false, supports4KExport: false, supportsMultipleQiraat: false, supportsPremiumCreatorCapabilities: false, exportCountQuota: null },
-  Creator: { plan: "Creator", maxExportResolution: "1080p", watermarkRequired: false, availableFontTier: "all", availableTranslationTier: "all", availableTransitionTier: "all", cloudProjectLimit: 25, customStyleLimit: null, supportsAdvancedWordAlignment: true, supports4KExport: false, supportsMultipleQiraat: false, supportsPremiumCreatorCapabilities: false, exportCountQuota: null },
-  Pro: { plan: "Pro", maxExportResolution: "4k", watermarkRequired: false, availableFontTier: "all", availableTranslationTier: "all", availableTransitionTier: "all", cloudProjectLimit: 1_000, customStyleLimit: null, supportsAdvancedWordAlignment: true, supports4KExport: true, supportsMultipleQiraat: true, supportsPremiumCreatorCapabilities: true, exportCountQuota: null },
+  Free: { plan: "Free", maxExportResolution: "720p", watermarkRequired: true, availableFontTier: "basic", availableTranslationTier: "saheeh-international", availableTransitionTier: "basic", cloudProjectLimit: 3, customStyleLimit: 2, supportsAdvancedWordAlignment: false, supports4KExport: false, supportsMultipleQiraat: false, supportsPremiumCreatorCapabilities: false, exportCountQuota: null },
+  Creator: { plan: "Creator", maxExportResolution: "1080p", watermarkRequired: false, availableFontTier: "all", availableTranslationTier: "all", availableTransitionTier: "all", cloudProjectLimit: null, customStyleLimit: null, supportsAdvancedWordAlignment: true, supports4KExport: false, supportsMultipleQiraat: false, supportsPremiumCreatorCapabilities: false, exportCountQuota: null },
+  Pro: { plan: "Pro", maxExportResolution: "4k", watermarkRequired: false, availableFontTier: "all", availableTranslationTier: "all", availableTransitionTier: "all", cloudProjectLimit: null, customStyleLimit: null, supportsAdvancedWordAlignment: true, supports4KExport: true, supportsMultipleQiraat: true, supportsPremiumCreatorCapabilities: true, exportCountQuota: null },
 };
 
 export function getPlanEntitlements(plan: Plan): PlanEntitlements { return PLAN_ENTITLEMENTS[plan]; }
-export function getCloudProjectLimit(plan: Plan): number { return getPlanEntitlements(plan).cloudProjectLimit; }
+export function getCloudProjectLimit(plan: Plan): number | null { return getPlanEntitlements(plan).cloudProjectLimit; }
 export function getCustomStyleLimit(plan: Plan): number | null { return getPlanEntitlements(plan).customStyleLimit; }
 export function getMaxExportResolution(plan: Plan): ExportResolution { return getPlanEntitlements(plan).maxExportResolution; }
 export function isFontAvailable(plan: Plan, fontStyle: string): boolean { return hasFeature(plan, "all_fonts") || fontStyle === "uthmani"; }

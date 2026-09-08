@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY } from "../src/lib/editor/captions.ts";
 import { DEFAULT_PROJECT_FORMAT } from "../src/lib/editor/formats.ts";
-import { fromCloudProjectRow, hasProjectConflict, toCloudProjectPayload } from "../src/lib/cloud-sync.ts";
+import { fromCloudProjectRow, hasProjectConflict, toCloudProjectPayload, type CloudProjectRow } from "../src/lib/cloud-sync.ts";
+import { FREE_CLOUD_PROJECT_LIMIT, projectMediaPath, quranProjectMetadata } from "../src/lib/cloud-projects.ts";
 import type { SavedProject } from "../src/lib/schemas/project.ts";
 
 function project(overrides: Partial<SavedProject> = {}): SavedProject {
@@ -22,8 +23,9 @@ test("cloud payload maps stable identity and contains metadata only", () => {
 test("cloud rows restore the project schema and reject unsupported versions", () => {
   const saved = project({ updatedAt: "2026-01-02T00:00:00.000Z" });
   const payload = toCloudProjectPayload(saved);
-  assert.deepEqual(fromCloudProjectRow({ ...payload, user_id: "user-1", schema_version: 1 }), saved);
-  assert.throws(() => fromCloudProjectRow({ ...payload, user_id: "user-1", schema_version: 99 }), /schema version/);
+  const row: CloudProjectRow = { ...payload, user_id: "user-1", save_complete: true, source_media_path: null, source_media_type: null, source_media_name: null, source_media_size_bytes: null, thumbnail_path: null, thumbnail_size_bytes: null, last_export_quality: null, last_exported_at: null };
+  assert.deepEqual(fromCloudProjectRow(row), saved);
+  assert.throws(() => fromCloudProjectRow({ ...row, schema_version: 99 }), /schema version/);
 });
 
 test("conflict detection requires the same project identity and different timestamps", () => {
@@ -32,4 +34,16 @@ test("conflict detection requires the same project identity and different timest
   assert.equal(hasProjectConflict(local, { ...local, id: "other" }), false);
   assert.equal(hasProjectConflict(local, local), false);
   assert.equal(hasProjectConflict(null, local), false);
+});
+
+test("cloud project metadata derives a deterministic canonical Quran range", () => {
+  const caption = { id: "c", contentKind: "ayah" as const, verseKeys: ["70:1", "70:7"], startMs: 0, endMs: 1_000, arabic: "x", translation: null, transliteration: null, wordStart: 0, wordEnd: 1, wordCount: 1 };
+  const metadata = quranProjectMetadata(project({ captionSegments: [caption] }));
+  assert.equal(metadata.autoTitle, "Al-Ma'arij 1–7");
+  assert.equal(metadata.passageLabel, "Surah Al-Ma'arij · 70:1–7");
+});
+
+test("private media paths are scoped by user and project and Free is three projects", () => {
+  assert.match(projectMediaPath("user-a", "project-a", "source", "mp4", "nonce"), /^user-a\/project-a\/source-nonce\.mp4$/);
+  assert.equal(FREE_CLOUD_PROJECT_LIMIT, 3);
 });

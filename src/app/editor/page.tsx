@@ -109,18 +109,27 @@ import type {
 } from "@/lib/export/types";
 import type { OutputProfile } from "@/lib/export/output";
 import {
+  beginCloudProjectSave,
+  cancelCloudProjectSave,
+  cleanupReplacedCloudMedia,
+  completeCloudProjectSave,
+  createProjectThumbnail,
   deleteCloudProject,
+  downloadCloudProjectSource,
   getAuthSession,
   getCloudProject,
+  getCloudProjectRecord,
   getSupabaseClient,
-  hasProjectConflict,
   listCloudProjects,
-  saveCloudProject,
+  newCloudSourcePath,
+  newCloudThumbnailPath,
+  removePrivateProjectObjects,
+  uploadPrivateProjectObject,
 } from "@/lib/cloud-sync";
 import { exportAuthIntent, rememberAuthContinuation, rememberAuthResumeProject, takeAuthContinuation, takeAuthResumeProject } from "@/lib/auth-flow";
 import type { Session } from "@supabase/supabase-js";
 import { recordAuthenticatedUsage } from "@/lib/usage/client";
-import { getCloudProjectLimit, getCustomStyleLimit, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
+import { getCustomStyleLimit, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
 import { clampMediaTrim, clampTimelineViewport, createMediaTrim, createTimelineViewport, mediaKindForFile, mediaSourceFromFile, panTimelineViewport, pinchTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, snapCaptionBoundaryToPlayhead, timelineContentPosition, viewportPositionToTime, zoomTimelineViewport, type MediaSource, type MediaTrim, type TimelineViewport } from "@/lib/editor/media";
 import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
@@ -131,6 +140,7 @@ import { EditorHistory } from "@/lib/editor/history";
 import { DEFAULT_SOCIAL_PLATFORM_PREVIEW, moveRectToSafeArea, platformCaptionCollisions, socialPlatformGuide, type CaptionCanvasBounds, type SocialPlatformId } from "@/lib/editor/social-platform-guides";
 import { applyPlaybackRate, DEFAULT_PLAYBACK_RATE, resolvePlaybackRate, type PlaybackRate } from "@/lib/editor/playback-rate";
 import { createTikTokCaption } from "@/lib/tiktok/caption";
+import { cloudProjectName, quranProjectMetadata } from "@/lib/cloud-projects";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -290,6 +300,9 @@ export default function Home() {
   const [exportOpen, setExportOpen] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [authRestoreReady, setAuthRestoreReady] = useState(false);
+  const [cloudSaveOpen, setCloudSaveOpen] = useState(false);
+  const [cloudSaveName, setCloudSaveName] = useState("");
+  const [cloudSaveStatus, setCloudSaveStatus] = useState<string | null>(null);
   const [exportPreflight, setExportPreflight] = useState<ExportPreflightResult | null>(null);
   const [exportQuality, setExportQuality] = useState<ExportQuality>(
     DEFAULT_EXPORT_QUALITY,
@@ -307,7 +320,9 @@ export default function Home() {
   const [endAyah, setEndAyah] = useState(5);
   const [projectName, setProjectName] = useState("Untitled project");
   const [savedProject, setSavedProject] = useState<SavedProject | null>(null);
+  const [cloudProjectId, setCloudProjectId] = useState<string | null>(null);
   const [projects, setProjects] = useState<SavedProject[]>([]);
+  const [localRepositoryReady, setLocalRepositoryReady] = useState(false);
   const [projectsOpen, setProjectsOpen] = useState(false);
   const [cloudProjects, setCloudProjects] = useState<SavedProject[]>([]);
   const [cloudProjectsOpen, setCloudProjectsOpen] = useState(false);
@@ -320,6 +335,9 @@ export default function Home() {
   const repository = useRef<ProjectRepository | null>(null);
   const savedSignature = useRef<string | null>(null);
   const cloudBaselineUpdatedAt = useRef<string | null>(null);
+  const cloudMedia = useRef<{ sourcePath: string | null; thumbnailPath: string | null; thumbnailSize: number | null; sourceFingerprint: string | null }>({ sourcePath: null, thumbnailPath: null, thumbnailSize: null, sourceFingerprint: null });
+  const cloudProjectLoadStarted = useRef(false);
+  const localSafetyProjectId = useRef<string | null>(null);
   const generation = useRef(0);
   const captionProgress = useRef(new CaptionGenerationProgressController());
   const alignmentDebug = useRef<AlignmentDebug | null>(null);
@@ -517,7 +535,7 @@ export default function Home() {
                 ? error.message
                 : "Local project storage is unavailable.",
             ),
-          ).finally(() => setAuthRestoreReady(true));
+          ).finally(() => { setLocalRepositoryReady(true); setAuthRestoreReady(true); });
       } catch (error) {
         setErrorMessage(
           error instanceof Error
@@ -556,12 +574,39 @@ export default function Home() {
     return () => { active = false; subscription.data.subscription.unsubscribe(); };
   }, [handleSessionChange]);
   useEffect(() => {
-    if (!authRestoreReady || !session || takeAuthContinuation() !== "export") return;
+    if (!authRestoreReady || !session) return;
+    const continuation = takeAuthContinuation();
+    if (!continuation) return;
     const frame = requestAnimationFrame(() => {
       setAuthOpen(false);
-      openExportSettings();
+      if (continuation === "export") openExportSettings();
+      else {
+        setCloudSaveName(projectName || "Untitled Quran Project");
+        setCloudSaveOpen(true);
+      }
     });
     return () => cancelAnimationFrame(frame);
+  }, [authRestoreReady, projectName, session]);
+  useEffect(() => {
+    if (!authRestoreReady || !session || cloudProjectLoadStarted.current) return;
+    const projectId = new URLSearchParams(window.location.search).get("project");
+    if (!projectId) return;
+    cloudProjectLoadStarted.current = true;
+    void (async () => {
+      try {
+        const record = await getCloudProjectRecord(projectId);
+        if (!record) throw new Error("This cloud project was not found or is not available to your account.");
+        if (!(await openProject(record.project, true))) return;
+        setCloudProjectId(record.row.id);
+        cloudMedia.current = { sourcePath: record.row.source_media_path, thumbnailPath: record.row.thumbnail_path, thumbnailSize: record.row.thumbnail_size_bytes, sourceFingerprint: record.project.sourceMedia?.fingerprint ?? null };
+        const source = await downloadCloudProjectSource(record.row);
+        if (!source) { setErrorMessage("Source media needs to be relinked."); return; }
+        setPendingOpenProject(null);
+        loadSelectedSource(source, record.project.sourceMedia ?? mediaSourceFromFile(source, record.row.source_media_type?.startsWith("audio/") ? "audio" : "video"), { preserveCaptions: true });
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? `${error.message} Source media needs to be relinked.` : "Source media needs to be relinked.");
+      }
+    })();
   }, [authRestoreReady, session]);
   useEffect(
     () => () => {
@@ -602,6 +647,7 @@ export default function Home() {
     captionBackground,
     typography,
     transitionSettings,
+    playbackRate,
     showVerseNumber,
   });
   const currentExportFingerprint = JSON.stringify({
@@ -625,6 +671,21 @@ export default function Home() {
         : editorSignature !== savedSignature.current,
     );
   }, [editorSignature, videoFile, alignments.length, segments.length]);
+  // IndexedDB remains a background safety checkpoint; it intentionally never changes cloud-sync state.
+  useEffect(() => {
+    if (!localRepositoryReady || !repository.current || !(videoFile || alignments.length || segments.length)) return;
+    const timer = window.setTimeout(() => {
+      const now = new Date().toISOString();
+      const id = savedProject?.id ?? localSafetyProjectId.current ?? crypto.randomUUID();
+      localSafetyProjectId.current = id;
+      const checkpoint = projectSnapshot(id, projectName || "Untitled project", savedProject?.createdAt ?? now);
+      void repository.current?.put(checkpoint).then(async () => {
+        setSavedProject((current) => current?.id === checkpoint.id ? current : checkpoint);
+        setProjects(await repository.current!.list());
+      }).catch(() => undefined);
+    }, 900);
+    return () => window.clearTimeout(timer);
+  }, [alignments.length, editorSignature, localRepositoryReady, projectName, savedProject?.createdAt, savedProject?.id, segments.length, videoFile]);
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
       if (!dirty) return;
@@ -775,10 +836,13 @@ export default function Home() {
     setExportError(null);
     setExportDiagnostics(null);
     setSavedProject(null);
+    setCloudProjectId(null);
     setPendingOpenProject(null);
     setProjectName("Untitled project");
+    localSafetyProjectId.current = null;
     savedSignature.current = null;
     cloudBaselineUpdatedAt.current = null;
+    cloudMedia.current = { sourcePath: null, thumbnailPath: null, thumbnailSize: null, sourceFingerprint: null };
     resetProjectHistory();
   }
   function projectSnapshot(
@@ -838,24 +902,6 @@ export default function Home() {
       await repository.current.put(project);
       setSavedProject(project);
       setProjectName(title);
-      savedSignature.current = JSON.stringify({
-        projectName: title,
-        sourceMedia: project.sourceMedia,
-        projectAssets: project.projectAssets,
-        activeMediaAssetId: project.activeMediaAssetId,
-        mediaTrim: project.mediaTrim,
-        format: project.format,
-        verseAlignments: project.verseAlignments,
-        captionSegments: project.captionSegments,
-        captions: project.captions,
-        positioning: project.positioning,
-        captionBackground: project.captionBackground,
-        typography: project.typography,
-        transitionSettings: project.transitionSettings,
-        playbackRate: project.playbackRate,
-        showVerseNumber: project.showVerseNumber,
-      });
-      setDirty(false);
       setProjects(await repository.current.list());
     } catch (error) {
       setErrorMessage(
@@ -874,76 +920,95 @@ export default function Home() {
     setSavedProject(snapshot);
     setProjects(await repository.current.list());
   }
-  async function saveToAccount() {
+  function startCloudSave() {
     if (!session || !getSupabaseClient()) {
-      setErrorMessage("Sign in to save project metadata to your account.");
+      rememberAuthContinuation("save");
+      setAuthOpen(true);
       return;
     }
-    const title = window
-      .prompt(
-        "Project name",
-        projectName || videoFile?.name || "Untitled project",
-      )
-      ?.trim();
-    if (!title) return;
+    if (!cloudProjectId) {
+      const now = new Date().toISOString();
+      const draft = projectSnapshot(savedProject?.id ?? crypto.randomUUID(), projectName || "Untitled project", savedProject?.createdAt ?? now);
+      setCloudSaveName(cloudProjectName(draft));
+      setCloudSaveStatus(null);
+      setCloudSaveOpen(true);
+      return;
+    }
+    void saveToCloud(projectName);
+  }
+  async function saveToCloud(requestedName: string) {
+    if (!session || !repository.current) return;
+    const name = requestedName.trim();
+    if (!name) { setCloudSaveStatus("Enter a project name."); return; }
     const now = new Date().toISOString();
-    const local = projectSnapshot(
-      savedProject?.id ?? crypto.randomUUID(),
-      title,
-      savedProject?.createdAt ?? now,
-    );
+    const id = cloudProjectId ?? savedProject?.id ?? crypto.randomUUID();
+    const snapshot = projectSnapshot(id, name, savedProject?.createdAt ?? now);
+    let reserved = false;
+    const uploaded: string[] = [];
+    const oldSourcePath = cloudMedia.current.sourcePath;
+    const oldThumbnailPath = cloudMedia.current.thumbnailPath;
     try {
-      const remote = await getCloudProject(local.id);
-      const currentCloudProjects = await listCloudProjects();
-      setCloudProjects(currentCloudProjects);
-      if (!remote && currentCloudProjects.length >= getCloudProjectLimit(plan)) {
-        setErrorMessage(`Your ${plan} plan supports up to ${getCloudProjectLimit(plan)} cloud projects.`);
-        return;
+      setCloudSaveStatus("Preparing your project…");
+      await repository.current.put(snapshot);
+      setProjects(await repository.current.list());
+      if (!cloudProjectId) { await beginCloudProjectSave(snapshot); reserved = true; }
+      else {
+        const remote = await getCloudProject(cloudProjectId);
+        if (remote && cloudBaselineUpdatedAt.current && remote.updatedAt !== cloudBaselineUpdatedAt.current && !window.confirm("The cloud version changed since this project was opened. Choose OK to replace it with this local version, or Cancel to open the cloud version.")) return;
       }
-      const hasRemoteChange = Boolean(
-        remote &&
-          ((cloudBaselineUpdatedAt.current &&
-            remote.updatedAt !== cloudBaselineUpdatedAt.current) ||
-            (!cloudBaselineUpdatedAt.current &&
-              hasProjectConflict(savedProject, remote))),
-      );
-      if (hasRemoteChange) {
-        if (
-          !window.confirm(
-            "The cloud version changed since this project was opened. Choose OK to replace it with this local version, or Cancel to open the cloud version.",
-          )
-        ) {
-          if (remote) await openProject(remote, true);
-          return;
-        }
+      const sourceChanged = Boolean(videoFile && (videoFile !== null && (mediaSource?.fingerprint ?? `${videoFile.name}:${videoFile.size}`) !== cloudMedia.current.sourceFingerprint));
+      let sourcePath = oldSourcePath;
+      let sourceType = savedProject?.sourceMedia?.mimeType ?? null;
+      let sourceName = savedProject?.sourceMedia?.fileName ?? null;
+      let sourceSize = savedProject?.sourceMedia?.fileSize ?? null;
+      let thumbnailPath = oldThumbnailPath;
+      let thumbnailSize: number | null = cloudMedia.current.thumbnailSize;
+      if (sourceChanged && videoFile) {
+        setCloudSaveStatus("Uploading source media…");
+        sourcePath = newCloudSourcePath(session.user.id, id, videoFile);
+        await uploadPrivateProjectObject(sourcePath, videoFile, videoFile.type || "application/octet-stream");
+        uploaded.push(sourcePath);
+        sourceType = videoFile.type || mediaSource?.mimeType || "application/octet-stream";
+        sourceName = videoFile.name; sourceSize = videoFile.size;
       }
-      const saved = await saveCloudProject(local);
+      if (sourceChanged || !thumbnailPath) {
+        setCloudSaveStatus("Creating project thumbnail…");
+        const thumbnail = await createProjectThumbnail(videoFile, Boolean(mediaSource?.hasVideo));
+        thumbnailPath = newCloudThumbnailPath(session.user.id, id);
+        setCloudSaveStatus("Uploading project thumbnail…");
+        await uploadPrivateProjectObject(thumbnailPath, thumbnail, "image/webp");
+        uploaded.push(thumbnailPath); thumbnailSize = thumbnail.size;
+      }
+      setCloudSaveStatus("Saving project state…");
+      const row = await completeCloudProjectSave(snapshot, { source_media_path: sourcePath, source_media_type: sourceType, source_media_name: sourceName, source_media_size_bytes: sourceSize, thumbnail_path: thumbnailPath, thumbnail_size_bytes: thumbnailSize });
+      void cleanupReplacedCloudMedia(id, oldSourcePath, oldThumbnailPath).catch(() => undefined);
+      const saved = { ...snapshot, title: row.name, createdAt: row.created_at, updatedAt: row.updated_at };
+      cloudBaselineUpdatedAt.current = row.updated_at;
+      cloudMedia.current = { sourcePath: row.source_media_path, thumbnailPath: row.thumbnail_path, thumbnailSize: row.thumbnail_size_bytes, sourceFingerprint: snapshot.sourceMedia?.fingerprint ?? null };
+      savedSignature.current = JSON.stringify({ projectName: row.name, sourceMedia: snapshot.sourceMedia, projectAssets: snapshot.projectAssets, activeMediaAssetId: snapshot.activeMediaAssetId, mediaTrim: snapshot.mediaTrim, format: snapshot.format, verseAlignments: snapshot.verseAlignments, captionSegments: snapshot.captionSegments, captions: snapshot.captions, positioning: snapshot.positioning, captionBackground: snapshot.captionBackground, typography: snapshot.typography, transitionSettings: snapshot.transitionSettings, playbackRate: snapshot.playbackRate, showVerseNumber: snapshot.showVerseNumber });
+      setCloudProjectId(row.id); setSavedProject(saved); setProjectName(row.name); setCloudSaveOpen(false); setCloudSaveStatus(null); setDirty(false);
       void recordAuthenticatedUsage("cloud_project_saved", `${saved.id}:${saved.updatedAt}`).catch(() => undefined);
-      cloudBaselineUpdatedAt.current = saved.updatedAt;
-      setSavedProject(saved);
-      setProjectName(saved.title);
-      setCloudProjects(await listCloudProjects());
-      setErrorMessage(null);
+      setCloudProjects(await listCloudProjects()); setErrorMessage(null);
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error
-          ? error.message
-          : "Could not save the project to your account.",
-      );
+      if (uploaded.length) void removePrivateProjectObjects(uploaded).catch(() => undefined);
+      if (reserved) void cancelCloudProjectSave(id).catch(() => undefined);
+      const message = error instanceof Error ? error.message : "Could not save the project to the cloud.";
+      setCloudSaveStatus(message); setErrorMessage(message);
     }
   }
-  async function openProject(project: SavedProject, fromCloud = cloudProjectsOpen) {
+  async function openProject(project: SavedProject, fromCloud = cloudProjectsOpen): Promise<boolean> {
     if (
       dirty &&
       !window.confirm("Discard unsaved changes and open this project?")
     )
-      return;
+      return false;
     setProjectsOpen(false);
     clearVideo();
     setExportQuality(DEFAULT_EXPORT_QUALITY);
     setExportPreflight(null);
     setOutputPlan(null);
     setSavedProject(project);
+    if (fromCloud) setCloudProjectId(project.id);
     setProjectAssets(project.projectAssets.map((asset) => asset.type === "text" ? asset : { ...asset, availability: "needs-relink" }));
     setActiveMediaAssetId(project.activeMediaAssetId);
     assetFiles.current.clear();
@@ -995,6 +1060,7 @@ export default function Home() {
     const job = ++generation.current;
     await loadCanonical(keys, job);
     await loadTranslations(keys, job);
+    return true;
   }
   async function deleteProject(project: SavedProject) {
     if (
@@ -2473,14 +2539,14 @@ export default function Home() {
         onStartAyahChange={setStartAyah}
         onEndAyahChange={setEndAyah}
         onClearVideo={clearVideo}
-        onSaveProject={() => void saveProject()}
+        onSaveProject={startCloudSave}
         onUndo={undoProjectHistory}
         onRedo={redoProjectHistory}
         onHistoryTransactionStart={beginProjectHistoryTransaction}
         onHistoryTransactionCommit={commitProjectHistoryTransaction}
-        onSaveToAccount={() => void saveToAccount()}
+        onSaveToAccount={startCloudSave}
         onOpenProjects={() => setProjectsOpen(true)}
-        onOpenCloudProjects={() => { void listCloudProjects().then(setCloudProjects).catch((error: unknown) => setErrorMessage(error instanceof Error ? error.message : "Could not list cloud projects.")); setCloudProjectsOpen(true); }}
+        onOpenCloudProjects={() => { window.location.assign("/projects"); }}
         onBeforeAuthenticate={checkpointProjectForAuthentication}
         onDiscard={savedProject ? () => void openProject(savedProject) : newProject}
         onNewProject={newProject}
@@ -4015,6 +4081,20 @@ export default function Home() {
         </div>
       </div>
       </div> */}
+      {cloudSaveOpen && (
+        <div className="editor-auth-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !cloudSaveStatus?.startsWith("Uploading")) setCloudSaveOpen(false); }}>
+          <div className="editor-auth-modal cloud-save-modal" role="dialog" aria-modal="true" aria-labelledby="save-project-title">
+            <button className="editor-auth-close" type="button" aria-label="Close save project" onClick={() => setCloudSaveOpen(false)}>×</button>
+            <p className="editor-auth-brand">Quran Video</p><h2 id="save-project-title">Save project</h2>
+            <p id="save-project-description">Save this editable project privately to your account.</p>
+            <label htmlFor="cloud-project-name">Project name</label>
+            <input id="cloud-project-name" maxLength={200} value={cloudSaveName} onChange={(event) => setCloudSaveName(event.target.value)} disabled={Boolean(cloudSaveStatus?.startsWith("Uploading") || cloudSaveStatus?.startsWith("Saving"))} />
+            <div className="cloud-save-passage"><span>Quran passage</span><strong>{quranProjectMetadata(projectSnapshot(cloudProjectId ?? savedProject?.id ?? "draft", cloudSaveName || projectName || "Untitled project", savedProject?.createdAt ?? new Date().toISOString())).passageLabel ?? "Passage will be saved when detected"}</strong></div>
+            {cloudSaveStatus && <p className={cloudSaveStatus.startsWith("Could not") || cloudSaveStatus.startsWith("Your free") || cloudSaveStatus.startsWith("Enter") ? "editor-auth-message editor-auth-error" : "editor-auth-message"} role="status">{cloudSaveStatus}</p>}
+            <div className="cloud-save-actions"><button className="editor-button editor-button-quiet" type="button" onClick={() => setCloudSaveOpen(false)}>Cancel</button><button className="editor-button editor-button-accent" type="button" disabled={Boolean(cloudSaveStatus && !cloudSaveStatus.startsWith("Could not") && !cloudSaveStatus.startsWith("Your free") && !cloudSaveStatus.startsWith("Enter"))} onClick={() => void saveToCloud(cloudSaveName)}>Save project</button></div>
+          </div>
+        </div>
+      )}
       {projectsOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"

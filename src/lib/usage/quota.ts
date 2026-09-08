@@ -4,7 +4,7 @@ export type UsageAction = "export" | "cloud_project_save";
 export type Usage = Record<UsageAction, number>;
 
 export type PlanLimits = {
-  cloudProjects: number;
+  cloudProjects: number | null;
   exportCount: null;
 };
 

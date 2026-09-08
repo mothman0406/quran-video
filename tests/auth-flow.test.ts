@@ -14,6 +14,7 @@ function storage() {
 test("public landing and editor routes remain safe auth return destinations", () => {
   assert.equal(safeAuthReturnPath("/"), "/");
   assert.equal(safeAuthReturnPath("/editor"), "/editor");
+  assert.equal(safeAuthReturnPath("/projects"), "/projects");
   assert.equal(safeAuthReturnPath("https://attacker.example/editor"), "/editor");
   assert.equal(safeAuthReturnPath("//attacker.example"), "/editor");
 });
@@ -35,4 +36,10 @@ test("auth continuation and local resume identity are minimal, one-time browser 
   assert.equal(takeAuthContinuation(sessionStorage), null);
   assert.equal(takeAuthResumeProject(sessionStorage), "project-123");
   assert.equal(takeAuthResumeProject(sessionStorage), null);
+});
+
+test("guest save continuation survives the authentication return", () => {
+  const sessionStorage = storage();
+  rememberAuthContinuation("save", sessionStorage);
+  assert.equal(takeAuthContinuation(sessionStorage), "save");
 });

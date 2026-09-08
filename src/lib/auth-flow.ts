@@ -1,4 +1,4 @@
-export type AuthContinuation = "export";
+export type AuthContinuation = "export" | "save";
 export const ACCOUNT_PLANS = ["free", "pro", "premium"] as const;
 export type AccountPlan = (typeof ACCOUNT_PLANS)[number];
 
@@ -20,9 +20,10 @@ export function accountPlanForAuthenticatedUser(): AccountPlan {
   return "free";
 }
 
-/** OAuth and email links may only return to public, first-party editor routes. */
-export function safeAuthReturnPath(value: string | null | undefined): "/" | "/editor" {
-  return value === "/" ? "/" : "/editor";
+/** OAuth and email links may only return to public, first-party application routes. */
+export function safeAuthReturnPath(value: string | null | undefined): "/" | "/editor" | "/projects" {
+  if (value === "/" || value === "/projects") return value;
+  return "/editor";
 }
 
 type SessionStorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -39,7 +40,7 @@ export function rememberAuthContinuation(continuation: AuthContinuation, storage
 export function takeAuthContinuation(storage = browserSessionStorage()): AuthContinuation | null {
   const value = storage?.getItem(AUTH_CONTINUATION_STORAGE_KEY);
   storage?.removeItem(AUTH_CONTINUATION_STORAGE_KEY);
-  return value === "export" ? value : null;
+  return value === "export" || value === "save" ? value : null;
 }
 
 export function rememberAuthResumeProject(id: string, storage = browserSessionStorage()): void {
