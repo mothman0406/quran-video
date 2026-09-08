@@ -1,5 +1,30 @@
 # Status
 
+## Current milestone: Real caption-generation progress
+
+Complete:
+
+- Added one centralized, monotonic caption-generation progress controller for
+  the real browser-local pipeline: media preparation, VAD, model download,
+  Quran-wide passage identification, accepted-span confirmation, canonical
+  word alignment, caption construction, translation enrichment, and
+  finalization.
+- The editor now keeps the canvas visible and presents an accessible overall
+  progress bar, concise current-stage copy, accurate FastConformer download
+  bytes when an uncached model is fetched, and actual identification-window
+  counts. Cached runs skip the download phase naturally.
+- Quran identity is shown only after the production passage decision accepts a
+  canonical span. Ambiguous identification exits loading into editable manual
+  passage recovery; failures replace the progress UI with a clear retry path.
+  Retry, clearing, and source replacement reset the controller and reject
+  stale async updates.
+- Recognition, passage decision, canonical timing, and caption segmentation
+  are unchanged. Development builds retain concise stage timing diagnostics.
+
+Verification: focused progress tests (5 passing), `npx tsc --noEmit`, `npm run
+lint -- --quiet`, `npm run build`, and `git diff --check` pass. Build retains
+the pre-existing non-fatal VAD ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Transactional editor Undo / Redo
 
 Complete:

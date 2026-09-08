@@ -10,6 +10,8 @@ import type { CaptionStyle, CaptionLayer, LocalCaptionStyle } from "@/lib/editor
 import type { CaptionObject, CaptionResizeEdge } from "@/components/caption-preview";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import type { RightInspectorMode } from "@/lib/editor/selection";
+import type { CaptionGenerationProgress } from "@/lib/editor/caption-generation-progress";
+import { hafsSurahs } from "@/lib/recognition/core";
 import { arabicCaptionDisplay, captionSegmentLabel, getActiveCaptionSegment, translationDisplayText } from "@/lib/editor/captions";
 import CaptionPreview from "@/components/caption-preview";
 import SafeAreaOverlay from "@/components/safe-area-overlay";
@@ -37,7 +39,7 @@ type EditorWorkspaceProps = {
   previewRef: React.RefObject<HTMLDivElement | null>;
   timelineRef: React.RefObject<HTMLDivElement | null>;
   stage: Stage;
-  progress: { phase?: string; completed?: number; total?: number } | null;
+  progress: CaptionGenerationProgress | null;
   support: { supported: boolean; reason: string } | null;
   alignments: { surahNumber: number; ayahNumber: number; confidence: number }[];
   content: Readonly<Record<string, QuranContentResponse>>;
@@ -131,6 +133,9 @@ type EditorWorkspaceProps = {
   onCopyAlignmentDebug: () => void;
   onCorrectDetection: () => void;
   onToggleCorrection: () => void;
+  onSurahChange: (surah: number) => void;
+  onStartAyahChange: (ayah: number) => void;
+  onEndAyahChange: (ayah: number) => void;
   onClearVideo: () => void;
   onSaveProject: () => void;
   onUndo: () => void;
@@ -214,7 +219,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown, onSetRightInspectorMode, onSelectMedia,
     onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
-    onCorrectDetection, onToggleCorrection, onClearVideo, onSaveProject, onUndo, onRedo, onHistoryTransactionStart, onHistoryTransactionCommit, onSaveToAccount, onOpenProjects,
+    onCorrectDetection, onToggleCorrection, onSurahChange, onStartAyahChange, onEndAyahChange, onClearVideo, onSaveProject, onUndo, onRedo, onHistoryTransactionStart, onHistoryTransactionCommit, onSaveToAccount, onOpenProjects,
     onOpenCloudProjects, onSessionChange, onPlanChange, onDiscard, onNewProject, onExportOpen, onExport, onCancelExport, onDownloadExport,
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange,
     onSetShowVerseNumber, onSetShowSafeArea, onApplyStyle, onSaveCurrentStyle, onSetLocalStyleName,
@@ -365,11 +370,16 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           </div>
         </div>{timelineViewport.zoom > 1 && <input className="editor-timeline-pan" aria-label="Pan timeline" type="range" min="0" max={Math.max(0, durationMs - visibleDuration)} value={Math.min(timelineViewport.visibleStartMs, Math.max(0, durationMs - visibleDuration))} onChange={(event) => onTimelinePan(Number(event.target.value))} />}</div>}
         {(busy || (stage === "complete" && alignments.length > 0) || showCorrection || errorMessage || timingWarning || exportState) && <div className="editor-notices">
-          {busy && <div className="editor-notice"><strong>{stage === "detecting-speech" ? "Checking local speech" : stage === "loading-model" ? "Loading recognition model" : stage === "transcribing" ? "Transcribing locally" : stage === "matching" ? "Matching Quran" : "Preparing captions"}</strong><span>Audio stays in this browser{progress?.total ? ` · ${progress.completed ?? 0}/${progress.total} chunks` : ""}.</span></div>}
+          {busy && progress && <div className="editor-generation-progress" aria-live="polite">
+            <div className="editor-generation-progress-heading"><strong>Generating Quran captions</strong><output>{Math.round(progress.progress * 100)}%</output></div>
+            <div className="editor-generation-progress-track" role="progressbar" aria-label="Caption generation progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress.progress * 100)}><span style={{ width: `${Math.round(progress.progress * 100)}%` }} /></div>
+            <strong className="editor-generation-progress-label">{progress.label}</strong>
+            <span>{progress.detail ?? "Your recitation stays in this browser."}</span>
+          </div>}
           {stage === "complete" && alignments.length > 0 && <div className="editor-notice editor-notice-success"><strong>Detected Surah {alignments[0].surahNumber} · ayat {alignments[0].ayahNumber}–{alignments.at(-1)?.ayahNumber}</strong><span>{Math.round((alignments.reduce((sum, item) => sum + item.confidence, 0) / alignments.length) * 100)}% overall confidence</span></div>}
           {timingWarning && <div className="editor-notice">{timingWarning}</div>}
-          {showCorrection && <div className="editor-correction"><SectionLabel>Correct detection</SectionLabel><div><select aria-label="Surah" className="editor-select" value={surah}><option value={surah}>Surah {surah}</option></select><input aria-label="First ayah" type="number" value={startAyah} readOnly /><input aria-label="Last ayah" type="number" value={endAyah} readOnly /><button className="editor-button editor-button-primary" type="button" onClick={onCorrectDetection}>Use range</button></div></div>}
-          {errorMessage && <div className="editor-notice editor-notice-error">{errorMessage}</div>}
+          {showCorrection && <div className="editor-correction"><SectionLabel>Choose the Quran passage</SectionLabel><div><select aria-label="Surah" className="editor-select" value={surah} onChange={(event) => onSurahChange(Number(event.target.value))}><option value={0} disabled>Choose a Surah</option>{hafsSurahs.map((item) => <option key={item.number} value={item.number}>Surah {item.number} · {item.name}</option>)}</select><input aria-label="First ayah" type="number" min="1" value={startAyah} onChange={(event) => onStartAyahChange(Number(event.target.value))} /><input aria-label="Last ayah" type="number" min="1" value={endAyah} onChange={(event) => onEndAyahChange(Number(event.target.value))} /><button className="editor-button editor-button-primary" type="button" onClick={onCorrectDetection}>Use range</button></div></div>}
+          {errorMessage && <div className="editor-notice editor-notice-error"><span>{errorMessage}</span><button className="editor-text-button" type="button" onClick={onDetect}>Try again</button></div>}
           {exportState && <div className="editor-notice"><strong>{exportState === "complete" ? "Export complete" : exportState === "error" ? "Export stopped" : `Exporting · ${exportState.phase}`}</strong><span>{exportError ?? "Source media is processed locally."}</span></div>}
         </div>}
       </section>

@@ -202,9 +202,19 @@ export type FastConformerResult = {
   };
 };
 
-export type FastConformerRunner = (verses: readonly QuranCorpusVerse[], matches: readonly { startMs: number; endMs: number }[]) => Promise<FastConformerResult>;
+export type FastConformerProgress =
+  | { phase: "downloading-model"; bytesLoaded: number; bytesTotal: number }
+  | { phase: "identifying-passage"; completed: number; total: number }
+  | { phase: "aligning-words"; step: "inference" | "forced-alignment" };
+export type FastConformerProgressCallback = (progress: FastConformerProgress) => void;
+
+export type FastConformerRunner = (
+  verses: readonly QuranCorpusVerse[],
+  matches: readonly { startMs: number; endMs: number }[],
+  onProgress?: FastConformerProgressCallback,
+) => Promise<FastConformerResult>;
 /** Independent Quran-wide CTC identifier used before canonical passage selection. */
-export type FastConformerIdentificationRunner = () => Promise<FastConformerIdentificationResult>;
+export type FastConformerIdentificationRunner = (onProgress?: FastConformerProgressCallback) => Promise<FastConformerIdentificationResult>;
 
 let sharedModelPromise: Promise<LoadedFastConformer> | null = null;
 let sharedQuranIdentificationIndexPromise: Promise<QuranWideLexicalIndex> | null = null;
@@ -277,7 +287,33 @@ function assetDiagnostic(url: string, overrides: Partial<FastConformerAssetDiagn
   };
 }
 
-async function loadPinnedAsset(url: string, expectedBytes: number): Promise<FastConformerAsset> {
+async function readAssetBytes(response: Response, expectedBytes: number, onBytesLoaded?: (bytesLoaded: number) => void) {
+  if (!response.body) {
+    const buffer = await response.arrayBuffer();
+    onBytesLoaded?.(buffer.byteLength);
+    return buffer;
+  }
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let bytesLoaded = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    chunks.push(value);
+    bytesLoaded += value.byteLength;
+    onBytesLoaded?.(Math.min(bytesLoaded, expectedBytes));
+  }
+  const bytes = new Uint8Array(bytesLoaded);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes.buffer;
+}
+
+async function loadPinnedAsset(url: string, expectedBytes: number, onBytesLoaded?: (bytesLoaded: number) => void): Promise<FastConformerAsset> {
   const cache = await browserCache();
   const cached = cache ? await cache.match(url) : undefined;
   if (cached) {
@@ -298,7 +334,7 @@ async function loadPinnedAsset(url: string, expectedBytes: number): Promise<Fast
     lastStatus = response.status;
     if (response.status === 429) lastRetryAfterMs = retryAfterMs(response.headers.get("Retry-After"));
     if (response.ok) {
-      const buffer = await response.arrayBuffer();
+      const buffer = await readAssetBytes(response, expectedBytes, onBytesLoaded);
       const diagnostic = assetDiagnostic(url, {
         assetUrlHost: new URL(response.url || url).host,
         httpStatus: response.status,
@@ -334,10 +370,10 @@ async function loadPinnedAsset(url: string, expectedBytes: number): Promise<Fast
 }
 
 /** Loads one immutable public Tilawa artifact with a cache-first, module-single-flight request. */
-export function loadFastConformerAsset(url: string, expectedBytes: number): Promise<FastConformerAsset> {
+export function loadFastConformerAsset(url: string, expectedBytes: number, onBytesLoaded?: (bytesLoaded: number) => void): Promise<FastConformerAsset> {
   const existing = sharedAssetPromises.get(url);
   if (existing) return existing;
-  const loading = loadPinnedAsset(url, expectedBytes).catch((error) => {
+  const loading = loadPinnedAsset(url, expectedBytes, onBytesLoaded).catch((error) => {
     sharedAssetPromises.delete(url);
     throw error;
   });
@@ -345,13 +381,22 @@ export function loadFastConformerAsset(url: string, expectedBytes: number): Prom
   return loading;
 }
 
-async function loadAssets(): Promise<FastConformerAssets> {
+async function loadAssets(onProgress?: FastConformerProgressCallback): Promise<FastConformerAssets> {
   // Hugging Face's unauthenticated resolver can reject bursts while its queue
   // is full. Keep cold resolver traffic to one pinned asset at a time.
-  const model = await loadFastConformerAsset(FASTCONFORMER_MODEL_URL, FASTCONFORMER_MODEL_BYTES);
-  const vocabulary = await loadFastConformerAsset(VOCAB_URL, FASTCONFORMER_VOCAB_BYTES);
-  const tokenTable = await loadFastConformerAsset(TOKEN_TABLE_URL, FASTCONFORMER_TOKEN_TABLE_BYTES);
-  const quran = await loadFastConformerAsset(QURAN_URL, FASTCONFORMER_QURAN_BYTES);
+  const totalBytes = FASTCONFORMER_MODEL_BYTES + FASTCONFORMER_VOCAB_BYTES + FASTCONFORMER_TOKEN_TABLE_BYTES + FASTCONFORMER_QURAN_BYTES;
+  let completedBytes = 0;
+  const load = async (url: string, expectedBytes: number) => {
+    const asset = await loadFastConformerAsset(url, expectedBytes, (bytesLoaded) => {
+      onProgress?.({ phase: "downloading-model", bytesLoaded: completedBytes + bytesLoaded, bytesTotal: totalBytes });
+    });
+    completedBytes += expectedBytes;
+    return asset;
+  };
+  const model = await load(FASTCONFORMER_MODEL_URL, FASTCONFORMER_MODEL_BYTES);
+  const vocabulary = await load(VOCAB_URL, FASTCONFORMER_VOCAB_BYTES);
+  const tokenTable = await load(TOKEN_TABLE_URL, FASTCONFORMER_TOKEN_TABLE_BYTES);
+  const quran = await load(QURAN_URL, FASTCONFORMER_QURAN_BYTES);
   const cacheStatus = model.diagnostic.cacheStatus === "browser-cache" && vocabulary.diagnostic.cacheStatus === "browser-cache" && tokenTable.diagnostic.cacheStatus === "browser-cache" && quran.diagnostic.cacheStatus === "browser-cache"
     ? "browser-cache"
     : model.diagnostic.cacheStatus === "cache-unavailable" || vocabulary.diagnostic.cacheStatus === "cache-unavailable" || tokenTable.diagnostic.cacheStatus === "cache-unavailable" || quran.diagnostic.cacheStatus === "cache-unavailable"
@@ -393,11 +438,11 @@ async function sha256Hex(buffer: ArrayBuffer): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function loadModel(): Promise<LoadedFastConformer> {
+async function loadModel(onProgress?: FastConformerProgressCallback): Promise<LoadedFastConformer> {
   const modelLoadStartedAt = performance.now();
   let assets: FastConformerAssets;
   try {
-    assets = await loadAssets();
+    assets = await loadAssets(onProgress);
   } catch (error) {
     throw new FastConformerStageError("asset", error);
   }
@@ -783,12 +828,12 @@ function unavailableIdentification(reason: string, totalMs: number): FastConform
  * later canonical-span decision.
  */
 export function createFastConformerIdentificationRunner(audio: Float32Array, speechRegions: readonly VadSpeechRegion[]): FastConformerIdentificationRunner {
-  return async () => {
+  return async (onProgress) => {
     const startedAt = performance.now();
     const audioWindows = identificationAudioWindows(audio, speechRegions);
     if (!audioWindows.length) return unavailableIdentification("No sufficiently voiced VAD window was available for FastConformer identification.", Math.round(performance.now() - startedAt));
     try {
-      sharedModelPromise ??= loadModel().catch((error) => { sharedModelPromise = null; throw error; });
+      sharedModelPromise ??= loadModel(onProgress).catch((error) => { sharedModelPromise = null; throw error; });
       const loaded = await sharedModelPromise;
       const index = await quranWideIdentificationIndex(loaded.assets);
       if (!loaded.session.inputNames.includes("audio_signal") || !loaded.session.inputNames.includes("length")) throw new Error(`FastConformer has an unsupported input contract: ${loaded.session.inputNames.join(", ")}.`);
@@ -814,6 +859,7 @@ export function createFastConformerIdentificationRunner(audio: Float32Array, spe
           vocabulary: loaded.assets.vocabulary,
           blankTokenId: BLANK_TOKEN_ID,
         }));
+        onProgress?.({ phase: "identifying-passage", completed: windowIndex + 1, total: audioWindows.length });
       }
       const summary = summarizeFastConformerIdentification(windows, inferenceMs);
       return { ...summary, performance: { ...summary.performance, totalMs: Math.round(performance.now() - startedAt) } };
@@ -830,7 +876,7 @@ export function createFastConformerRunner(
   analysisRunId?: string,
   options: { includeTransitionBoundaryDiagnostics?: boolean; wordEndPolicy?: "ctc-transition-boundary" | "first-aligned-token" } = {},
 ): FastConformerRunner {
-  return async (verses, matches) => {
+  return async (verses, matches, onProgress) => {
     const startedAt = performance.now();
     const window = passageWindow(audio, speechRegions, matches);
     if (!window) return unavailable("No VAD-constrained Quran interval was available for FastConformer alignment.", verses, startedAt, analysisRunId, { failureStage: "target-construction" });
@@ -840,7 +886,7 @@ export function createFastConformerRunner(
     let failureStage: FastConformerFailureStage = "asset";
     try {
       const loadingStartedAt = performance.now();
-      sharedModelPromise ??= loadModel().catch((error) => { sharedModelPromise = null; throw error; });
+      sharedModelPromise ??= loadModel(onProgress).catch((error) => { sharedModelPromise = null; throw error; });
       loaded = await sharedModelPromise;
       const loadMs = Math.round(performance.now() - loadingStartedAt);
       failureStage = "target-construction";
@@ -848,6 +894,7 @@ export function createFastConformerRunner(
       failureStage = "session-create";
       if (!loaded.session.inputNames.includes("audio_signal") || !loaded.session.inputNames.includes("length")) throw new Error(`FastConformer has an unsupported input contract: ${loaded.session.inputNames.join(", ")}.`);
       failureStage = "inference";
+      onProgress?.({ phase: "aligning-words", step: "inference" });
       const inferenceStartedAt = performance.now();
       const outputs = await loaded.session.run({
         audio_signal: new loaded.ort.Tensor("float32", window.audio, [1, window.audio.length]),
@@ -859,6 +906,7 @@ export function createFastConformerRunner(
       const inferenceMs = Math.round(performance.now() - inferenceStartedAt);
       const upstreamTilawaResult = await runUpstreamTilawaOracle(window.audio, output.data, frames, vocabularySize, loaded.assets);
       failureStage = "forced-alignment";
+      onProgress?.({ phase: "aligning-words", step: "forced-alignment" });
       const alignmentStartedAt = performance.now();
       const alignmentWithoutPrelude = forceAlignCtc(encoded.canonicalWords, encoded.targetTokens, { values: output.data, frames, vocabularySize }, {
         blankTokenId: BLANK_TOKEN_ID,

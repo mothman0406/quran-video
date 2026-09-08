@@ -11,10 +11,14 @@ import {
   useState,
 } from "react";
 import { analyzeTranscript, canonicalSpanFromFastConformerIdentification, createPrimaryTranscript, hafsSurahs, hafsVerses } from "@/lib/recognition/core";
-import { FASTCONFORMER_MODEL, FASTCONFORMER_MODEL_ARTIFACT, FASTCONFORMER_MODEL_BYTES, FASTCONFORMER_MODEL_LICENSE, FASTCONFORMER_RUNTIME } from "@/lib/recognition/local-fastconformer";
+import { FASTCONFORMER_MODEL, FASTCONFORMER_MODEL_ARTIFACT, FASTCONFORMER_MODEL_BYTES, FASTCONFORMER_MODEL_LICENSE, FASTCONFORMER_RUNTIME, type FastConformerProgress } from "@/lib/recognition/local-fastconformer";
 import { comparePassageIdentification } from "@/lib/recognition/fastconformer-identification";
 import { decideFastConformerPassage } from "@/lib/recognition/passage-decision";
-import type { TranscriptionProgress } from "@/lib/recognition/transcriber";
+import {
+  CaptionGenerationProgressController,
+  captionGenerationProgressForDownload,
+  type CaptionGenerationProgress,
+} from "@/lib/editor/caption-generation-progress";
 import {
   recognitionToVerseAlignments,
   type VerseAlignment,
@@ -220,7 +224,7 @@ export default function Home() {
   const [stage, setStage] = useState<Stage>("idle");
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed by JSX below; this ESLint setup does not mark JSX expressions as references.
   const recognitionStatusLabel = recognitionStageLabel(stage);
-  const [progress, setProgress] = useState<TranscriptionProgress | null>(null);
+  const [progress, setProgress] = useState<CaptionGenerationProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [timingWarning, setTimingWarning] = useState<string | null>(null);
   const [support, setSupport] = useState<{
@@ -303,6 +307,7 @@ export default function Home() {
   const savedSignature = useRef<string | null>(null);
   const cloudBaselineUpdatedAt = useRef<string | null>(null);
   const generation = useRef(0);
+  const captionProgress = useRef(new CaptionGenerationProgressController());
   const alignmentDebug = useRef<AlignmentDebug | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
@@ -616,6 +621,7 @@ export default function Home() {
   function loadSelectedSource(next: File, nextSource: MediaSource, options?: { preserveCaptions?: boolean }) {
     exportAbort.current?.abort();
     generation.current += 1;
+    captionProgress.current.reset();
     const waveformJob = ++waveformGeneration.current;
     setWaveformData(null);
     if (videoUrl) URL.revokeObjectURL(videoUrl);
@@ -628,6 +634,7 @@ export default function Home() {
     void loadWaveform(next, waveformJob);
     setVideoMetadata(null);
     setErrorMessage(opening ? `Reselect source media: ${opening.sourceMedia?.fileName ?? next.name}` : null);
+    setShowCorrection(false);
     setStage("idle");
     setProgress(null);
     if (!opening && !options?.preserveCaptions) {
@@ -646,6 +653,7 @@ export default function Home() {
     exportAbort.current?.abort();
     setProjectFormatExplicitlyChosen(false);
     generation.current += 1;
+    captionProgress.current.reset();
     waveformGeneration.current += 1;
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     for (const sessionId of assetYouTubeSessions.current.values()) releaseYouTubeImport(sessionId);
@@ -671,6 +679,7 @@ export default function Home() {
     setSelectedObject(null);
     setStage("idle");
     setProgress(null);
+    setShowCorrection(false);
     setErrorMessage(null);
     setTimingWarning(null);
     setPositioning(resetCaptionPositioning(projectFormat));
@@ -1097,6 +1106,28 @@ export default function Home() {
     setSegments([]);
     setContent({});
     setStage("preparing");
+    setProgress(captionProgress.current.start(job));
+    const startedAt = performance.now();
+    const reportProgress = (
+      phase: "preparing-media" | "analyzing-speech" | "identifying-passage" | "confirming-passage" | "aligning-words" | "building-captions" | "adding-translation" | "finalizing",
+      fraction?: number,
+      detail?: string,
+    ) => {
+      const next = captionProgress.current.report(job, phase, fraction, detail);
+      if (next) setProgress(next);
+    };
+    const reportFastConformerProgress = (next: FastConformerProgress) => {
+      if (next.phase === "downloading-model") {
+        const update = captionGenerationProgressForDownload(captionProgress.current, job, next.bytesLoaded, next.bytesTotal);
+        if (update) setProgress(update);
+        return;
+      }
+      if (next.phase === "identifying-passage") {
+        reportProgress("identifying-passage", next.completed / Math.max(1, next.total), `${next.completed} of ${next.total} audio windows analyzed`);
+        return;
+      }
+      reportProgress("aligning-words", next.step === "forced-alignment" ? 0.5 : 0);
+    };
     try {
       const { localWhisperTranscriber } =
         await import("@/lib/recognition/local-whisper");
@@ -1104,15 +1135,25 @@ export default function Home() {
         videoFile,
         (next) => {
           if (job !== generation.current) return;
-          setProgress(next);
-          setStage(next.phase === "decoding" ? "preparing" : next.phase);
+          if (next.phase === "decoding") {
+            reportProgress("preparing-media");
+            setStage("preparing");
+          } else if (next.phase === "detecting-speech") {
+            reportProgress("analyzing-speech");
+            setStage("detecting-speech");
+          } else if (next.phase === "loading-model") {
+            setStage("loading-model");
+          } else {
+            setStage("transcribing");
+          }
         },
         { analysisRunId: crypto.randomUUID(), sourceIdentity: `${videoFile.name}:${videoFile.size}:${videoFile.lastModified}`, sourceObjectUrl: videoUrl, deferWhisper: true },
       );
       if (job !== generation.current) return;
       setStage("matching");
+      reportProgress("identifying-passage");
       const fastConformerIdentification = prepared.runFastConformerIdentification
-        ? await prepared.runFastConformerIdentification()
+        ? await prepared.runFastConformerIdentification(reportFastConformerProgress)
         : null;
       if (job !== generation.current) return;
       const fastConformerSpan = canonicalSpanFromFastConformerIdentification(fastConformerIdentification?.canonicalSpan ?? null);
@@ -1131,6 +1172,14 @@ export default function Home() {
       });
       const useFastConformer = fastConformerDecision.accepted && fastConformerSpan !== null;
       const selectedCanonicalSpan = useFastConformer ? fastConformerSpan : whisperAnalysis.passage.canonicalSpan;
+      const acceptedIdentity = useFastConformer || whisperAnalysis.passage.state === "confident-unique";
+      if (acceptedIdentity && selectedCanonicalSpan) {
+        const acceptedSurah = hafsSurahs.find((item) => item.number === Number(selectedCanonicalSpan.firstVerseKey.split(":")[0]));
+        const update = captionProgress.current.confirmIdentity(job, `Detected Surah ${acceptedSurah?.name ?? selectedCanonicalSpan.firstVerseKey.split(":")[0]}`);
+        if (update) setProgress(update);
+      } else {
+        reportProgress("confirming-passage");
+      }
       const passageComparison = fastConformerIdentification
         ? comparePassageIdentification({
           engine: "whisper-quran-matcher",
@@ -1146,8 +1195,9 @@ export default function Home() {
       const speechStartMs = result.speechRegions[0]?.startMs ?? 0;
       const speechEndMs = result.speechRegions.at(-1)?.endMs ?? result.audioAnalysis.durationMs;
       const alignmentMatches = selectedCanonicalSpan?.coveredVerseKeys.map((verseKey) => ({ verseKey, startMs: speechStartMs, endMs: speechEndMs })) ?? [];
+      reportProgress("aligning-words");
       const fastConformerAlignment = alignmentMatches.length && result.runFastConformer
-        ? await result.runFastConformer(hafsVerses.filter((verse) => selectedCanonicalSpan!.coveredVerseKeys.includes(verse.verseKey)), alignmentMatches)
+        ? await result.runFastConformer(hafsVerses.filter((verse) => selectedCanonicalSpan!.coveredVerseKeys.includes(verse.verseKey)), alignmentMatches, reportFastConformerProgress)
         : null;
       const analysis = useFastConformer
         ? analyzeTranscript(primaryTranscript, { audioAnalysis: result.audioAnalysis, speechRegions: result.speechRegions, fastConformerResult: fastConformerAlignment, passageOverride: { canonicalSpan: fastConformerSpan, passageSource: "fastconformer-quran" } })
@@ -1162,9 +1212,15 @@ export default function Home() {
           passage: analysis.passage,
         };
         publishAlignmentDebug(alignmentDebug.current);
-        throw new Error(
-          "No confident Quran passage was detected. You can try again or correct it manually.",
-        );
+        const update = captionProgress.current.manualCorrection(job);
+        if (update) setProgress(update);
+        setSurah(0);
+        setStartAyah(1);
+        setEndAyah(1);
+        setShowCorrection(true);
+        setStage("idle");
+        setErrorMessage("We couldn't confidently identify this recitation. Try again or choose the Quran passage manually.");
+        return;
       }
       if (analysis.timingFailure) throw new Error(`Quran timing could not be completed. ${analysis.timingFailure.reason} Please retry.`);
       if (!analysis.authoritativeTimingEngine) throw new Error("Quran timing could not be completed. Please retry.");
@@ -1182,6 +1238,7 @@ export default function Home() {
         fastConformerAlignment?.optionalPrelude,
         analysis.authoritativeTimingEngine.wordTimings,
       );
+      reportProgress("building-captions", 1);
       const displayPrelude = nextSegments.find((segment) => segment.contentKind === "basmalah-prelude") ?? null;
       setAlignments(next);
       setSegments(nextSegments);
@@ -1311,11 +1368,26 @@ export default function Home() {
       setEndAyah(last.ayahNumber);
       setStage("captions");
       const keys = next.map((item) => item.verseKey);
+      reportProgress("adding-translation");
       await loadCanonical(keys, job);
       await loadTranslations(keys, job);
-      if (job === generation.current) setStage("complete");
+      if (job === generation.current) {
+        reportProgress("finalizing", 1);
+        if (process.env.NODE_ENV !== "production") {
+          console.debug("Caption generation timing", {
+            totalMs: Math.round(performance.now() - startedAt),
+            mediaPreparationAndVadMs: prepared.durationMs,
+            identificationMs: fastConformerIdentification?.performance.totalMs ?? null,
+            alignmentMs: fastConformerAlignment?.performance.alignmentMs ?? null,
+            captionConstructionMs: 0,
+          });
+        }
+        setProgress(captionProgress.current.complete(job));
+        setStage("complete");
+      }
     } catch (caught) {
       if (job === generation.current) {
+        setProgress(captionProgress.current.fail(job));
         setStage("error");
         setErrorMessage(
           caught instanceof Error
@@ -1360,6 +1432,7 @@ export default function Home() {
   function clearVideo() {
     exportAbort.current?.abort();
     generation.current += 1;
+    captionProgress.current.reset();
     waveformGeneration.current += 1;
     setWaveformData(null);
     setTimelineViewport(createTimelineViewport(0));
@@ -1377,6 +1450,7 @@ export default function Home() {
     setContent({});
     setProgress(null);
     setStage("idle");
+    setShowCorrection(false);
     setErrorMessage(null);
     setCurrentTimeMs(0);
     setTimelineTooltip(null);
@@ -1399,6 +1473,8 @@ export default function Home() {
       return;
     }
     const job = ++generation.current;
+    setProgress(captionProgress.current.start(job));
+    setProgress(captionProgress.current.report(job, "building-captions"));
     const rangeStart = alignments[0]?.startMs ?? 0;
     const rangeEnd =
       alignments.at(-1)?.endMs ?? (videoMetadata?.durationSeconds ?? 1) * 1000;
@@ -1437,14 +1513,17 @@ export default function Home() {
     setErrorMessage(null);
     try {
       const keys = next.map((item) => item.verseKey);
+      setProgress(captionProgress.current.report(job, "adding-translation"));
       await loadCanonical(keys, job);
       await loadTranslations(keys, job);
       if (job === generation.current) {
+        setProgress(captionProgress.current.complete(job));
         setStage("complete");
         setShowCorrection(false);
       }
     } catch {
       if (job === generation.current) {
+        setProgress(captionProgress.current.fail(job));
         setStage("error");
         setErrorMessage("Canonical captions could not be loaded locally.");
       }
@@ -2104,6 +2183,9 @@ export default function Home() {
         onCopyAlignmentDebug={() => { void copyAlignmentDebug(); }}
         onCorrectDetection={() => void correctDetection()}
         onToggleCorrection={() => setShowCorrection((value) => !value)}
+        onSurahChange={setSurah}
+        onStartAyahChange={setStartAyah}
+        onEndAyahChange={setEndAyah}
         onClearVideo={clearVideo}
         onSaveProject={() => void saveProject()}
         onUndo={undoProjectHistory}
