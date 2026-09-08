@@ -21,6 +21,7 @@
     "@huggingface/transformers": "^3.8.1",
     "@remotion/player": "^4.0.518",
     "@ricky0123/vad-web": "^0.0.30",
+    "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.112.4",
     "@tilawa/core": "0.1.0",
     "fastconformer-onnxruntime-web": "npm:onnxruntime-web@1.24.2",

@@ -110,12 +110,14 @@ import type {
 import type { OutputProfile } from "@/lib/export/output";
 import {
   deleteCloudProject,
+  getAuthSession,
   getCloudProject,
   getSupabaseClient,
   hasProjectConflict,
   listCloudProjects,
   saveCloudProject,
 } from "@/lib/cloud-sync";
+import { exportAuthIntent, rememberAuthContinuation, rememberAuthResumeProject, takeAuthContinuation, takeAuthResumeProject } from "@/lib/auth-flow";
 import type { Session } from "@supabase/supabase-js";
 import { recordAuthenticatedUsage } from "@/lib/usage/client";
 import { getCloudProjectLimit, getCustomStyleLimit, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
@@ -286,6 +288,8 @@ export default function Home() {
   const [exportDiagnostics, setExportDiagnostics] =
     useState<LocalExportDiagnostics | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [authRestoreReady, setAuthRestoreReady] = useState(false);
   const [exportPreflight, setExportPreflight] = useState<ExportPreflightResult | null>(null);
   const [exportQuality, setExportQuality] = useState<ExportQuality>(
     DEFAULT_EXPORT_QUALITY,
@@ -501,14 +505,19 @@ export default function Home() {
         repository.current = createProjectRepository();
         void repository.current
           .list()
-          .then(setProjects)
+          .then(async (localProjects) => {
+            setProjects(localProjects);
+            const resumeProjectId = takeAuthResumeProject();
+            const resumeProject = resumeProjectId ? localProjects.find((project) => project.id === resumeProjectId) : null;
+            if (resumeProject) await openProject(resumeProject, false);
+          })
           .catch((error: unknown) =>
             setErrorMessage(
               error instanceof Error
                 ? error.message
                 : "Local project storage is unavailable.",
             ),
-          );
+          ).finally(() => setAuthRestoreReady(true));
       } catch (error) {
         setErrorMessage(
           error instanceof Error
@@ -536,6 +545,24 @@ export default function Home() {
         ),
       );
   }, []);
+  useEffect(() => {
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    let active = true;
+    void getAuthSession().then((next) => { if (active) handleSessionChange(next); }).catch((error: unknown) => {
+      if (active) setErrorMessage(error instanceof Error ? error.message : "Could not read account session.");
+    });
+    const subscription = supabase.auth.onAuthStateChange((_event, next) => handleSessionChange(next));
+    return () => { active = false; subscription.data.subscription.unsubscribe(); };
+  }, [handleSessionChange]);
+  useEffect(() => {
+    if (!authRestoreReady || !session || takeAuthContinuation() !== "export") return;
+    const frame = requestAnimationFrame(() => {
+      setAuthOpen(false);
+      openExportSettings();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [authRestoreReady, session]);
   useEffect(
     () => () => {
       if (videoUrl) URL.revokeObjectURL(videoUrl);
@@ -837,6 +864,15 @@ export default function Home() {
           : "Could not save the project locally.",
       );
     }
+  }
+  async function checkpointProjectForAuthentication() {
+    if (!repository.current) throw new Error("Local project storage is unavailable, so this editor cannot safely leave for sign-in.");
+    const now = new Date().toISOString();
+    const snapshot = projectSnapshot(savedProject?.id ?? crypto.randomUUID(), projectName || videoFile?.name || "Untitled project", savedProject?.createdAt ?? now);
+    await repository.current.put(snapshot);
+    rememberAuthResumeProject(snapshot.id);
+    setSavedProject(snapshot);
+    setProjects(await repository.current.list());
   }
   async function saveToAccount() {
     if (!session || !getSupabaseClient()) {
@@ -2266,6 +2302,12 @@ export default function Home() {
     }
   }
   async function startExport() {
+    if (!session) {
+      rememberAuthContinuation("export");
+      setExportOpen(false);
+      setAuthOpen(true);
+      return;
+    }
     if (exportStarting.current || exportAbort.current || exportActive) return;
     exportStarting.current = true;
     setExportState({ phase: "preparing", fraction: 0, elapsedSeconds: 0 });
@@ -2284,6 +2326,22 @@ export default function Home() {
   }
   function cancelExport() {
     if (exportActive) exportAbort.current?.abort();
+  }
+  function openExportSettings() {
+    setExportOpen(true);
+    setExportPreflight(null);
+    setExportError(null);
+    if (exportState === "error") setExportState(exportResult ? "complete" : null);
+  }
+  function requestExportSettings() {
+    const intent = exportAuthIntent(Boolean(session));
+    if (intent.kind === "authenticate") {
+      rememberAuthContinuation(intent.continuation);
+      setExportOpen(false);
+      setAuthOpen(true);
+      return;
+    }
+    openExportSettings();
   }
   function downloadExport() {
     if (!exportResult) return;
@@ -2337,6 +2395,7 @@ export default function Home() {
         platformCollisions={platformCollisions}
         projectName={projectName}
         dirty={dirty}
+        session={session}
         canUndo={projectHistory.current.canUndo}
         canRedo={projectHistory.current.canRedo}
         busy={busy}
@@ -2422,11 +2481,13 @@ export default function Home() {
         onSaveToAccount={() => void saveToAccount()}
         onOpenProjects={() => setProjectsOpen(true)}
         onOpenCloudProjects={() => { void listCloudProjects().then(setCloudProjects).catch((error: unknown) => setErrorMessage(error instanceof Error ? error.message : "Could not list cloud projects.")); setCloudProjectsOpen(true); }}
-        onSessionChange={handleSessionChange}
-        onPlanChange={setSubscriptionPlan}
+        onBeforeAuthenticate={checkpointProjectForAuthentication}
         onDiscard={savedProject ? () => void openProject(savedProject) : newProject}
         onNewProject={newProject}
-        onExportOpen={() => { setExportOpen(true); setExportPreflight(null); setExportError(null); if (exportState === "error") setExportState(exportResult ? "complete" : null); }}
+        authOpen={authOpen}
+        onOpenAuth={() => setAuthOpen(true)}
+        onCloseAuth={() => setAuthOpen(false)}
+        onExportOpen={requestExportSettings}
         onExport={() => void startExport()}
         onExportPreflightAction={handleExportPreflightAction}
         onCancelExport={cancelExport}

@@ -1,6 +1,18 @@
 # Status
 
-## Current milestone: Final pre-production QA and release readiness
+## Current milestone: Production authentication UX and export gate
+
+Complete:
+
+- Replaced the visible password form with a dark, accessible first-party sign-in modal: Google is the primary action and email uses Supabase passwordless magic links. Google configuration errors are actionable in development, and no service-role credential is exposed to the browser.
+- Moved the browser client to Supabase SSR cookie sessions, added the safe `/auth/callback` code-exchange route, and added a Next 16 `proxy.ts` session refresh. Callback destinations are restricted to `/` or `/editor`.
+- Kept landing, editor, import, recognition, caption editing, translation, highlighting, timeline, and preview public. Export now gates before settings, preflight, or render; authentication with the saved export continuation reopens Export Settings only, never starts a render.
+- Before an OAuth or magic-link navigation, the editor checkpoints its metadata-only local project state in IndexedDB and stores only the local project id plus the `export` continuation in session storage. The return restores serializable captions/styles/timeline edits; source files are deliberately never claimed to survive a browser navigation and require relinking when unavailable.
+- Logged-in users now receive a compact identity/account menu with avatar where supplied, email, Free plan, Manage account, and Sign out. Save is explicitly labelled local; cloud-save and plan enforcement remain deferred.
+
+Verification: `npx tsc --noEmit`, `npm test` (268 passing), `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning.
+
+## Previous milestone: Final pre-production QA and release readiness
 
 Complete:
 

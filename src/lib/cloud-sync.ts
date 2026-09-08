@@ -1,4 +1,5 @@
-import { createClient, type Session, type SupabaseClient } from "@supabase/supabase-js";
+import { createBrowserClient } from "@supabase/ssr";
+import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { loadSavedProject, serializeSavedProject } from "./project-storage.ts";
 import type { SavedProject } from "./schemas/project.ts";
 
@@ -27,7 +28,7 @@ export function getSupabaseClient(): SupabaseClient | null {
   if (client !== undefined) return client;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  client = url && anonKey ? createClient(url, anonKey) : null;
+  client = url && anonKey ? createBrowserClient(url, anonKey) : null;
   return client;
 }
 
@@ -72,16 +73,25 @@ export async function getAuthSession(): Promise<Session | null> {
   return data.session;
 }
 
-export async function signUp(email: string, password: string): Promise<Session | null> {
-  const { data, error } = await requireClient().auth.signUp({ email, password });
-  if (error) throw error;
-  return data.session;
+function authCallbackUrl(): string {
+  if (typeof window === "undefined") throw new Error("Authentication can only start in the browser.");
+  return new URL("/auth/callback?next=/editor", window.location.origin).toString();
 }
 
-export async function signIn(email: string, password: string): Promise<Session | null> {
-  const { data, error } = await requireClient().auth.signInWithPassword({ email, password });
+export async function signInWithGoogle(): Promise<void> {
+  const { error } = await requireClient().auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo: authCallbackUrl() },
+  });
   if (error) throw error;
-  return data.session;
+}
+
+export async function sendMagicLink(email: string): Promise<void> {
+  const { error } = await requireClient().auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: authCallbackUrl() },
+  });
+  if (error) throw error;
 }
 
 export async function signOut(): Promise<void> {

@@ -20,6 +20,7 @@ import CaptionPreview from "@/components/caption-preview";
 import SafeAreaOverlay from "@/components/safe-area-overlay";
 import SocialPlatformGuideOverlay from "@/components/social-platform-guide-overlay";
 import AccountPanel from "@/components/account-panel";
+import type { Session } from "@supabase/supabase-js";
 import TikTokPosting from "@/components/tiktok-posting";
 import { DEFAULT_SOURCE_VIDEO_FIT, PROJECT_FORMATS, projectFormatDefinition } from "@/lib/editor/formats";
 import { BUILT_IN_STYLES, type BuiltInStyleName } from "@/lib/editor/styles";
@@ -73,6 +74,7 @@ type EditorWorkspaceProps = {
   platformCollisions: PlatformCollision[];
   projectName: string;
   dirty: boolean;
+  session: Session | null;
   canUndo: boolean;
   canRedo: boolean;
   busy: boolean;
@@ -80,6 +82,7 @@ type EditorWorkspaceProps = {
   availableBuiltInStyles: BuiltInStyleName[];
   availableQuranStyles: string[];
   localStyleName: string;
+  authOpen: boolean;
   exportOpen: boolean;
   exportPreflight: ExportPreflightResult | null;
   exportQuality: ExportQuality;
@@ -158,10 +161,11 @@ type EditorWorkspaceProps = {
   onSaveToAccount: () => void;
   onOpenProjects: () => void;
   onOpenCloudProjects: () => void;
-  onSessionChange: (session: import("@supabase/supabase-js").Session | null) => void;
-  onPlanChange: (plan: "Free" | "Creator" | "Pro") => void;
   onDiscard: () => void;
   onNewProject: () => void;
+  onOpenAuth: () => void;
+  onCloseAuth: () => void;
+  onBeforeAuthenticate: () => Promise<void>;
   onExportOpen: () => void;
   onExport: () => void;
   onExportPreflightAction: (action: ExportPreflightAction, segmentId?: string) => void;
@@ -227,7 +231,7 @@ type WorkspacePreferences = Pick<typeof WORKSPACE_LAYOUT_DEFAULTS, never> & {
 };
 
 export default function EditorWorkspace(props: EditorWorkspaceProps) {
-  const [accountOpen, setAccountOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [assetsExpanded, setAssetsExpanded] = useState(false);
   const [youtubeChoicesOpen, setYoutubeChoicesOpen] = useState(false);
   const [timelineWidth, setTimelineWidth] = useState(600);
@@ -245,14 +249,14 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     videoFile, videoUrl, videoMetadata, mediaSource, projectAssets, activeMediaAssetId, mediaTrim, videoRef, previewRef, timelineRef, stage, progress, support,
     alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
     selectedObject, rightInspectorMode, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
-    transitionSettings, playbackRate, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, canUndo, canRedo, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
+    transitionSettings, playbackRate, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, session, canUndo, canRedo, busy, localStyles, localStyleName, authOpen, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportPreflight, exportQuality, exportFormat, outputPlan, exportResult, exportIsStale, exportState, exportError, exportDiagnostics, tiktokCaption, errorMessage, timingWarning,
     showCorrection, surah, startAyah, endAyah, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
     onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown, onSetRightInspectorMode, onSelectMedia,
     onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
     onCorrectDetection, onToggleCorrection, onSurahChange, onStartAyahChange, onEndAyahChange, onClearVideo, onSaveProject, onUndo, onRedo, onHistoryTransactionStart, onHistoryTransactionCommit, onSaveToAccount, onOpenProjects,
-    onOpenCloudProjects, onSessionChange, onPlanChange, onDiscard, onNewProject, onExportOpen, onExport, onExportPreflightAction, onCancelExport, onDownloadExport,
+    onOpenCloudProjects, onDiscard, onNewProject, onOpenAuth, onCloseAuth, onBeforeAuthenticate, onExportOpen, onExport, onExportPreflightAction, onCancelExport, onDownloadExport,
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange, onPlaybackRateChange,
     onSetShowVerseNumber, onSetShowSafeArea, onSetPlatformPreview, onMoveToSafeArea, onCaptionBoundsChange, onApplyStyle, onSaveCurrentStyle, onSetLocalStyleName,
     onResetSelectedObjectStyle, onSetStyleScope, onAlignTranslation, onSetSplitBoundary, onSplit, onMergePrevious,
@@ -394,9 +398,9 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
         <span className={`editor-save-state ${dirty ? "is-dirty" : ""}`}><i />{dirty ? "Unsaved" : "Saved"}</span>
         <button className="editor-icon-button" type="button" aria-label="Undo" title="Undo ⌘Z" disabled={!canUndo} onClick={onUndo}>↶</button>
         <button className="editor-icon-button" type="button" aria-label="Redo" title="Redo ⇧⌘Z" disabled={!canRedo} onClick={onRedo}>↷</button>
-        <button className="editor-button editor-button-quiet" type="button" onClick={onSaveProject}>Save</button>
+        <button className="editor-button editor-button-quiet" type="button" title="Save this project in this browser" onClick={onSaveProject}>Save locally</button>
         <button className="editor-button editor-button-accent" type="button" disabled={!segments.length || Boolean(exportState && typeof exportState === "object")} onClick={onExportOpen}>Export</button>
-        <div className="editor-account-wrap"><button aria-label="Account" className="editor-icon-button" type="button" onClick={() => setAccountOpen((value) => !value)}>Account</button>{accountOpen && <div className="editor-account-popover"><AccountPanel onSessionChange={onSessionChange} onPlanChange={onPlanChange} /></div>}</div>
+        <div className="editor-account-wrap"><button aria-label="Account" aria-expanded={session ? accountMenuOpen : authOpen} className="editor-icon-button" type="button" onClick={() => session ? setAccountMenuOpen((value) => !value) : onOpenAuth()}>Account</button>{accountMenuOpen && session && <div className="editor-account-popover"><AccountPanel session={session} onClose={() => setAccountMenuOpen(false)} /></div>}{authOpen && <AccountPanel session={null} onClose={onCloseAuth} onBeforeAuthenticate={onBeforeAuthenticate} />}</div>
       </div>
     </header>
 
