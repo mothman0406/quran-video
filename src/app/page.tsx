@@ -118,6 +118,7 @@ import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 import { waveformPeaksFromPcm, type WaveformData } from "@/lib/editor/waveform";
 import { projectAssetFromMediaSource } from "@/lib/editor/project-assets";
 import { clearCaptionSelection, rightInspectorModeForSelection, selectCaptionLayer, selectTimelineCaption, type CaptionSelection, type RightInspectorMode } from "@/lib/editor/selection";
+import { EditorHistory } from "@/lib/editor/history";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -142,6 +143,20 @@ type ExportState =
   | null;
 type YouTubeImportStatus = "idle" | "validating" | "fetching-metadata" | "downloading" | "preparing-media" | "ready" | "failed";
 type YouTubeImportResponse = { sessionId: string; sourceUrl: string; fileName: string; mimeType: string; title?: string; durationMs?: number; width?: number; height?: number; hasVideo: boolean; mediaUrl: string };
+type EditorProjectHistoryState = {
+  segments: CaptionSegment[];
+  mediaTrim: MediaTrim;
+  typography: Typography;
+  captionBackground: CaptionBackground;
+  projectFormat: ProjectFormat;
+  positioning: CaptionPositioning;
+  transitionSettings: TransitionSettings;
+  showVerseNumber: boolean;
+};
+
+function sameEditorProjectHistoryState(left: EditorProjectHistoryState, right: EditorProjectHistoryState) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
 function validateYouTubeImportUrl(value: string): boolean {
   if (/[^\x20-\x7e]/.test(value) || /[\r\n]/.test(value)) return false;
   try {
@@ -320,6 +335,74 @@ export default function Home() {
   const assetYouTubeSessions = useRef(new Map<string, string>());
   const exportCoordinator = useRef(new ExportCoordinator());
   const playbackClock = useRef<MediaPlaybackClock | null>(null);
+  const projectHistory = useRef(new EditorHistory<EditorProjectHistoryState>(sameEditorProjectHistoryState));
+  const [, setHistoryVersion] = useState(0);
+  const projectHistoryStateRef = useRef<EditorProjectHistoryState>({
+    segments,
+    mediaTrim,
+    typography,
+    captionBackground,
+    projectFormat,
+    positioning,
+    transitionSettings,
+    showVerseNumber,
+  });
+  projectHistoryStateRef.current = {
+    segments,
+    mediaTrim,
+    typography,
+    captionBackground,
+    projectFormat,
+    positioning,
+    transitionSettings,
+    showVerseNumber,
+  };
+
+  function applyProjectHistoryState(next: EditorProjectHistoryState) {
+    projectHistoryStateRef.current = next;
+    mediaTrimRef.current = next.mediaTrim;
+    setSegments(next.segments);
+    setMediaTrim(next.mediaTrim);
+    setTypography(next.typography);
+    setCaptionBackground(next.captionBackground);
+    setProjectFormat(next.projectFormat);
+    setPositioning(next.positioning);
+    setTransitionSettings(next.transitionSettings);
+    setShowVerseNumber(next.showVerseNumber);
+  }
+  function updateProjectHistory(
+    updater: (current: EditorProjectHistoryState) => EditorProjectHistoryState,
+    transactional = false,
+  ) {
+    const previous = projectHistoryStateRef.current;
+    const next = updater(previous);
+    applyProjectHistoryState(next);
+    if (!transactional && !projectHistory.current.snapshot().transactionOpen && projectHistory.current.record(previous, next)) setHistoryVersion((value) => value + 1);
+  }
+  function beginProjectHistoryTransaction() {
+    projectHistory.current.begin(projectHistoryStateRef.current);
+  }
+  function commitProjectHistoryTransaction() {
+    if (projectHistory.current.commit(projectHistoryStateRef.current)) setHistoryVersion((value) => value + 1);
+  }
+  function resetProjectHistory() {
+    projectHistory.current.reset();
+    setHistoryVersion((value) => value + 1);
+  }
+  function undoProjectHistory() {
+    const previous = projectHistory.current.undo(projectHistoryStateRef.current);
+    if (!previous) return;
+    applyProjectHistoryState(previous);
+    setHistoryVersion((value) => value + 1);
+    setSelectedSegmentId((selected) => previous.segments.some((segment) => segment.id === selected) ? selected : previous.segments[0]?.id ?? null);
+  }
+  function redoProjectHistory() {
+    const next = projectHistory.current.redo(projectHistoryStateRef.current);
+    if (!next) return;
+    applyProjectHistoryState(next);
+    setHistoryVersion((value) => value + 1);
+    setSelectedSegmentId((selected) => next.segments.some((segment) => segment.id === selected) ? selected : next.segments[0]?.id ?? null);
+  }
 
   useEffect(() => {
     const clock = new MediaPlaybackClock({
@@ -548,6 +631,7 @@ export default function Home() {
     setStage("idle");
     setProgress(null);
     if (!opening && !options?.preserveCaptions) {
+      resetProjectHistory();
       setAlignments([]);
       setSegments([]);
       setContent({});
@@ -602,6 +686,7 @@ export default function Home() {
     setProjectName("Untitled project");
     savedSignature.current = null;
     cloudBaselineUpdatedAt.current = null;
+    resetProjectHistory();
   }
   function projectSnapshot(
     id: string,
@@ -792,6 +877,7 @@ export default function Home() {
       showVerseNumber: project.showVerseNumber,
     });
     setDirty(false);
+    resetProjectHistory();
     const keys = [
       ...new Set(
         project.captionSegments.flatMap((segment) => segment.verseKeys),
@@ -1099,6 +1185,7 @@ export default function Home() {
       const displayPrelude = nextSegments.find((segment) => segment.contentKind === "basmalah-prelude") ?? null;
       setAlignments(next);
       setSegments(nextSegments);
+      resetProjectHistory();
       alignmentDebug.current = {
         appCommit: DEV_BUILD_VERSION,
         buildVersion: DEV_BUILD_VERSION,
@@ -1298,6 +1385,7 @@ export default function Home() {
     setExportState(null);
     setExportError(null);
     setExportDiagnostics(null);
+    resetProjectHistory();
   }
   async function correctDetection() {
     const selected = hafsSurahs.find((item) => item.number === surah);
@@ -1344,6 +1432,7 @@ export default function Home() {
         ),
       ),
     );
+    resetProjectHistory();
     setStage("captions");
     setErrorMessage(null);
     try {
@@ -1431,8 +1520,7 @@ export default function Home() {
   }, [mediaSource, mediaTrim, seekTo]);
   function resetMediaTrim() {
     const next = createMediaTrim(projectDurationMs(mediaSource));
-    mediaTrimRef.current = next;
-    setMediaTrim(next);
+    updateProjectHistory((current) => ({ ...current, mediaTrim: next }));
   }
   function selectSegment(segment: CaptionSegment) {
     const selection = selectTimelineCaption(segment);
@@ -1471,6 +1559,7 @@ export default function Home() {
         pointerY: event.clientY,
         positioning: { ...(styleScope === "segment" && selectedSegmentId ? (() => { const segment = segments.find((item) => item.id === selectedSegmentId); return segment ? resolveCaptionLayerStyle(captionStyleFromState(typography, positioning, captionBackground, transitionSettings), segment.styleOverrides, kind).positioning : positioning; })() : positioning), translationPositionLinked: false },
       };
+      beginProjectHistoryTransaction();
       event.currentTarget.setPointerCapture(event.pointerId);
     },
     [captionBackground, positioning, selectedSegmentId, segments, styleScope, transitionSettings, typography],
@@ -1488,6 +1577,7 @@ export default function Home() {
         pointerY: event.clientY,
         positioning: { ...(styleScope === "segment" && selectedSegmentId ? (() => { const segment = segments.find((item) => item.id === selectedSegmentId); return segment ? resolveCaptionLayerStyle(captionStyleFromState(typography, positioning, captionBackground, transitionSettings), segment.styleOverrides, kind).positioning : positioning; })() : positioning), translationPositionLinked: false },
       };
+      beginProjectHistoryTransaction();
       event.currentTarget.setPointerCapture(event.pointerId);
     },
     [captionBackground, positioning, selectedSegmentId, segments, styleScope, transitionSettings, typography],
@@ -1502,7 +1592,7 @@ export default function Home() {
       const positioningKind = interaction.kind === "arabic" ? "arabic" : "translation";
       const savePositioning = (previous: CaptionPositioning, next: CaptionPositioning) => {
         if (styleScope !== "segment" || !selectedSegmentId) {
-          setPositioning(next);
+          updateProjectHistory((current) => ({ ...current, positioning: next }), true);
           return;
         }
         const changed = Object.fromEntries((Object.keys(next) as Array<keyof CaptionPositioning>)
@@ -1510,9 +1600,9 @@ export default function Home() {
           .map((key) => [key, next[key]])) as Partial<CaptionPositioning>;
         if (!Object.keys(changed).length) return;
         const layer: CaptionLayer = selectedObject ?? "arabic";
-        setSegments((current) => current.map((segment) => segment.id === selectedSegmentId
+        updateProjectHistory((current) => ({ ...current, segments: current.segments.map((segment) => segment.id === selectedSegmentId
           ? { ...segment, styleOverrides: patchCaptionLayerStyleOverrides(segment.styleOverrides, layer, { positioning: changed }) }
-          : segment));
+          : segment) }), true);
       };
       if (interaction.mode === "drag") {
         const start = interaction.positioning;
@@ -1528,6 +1618,7 @@ export default function Home() {
   );
   const handleObjectPointerUp = useCallback(() => {
     canvasInteraction.current = null;
+    commitProjectHistoryTransaction();
   }, []);
   function timelineTimeFromPointer(event: PointerEvent<HTMLElement>) {
     const rect = timelineRef.current?.getBoundingClientRect();
@@ -1563,6 +1654,7 @@ export default function Home() {
     setStyleScope("all");
     setSplitBoundary(Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)));
     timelineInteraction.current = { id: segment.id, mode: "body", pointerStartMs, initialStartMs: segment.startMs, initialEndMs: segment.endMs };
+    beginProjectHistoryTransaction();
     event.currentTarget.setPointerCapture(event.pointerId);
   }
   function handleEdgeDown(
@@ -1572,6 +1664,7 @@ export default function Home() {
   ) {
     event.stopPropagation();
     timelineInteraction.current = { id: segment.id, mode: edge, pointerStartMs: timelineTimeFromPointer(event), initialStartMs: segment.startMs, initialEndMs: segment.endMs };
+    beginProjectHistoryTransaction();
     draggingEdge.current = edge;
     const selection = selectTimelineCaption(segment);
     applyCaptionSelection(selection);
@@ -1586,6 +1679,7 @@ export default function Home() {
   function handleMediaTrimPointerDown(event: PointerEvent<HTMLElement>, edge: "start" | "end") {
     event.stopPropagation();
     mediaTrimInteraction.current = { edge };
+    beginProjectHistoryTransaction();
     draggingMediaTrim.current = edge;
     const media = videoRef.current;
     if (media && !media.paused) media.pause();
@@ -1606,8 +1700,7 @@ export default function Home() {
         ? snapCaptionBoundaryToPlayhead(nextTime, event.clientX, rect.left, rect.width, currentTimeMs, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs, timelineViewport.visibleStartMs)
         : { timeMs: nextTime, snapped: false };
       const nextTrim = resizeMediaTrim(mediaTrimRef.current, trimInteraction.edge, snapped.timeMs, projectDurationMs(mediaSource));
-      mediaTrimRef.current = nextTrim;
-      setMediaTrim(nextTrim);
+      updateProjectHistory((current) => ({ ...current, mediaTrim: nextTrim }), true);
       const boundary = trimInteraction.edge === "start" ? nextTrim.startMs : nextTrim.endMs;
       setTimelineTooltip({ label: `${formatTimelineTime(boundary)}${snapped.snapped ? " · Snap: Playhead" : ""}`, position: (boundary - timelineViewport.visibleStartMs) / Math.max(1, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs) });
       return;
@@ -1628,9 +1721,9 @@ export default function Home() {
           return { startMs, endMs: startMs + duration };
         })()
       : interaction.mode === "start" ? { startMs: snapped } : { endMs: snapped };
-    setSegments((current) => interaction.mode === "body"
-      ? updateCaptionSegmentTiming(current, interaction.id, nextPatch, projectDurationMs(mediaSource))
-      : resizeCaptionBoundary(current, interaction.id, interaction.mode, snapped, projectDurationMs(mediaSource)));
+    updateProjectHistory((current) => ({ ...current, segments: interaction.mode === "body"
+      ? updateCaptionSegmentTiming(current.segments, interaction.id, nextPatch, projectDurationMs(mediaSource))
+      : resizeCaptionBoundary(current.segments, interaction.id, interaction.mode, snapped, projectDurationMs(mediaSource)) }), true);
     const boundary = interaction.mode === "end" ? nextPatch.endMs ?? snapped : nextPatch.startMs ?? snapped;
     setTimelineTooltip({ label: `${formatTimelineTime(boundary)}${playheadSnap.snapped ? " · Snap: Playhead" : ""}`, position: (boundary - timelineViewport.visibleStartMs) / Math.max(1, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs) });
   }
@@ -1641,6 +1734,7 @@ export default function Home() {
     timelineInteraction.current = null;
     mediaTrimInteraction.current = null;
     setTimelineTooltip(null);
+    commitProjectHistoryTransaction();
   }
   function setTimelineZoom(zoom: number) {
     const durationMs = projectDurationMs(mediaSource);
@@ -1670,6 +1764,17 @@ export default function Home() {
         target.isContentEditable
       )
         return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "z") {
+        event.preventDefault();
+        if (event.shiftKey) redoProjectHistory();
+        else undoProjectHistory();
+        return;
+      }
+      if (event.ctrlKey && !event.metaKey && event.key.toLowerCase() === "y") {
+        event.preventDefault();
+        redoProjectHistory();
+        return;
+      }
       if (event.code === "Space") {
         event.preventDefault();
         const video = videoRef.current;
@@ -1704,29 +1809,26 @@ export default function Home() {
     : globalCaptionStyle;
   function patchSelectedLayerStyle(patch: Parameters<typeof patchCaptionLayerStyleOverrides>[2]) {
     if (!selectedSegment || styleScope !== "segment") return false;
-    setSegments((current) => current.map((segment) => segment.id === selectedSegment.id
+    updateProjectHistory((current) => ({ ...current, segments: current.segments.map((segment) => segment.id === selectedSegment.id
       ? { ...segment, styleOverrides: patchCaptionLayerStyleOverrides(segment.styleOverrides, selectedLayer, patch) }
-      : segment));
+      : segment) }));
     return true;
   }
   const updateTypography = <K extends keyof Typography>(
     key: K,
     value: Typography[K],
   ) => {
-    if (!patchSelectedLayerStyle({ typography: { [key]: value } })) setTypography((current) => ({ ...current, [key]: value }));
+    if (!patchSelectedLayerStyle({ typography: { [key]: value } })) updateProjectHistory((current) => ({ ...current, typography: { ...current.typography, [key]: value } }));
   };
   const updateCaptionBackground = <K extends keyof CaptionBackground>(
     key: K,
     value: CaptionBackground[K],
   ) => {
-    if (!patchSelectedLayerStyle({ captionBackground: { [key]: value } })) setCaptionBackground((current) => ({ ...current, [key]: value }));
+    if (!patchSelectedLayerStyle({ captionBackground: { [key]: value } })) updateProjectHistory((current) => ({ ...current, captionBackground: { ...current.captionBackground, [key]: value } }));
   };
   function applyStyle(style: CaptionStyle) {
     const next = captionStyleToState(style);
-    setTypography(next.typography);
-    setPositioning(clampCaptionPositioning(next.positioning, projectFormat));
-    setCaptionBackground(next.captionBackground);
-    setTransitionSettings(next.transitionSettings);
+    updateProjectHistory((current) => ({ ...current, typography: next.typography, positioning: clampCaptionPositioning(next.positioning, current.projectFormat), captionBackground: next.captionBackground, transitionSettings: next.transitionSettings }));
   }
   function saveCurrentStyle() {
     const styleLimit = getCustomStyleLimit(plan);
@@ -1748,21 +1850,21 @@ export default function Home() {
   }
   function resetSelectedObjectStyle() {
     if (selectedSegment && styleScope === "segment") {
-      setSegments((current) => current.map((segment) => segment.id === selectedSegment.id
+      updateProjectHistory((current) => ({ ...current, segments: current.segments.map((segment) => segment.id === selectedSegment.id
         ? { ...segment, styleOverrides: clearCaptionLayerStyleOverrides(segment.styleOverrides, selectedLayer) }
-        : segment));
+        : segment) }));
       return;
     }
     const defaults = resetTypographyDefaults();
     if (selectedObject === "arabic") {
-      setTypography((current) => ({ ...current, quranStyle: defaults.quranStyle, arabicFontFamily: defaults.arabicFontFamily, arabicFontSize: defaults.arabicFontSize, textColor: defaults.textColor, wordHighlightMode: defaults.wordHighlightMode, wordHighlightColor: defaults.wordHighlightColor, wordHighlightIntensity: defaults.wordHighlightIntensity, arabicOutlineEnabled: defaults.arabicOutlineEnabled, arabicOutlineWidth: defaults.arabicOutlineWidth, arabicOutlineColor: defaults.arabicOutlineColor, arabicShadowEnabled: defaults.arabicShadowEnabled, arabicShadowBlur: defaults.arabicShadowBlur, arabicShadowStrength: defaults.arabicShadowStrength, arabicOpacity: defaults.arabicOpacity, textAlign: defaults.textAlign, arabicLineSpacing: defaults.arabicLineSpacing }));
+      updateProjectHistory((current) => ({ ...current, typography: { ...current.typography, quranStyle: defaults.quranStyle, arabicFontFamily: defaults.arabicFontFamily, arabicFontSize: defaults.arabicFontSize, textColor: defaults.textColor, wordHighlightMode: defaults.wordHighlightMode, wordHighlightColor: defaults.wordHighlightColor, wordHighlightIntensity: defaults.wordHighlightIntensity, arabicOutlineEnabled: defaults.arabicOutlineEnabled, arabicOutlineWidth: defaults.arabicOutlineWidth, arabicOutlineColor: defaults.arabicOutlineColor, arabicShadowEnabled: defaults.arabicShadowEnabled, arabicShadowBlur: defaults.arabicShadowBlur, arabicShadowStrength: defaults.arabicShadowStrength, arabicOpacity: defaults.arabicOpacity, textAlign: defaults.textAlign, arabicLineSpacing: defaults.arabicLineSpacing } }));
     } else if (selectedObject === "translation") {
-      setTypography((current) => ({ ...current, translationFontFamily: defaults.translationFontFamily, translationFontSize: defaults.translationFontSize, translationTextColor: defaults.translationTextColor, translationOutlineEnabled: defaults.translationOutlineEnabled, translationOutlineWidth: defaults.translationOutlineWidth, translationOutlineColor: defaults.translationOutlineColor, translationShadowEnabled: defaults.translationShadowEnabled, translationShadowBlur: defaults.translationShadowBlur, translationShadowStrength: defaults.translationShadowStrength, translationOpacity: defaults.translationOpacity, translationTextAlign: defaults.translationTextAlign, translationSpacingBelowArabic: defaults.translationSpacingBelowArabic, translationVisible: defaults.translationVisible }));
+      updateProjectHistory((current) => ({ ...current, typography: { ...current.typography, translationFontFamily: defaults.translationFontFamily, translationFontSize: defaults.translationFontSize, translationTextColor: defaults.translationTextColor, translationOutlineEnabled: defaults.translationOutlineEnabled, translationOutlineWidth: defaults.translationOutlineWidth, translationOutlineColor: defaults.translationOutlineColor, translationShadowEnabled: defaults.translationShadowEnabled, translationShadowBlur: defaults.translationShadowBlur, translationShadowStrength: defaults.translationShadowStrength, translationOpacity: defaults.translationOpacity, translationTextAlign: defaults.translationTextAlign, translationSpacingBelowArabic: defaults.translationSpacingBelowArabic, translationVisible: defaults.translationVisible } }));
     }
   }
   function alignTranslationBelowArabic() {
     const next = clampCaptionPositioning({ ...inspectorStyle.positioning, translationPositionLinked: true }, projectFormat);
-    if (!patchSelectedLayerStyle({ positioning: { translationPositionLinked: next.translationPositionLinked } })) setPositioning(next);
+    if (!patchSelectedLayerStyle({ positioning: { translationPositionLinked: next.translationPositionLinked } })) updateProjectHistory((current) => ({ ...current, positioning: next }));
   }
   function changeFormat(preset: ProjectFormatPreset) {
     const definition = PROJECT_FORMATS[preset];
@@ -1771,34 +1873,33 @@ export default function Home() {
       width: definition.width,
       height: definition.height,
     };
-    setProjectFormat(next);
+    updateProjectHistory((current) => ({ ...current, projectFormat: next, positioning: clampCaptionPositioning(current.positioning, next) }));
     setProjectFormatExplicitlyChosen(true);
-    setPositioning((current) => clampCaptionPositioning(current, next));
   }
   function splitSelected() {
     if (!selectedSegment) return;
-    setSegments((current) => {
-      const index = current.findIndex(
+    updateProjectHistory((current) => {
+      const index = current.segments.findIndex(
         (segment) => segment.id === selectedSegment.id,
       );
-      return index < 0
-        ? current
+      return { ...current, segments: index < 0
+        ? current.segments
         : resolveCaptionTranslationSegments([
-            ...current.slice(0, index),
+            ...current.segments.slice(0, index),
             ...splitCaptionSegment(selectedSegment, splitBoundary),
-            ...current.slice(index + 1),
-          ]);
+            ...current.segments.slice(index + 1),
+          ]) };
     });
     setSelectedSegmentId(null);
   }
   function mergePrevious() {
     if (selectedIndex < 1) return;
-    setSegments((current) => resolveCaptionTranslationSegments(mergeCaptionWithPrevious(current, selectedIndex)));
+    updateProjectHistory((current) => ({ ...current, segments: resolveCaptionTranslationSegments(mergeCaptionWithPrevious(current.segments, selectedIndex)) }));
     setSelectedSegmentId(null);
   }
   function mergeNext() {
     if (selectedIndex < 0 || selectedIndex >= segments.length - 1) return;
-    setSegments((current) => resolveCaptionTranslationSegments(mergeCaptionWithNext(current, selectedIndex)));
+    updateProjectHistory((current) => ({ ...current, segments: resolveCaptionTranslationSegments(mergeCaptionWithNext(current.segments, selectedIndex)) }));
     setSelectedSegmentId(null);
   }
   async function exportVideo() {
@@ -1933,6 +2034,8 @@ export default function Home() {
         showSafeArea={showSafeArea}
         projectName={projectName}
         dirty={dirty}
+        canUndo={projectHistory.current.canUndo}
+        canRedo={projectHistory.current.canRedo}
         busy={busy}
         localStyles={localStyles}
         localStyleName={localStyleName}
@@ -2003,6 +2106,10 @@ export default function Home() {
         onToggleCorrection={() => setShowCorrection((value) => !value)}
         onClearVideo={clearVideo}
         onSaveProject={() => void saveProject()}
+        onUndo={undoProjectHistory}
+        onRedo={redoProjectHistory}
+        onHistoryTransactionStart={beginProjectHistoryTransaction}
+        onHistoryTransactionCommit={commitProjectHistoryTransaction}
         onSaveToAccount={() => void saveToAccount()}
         onOpenProjects={() => setProjectsOpen(true)}
         onOpenCloudProjects={() => { void listCloudProjects().then(setCloudProjects).catch((error: unknown) => setErrorMessage(error instanceof Error ? error.message : "Could not list cloud projects.")); setCloudProjectsOpen(true); }}
@@ -2018,8 +2125,8 @@ export default function Home() {
         onSetExportOpen={setExportOpen}
         onTypographyChange={updateTypography}
         onBackgroundChange={updateCaptionBackground}
-        onTransitionChange={(patch) => setTransitionSettings((current) => ({ ...current, ...patch }))}
-        onSetShowVerseNumber={setShowVerseNumber}
+        onTransitionChange={(patch) => updateProjectHistory((current) => ({ ...current, transitionSettings: { ...current.transitionSettings, ...patch } }))}
+        onSetShowVerseNumber={(value) => updateProjectHistory((current) => ({ ...current, showVerseNumber: value }))}
         onSetShowSafeArea={setShowSafeArea}
         onApplyStyle={applyStyle}
         onSaveCurrentStyle={saveCurrentStyle}
@@ -2031,10 +2138,10 @@ export default function Home() {
         onSplit={splitSelected}
         onMergePrevious={mergePrevious}
         onMergeNext={mergeNext}
-        onTranslationFragmentChange={(text) => selectedSegment && setSegments((current) => updateCaptionTranslationSegment(current, selectedSegment.id, text))}
-        onResetTranslationFragment={() => selectedSegment && setSegments((current) => resetCaptionTranslationSegment(current, selectedSegment.id))}
-        onResetTiming={() => selectedSegment && setSegments((current) => resetCaptionSegmentTiming(current, selectedSegment.id, projectDurationMs(mediaSource)))}
-        onResetAllTiming={() => setSegments((current) => resetAllCaptionSegmentTiming(current, projectDurationMs(mediaSource)))}
+        onTranslationFragmentChange={(text) => selectedSegment && updateProjectHistory((current) => ({ ...current, segments: updateCaptionTranslationSegment(current.segments, selectedSegment.id, text) }))}
+        onResetTranslationFragment={() => selectedSegment && updateProjectHistory((current) => ({ ...current, segments: resetCaptionTranslationSegment(current.segments, selectedSegment.id) }))}
+        onResetTiming={() => selectedSegment && updateProjectHistory((current) => ({ ...current, segments: resetCaptionSegmentTiming(current.segments, selectedSegment.id, projectDurationMs(mediaSource)) }))}
+        onResetAllTiming={() => updateProjectHistory((current) => ({ ...current, segments: resetAllCaptionSegmentTiming(current.segments, projectDurationMs(mediaSource)) }))}
       />
       {/* <div className="hidden" aria-hidden="true">
       <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col px-5 py-5 sm:px-8 lg:px-12 lg:py-8">

@@ -1,5 +1,29 @@
 # Status
 
+## Current milestone: Transactional editor Undo / Redo
+
+Complete:
+
+- Added bounded (120-operation) centralized project history for caption
+  segments, timing, trim, global/segment styles, positioning, transitions,
+  highlight settings, format, and verse-number presentation. Recognition and
+  project loading establish a fresh baseline; canonical Quran/recognition data
+  is never recomputed during Undo or Redo.
+- Canvas drags, caption timing edges/bodies, media trim, sliders, color
+  selection, and translation edit sessions use transactions: live previews
+  update immediately while one completed gesture/edit produces one entry.
+- Added compact disabled-aware toolbar Undo/Redo controls and Cmd/Ctrl+Z,
+  Cmd/Ctrl+Shift+Z, and Ctrl+Y routing. Native input/textarea undo remains
+  untouched while text controls are focused.
+- Panel layout, inspector mode, selection, playback/playhead, and timeline
+  zoom/pan remain session UI state and do not consume history. Undo/Redo safely
+  resolves a selection if a structural operation restores/removes segment IDs.
+- Save dirty state continues to use the exact persisted project signature, so
+  undoing back to a save checkpoint returns the existing indicator to Saved.
+
+Verification: focused history/style tests and `npx tsc --noEmit` pass. Full
+test, lint, build, and browser validation are pending for this milestone.
+
 ## Current milestone: Two-mode right inspector
 
 Complete:
