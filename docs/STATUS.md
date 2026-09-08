@@ -1341,3 +1341,15 @@ M5A first-caption onset regression fix:
 - Fix: pass recognized verse alignments into forced-alignment caption generation and preserve their exact millisecond start/end values; forced-set timing remains the fallback for callers without recognized alignments.
 
 Verification: focused caption regression, full test, typecheck, lint, build, and diff checks pass.
+
+## Current milestone: Strengthen Quran word highlighting defaults
+
+Complete:
+
+- New editor projects reset to `read-so-far`, Electric Lime `#B7FF00`, and 85% highlight intensity; persistence and caption-style schema defaults match the live editor default, so recognition/caption generation has no path that writes `off`.
+- Existing projects with explicit saved `off` or `current-word` retain that choice. A legacy project with no stored highlight setting adopts the new default. Projects that explicitly stored the old automatic `off` cannot be distinguished from an intentional `off`, so those values are conservatively preserved.
+- The Subtitles inspector now has six compact neon swatches, a custom color picker, and global or property-level segment intensity control.
+- Preview and canvas export use the same highlight color/glow presentation resolver. The final verse ornament follows the final canonical word on terminal ayah pieces only; basmalah preludes remain numberless.
+- Recognition, canonical Quran text, word timing, segment boundaries, and timeline geometry were not changed.
+
+Verification: focused highlighting/style/storage/export regressions and `npx tsc --noEmit` pass. Browser media validation requires a local Quran video fixture and was not available in this environment.

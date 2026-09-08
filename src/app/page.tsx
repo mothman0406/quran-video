@@ -590,6 +590,10 @@ export default function Home() {
     setErrorMessage(null);
     setTimingWarning(null);
     setPositioning(resetCaptionPositioning(projectFormat));
+    setTypography(resetTypographyDefaults());
+    setCaptionBackground(DEFAULT_CAPTION_BACKGROUND);
+    setTransitionSettings(DEFAULT_TRANSITION_SETTINGS);
+    setShowVerseNumber(DEFAULT_CAPTION_PRESENTATION.showVerseNumber);
     setExportState(null);
     setExportError(null);
     setExportDiagnostics(null);
@@ -1751,7 +1755,7 @@ export default function Home() {
     }
     const defaults = resetTypographyDefaults();
     if (selectedObject === "arabic") {
-      setTypography((current) => ({ ...current, quranStyle: defaults.quranStyle, arabicFontFamily: defaults.arabicFontFamily, arabicFontSize: defaults.arabicFontSize, textColor: defaults.textColor, wordHighlightMode: defaults.wordHighlightMode, wordHighlightColor: defaults.wordHighlightColor, arabicOutlineEnabled: defaults.arabicOutlineEnabled, arabicOutlineWidth: defaults.arabicOutlineWidth, arabicOutlineColor: defaults.arabicOutlineColor, arabicShadowEnabled: defaults.arabicShadowEnabled, arabicShadowBlur: defaults.arabicShadowBlur, arabicShadowStrength: defaults.arabicShadowStrength, arabicOpacity: defaults.arabicOpacity, textAlign: defaults.textAlign, arabicLineSpacing: defaults.arabicLineSpacing }));
+      setTypography((current) => ({ ...current, quranStyle: defaults.quranStyle, arabicFontFamily: defaults.arabicFontFamily, arabicFontSize: defaults.arabicFontSize, textColor: defaults.textColor, wordHighlightMode: defaults.wordHighlightMode, wordHighlightColor: defaults.wordHighlightColor, wordHighlightIntensity: defaults.wordHighlightIntensity, arabicOutlineEnabled: defaults.arabicOutlineEnabled, arabicOutlineWidth: defaults.arabicOutlineWidth, arabicOutlineColor: defaults.arabicOutlineColor, arabicShadowEnabled: defaults.arabicShadowEnabled, arabicShadowBlur: defaults.arabicShadowBlur, arabicShadowStrength: defaults.arabicShadowStrength, arabicOpacity: defaults.arabicOpacity, textAlign: defaults.textAlign, arabicLineSpacing: defaults.arabicLineSpacing }));
     } else if (selectedObject === "translation") {
       setTypography((current) => ({ ...current, translationFontFamily: defaults.translationFontFamily, translationFontSize: defaults.translationFontSize, translationTextColor: defaults.translationTextColor, translationOutlineEnabled: defaults.translationOutlineEnabled, translationOutlineWidth: defaults.translationOutlineWidth, translationOutlineColor: defaults.translationOutlineColor, translationShadowEnabled: defaults.translationShadowEnabled, translationShadowBlur: defaults.translationShadowBlur, translationShadowStrength: defaults.translationShadowStrength, translationOpacity: defaults.translationOpacity, translationTextAlign: defaults.translationTextAlign, translationSpacingBelowArabic: defaults.translationSpacingBelowArabic, translationVisible: defaults.translationVisible }));
     }

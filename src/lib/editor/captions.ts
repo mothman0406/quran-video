@@ -15,6 +15,13 @@ export type TransitionSettings = z.infer<typeof TransitionSettingsSchema>;
 export type CaptionStyleOverrides = z.infer<typeof CaptionStyleOverridesSchema>;
 export type CaptionPresentationSettings = { showVerseNumber: boolean };
 
+export type WordHighlightPresentation = {
+  color: string;
+  glowColor: string;
+  glowBlurPx: number;
+  glowOpacity: number;
+};
+
 export const DEFAULT_CAPTION_PRESENTATION: CaptionPresentationSettings = {
   showVerseNumber: true,
 };
@@ -124,6 +131,36 @@ export function isCaptionWordHighlighted(
     : timeMs >= timing.startMs;
 }
 
+function colorWithOpacity(color: string, opacity: number): string {
+  const alpha = Math.round(Math.max(0, Math.min(1, opacity)) * 255).toString(16).padStart(2, "0");
+  if (/^#[0-9a-f]{6}$/iu.test(color)) return `${color}${alpha}`;
+  if (/^#[0-9a-f]{3}$/iu.test(color)) return `#${color.slice(1).split("").map((value) => value + value).join("")}${alpha}`;
+  return color;
+}
+
+/** One visual model used by both DOM preview and the canvas export renderer. */
+export function resolveWordHighlightPresentation({
+  baseTextColor,
+  highlightColor,
+  intensity,
+  isHighlighted,
+}: {
+  baseTextColor: string;
+  highlightColor: string;
+  intensity: number;
+  isHighlighted: boolean;
+}): WordHighlightPresentation {
+  if (!isHighlighted) return { color: baseTextColor, glowColor: "transparent", glowBlurPx: 0, glowOpacity: 0 };
+  const strength = Math.max(0, Math.min(1, intensity));
+  const glowOpacity = 0.18 + strength * 0.62;
+  return {
+    color: highlightColor,
+    glowColor: colorWithOpacity(highlightColor, glowOpacity),
+    glowBlurPx: 2 + strength * 9,
+    glowOpacity,
+  };
+}
+
 /**
  * Maps immutable Quran source words to display spans. The renderer never
  * writes markup into Quran strings: standalone waqf/annotation source tokens
@@ -156,7 +193,13 @@ export function arabicCaptionPresentationWords(
   }
   appendNormal(cursor, sourceWords.length);
   const verseNumber = inlineVerseNumber(segment, showVerseNumber);
-  if (verseNumber) result.push({ text: verseNumber, highlighted: false, kind: "verse-number" });
+  // The ornament has no acoustic timing of its own. It follows the final
+  // canonical word only on the ayah piece that is allowed to display it.
+  const finalTiming = [...(segment.wordTimings ?? [])]
+    .filter((timing) => validWordTiming(timing, sourceWords.length))
+    .sort((left, right) => left.canonicalWordIndex - right.canonicalWordIndex)
+    .at(-1);
+  if (verseNumber) result.push({ text: verseNumber, highlighted: finalTiming ? isCaptionWordHighlighted(segment, finalTiming, timeMs, mode) : false, kind: "verse-number" });
   return result;
 }
 
@@ -192,8 +235,9 @@ export const DEFAULT_TYPOGRAPHY: Typography = {
   translationFontSize: 15,
   transliterationFontSize: 14,
   textColor: "#ffffff",
-  wordHighlightMode: "off",
-  wordHighlightColor: "#f4dfab",
+  wordHighlightMode: "read-so-far",
+  wordHighlightColor: "#B7FF00",
+  wordHighlightIntensity: 0.85,
   arabicOutlineEnabled: false,
   arabicOutlineWidth: 1,
   arabicOutlineColor: "#000000",

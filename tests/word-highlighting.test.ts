@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { arabicCaptionPresentationWords, createCaptionSegmentsFromVerseBoundaries, mergeCaptionWithNext, splitCaptionSegment } from "../src/lib/editor/captions.ts";
+import { arabicCaptionPresentationWords, createCaptionSegmentsFromVerseBoundaries, mergeCaptionWithNext, resolveWordHighlightPresentation, splitCaptionSegment } from "../src/lib/editor/captions.ts";
 import { CaptionSegmentSchema, TypographySchema } from "../src/lib/schemas/project.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
@@ -28,7 +28,7 @@ function segment() {
 
 function highlightedAt(timeMs: number, mode: "current-word" | "read-so-far") {
   return arabicCaptionPresentationWords(segment(), true, timeMs, mode)
-    .filter((word) => word.highlighted)
+    .filter((word) => word.kind === "quran-word" && word.highlighted)
     .map((word) => word.text);
 }
 
@@ -60,11 +60,37 @@ test("read-so-far retains completed words through silence and seeking is a pure 
   assert.deepEqual(highlightedAt(1_800, "read-so-far"), [], "manual/display segment end clips highlighting");
 });
 
+test("the final verse ornament follows the final canonical word in each highlight mode", () => {
+  const readSoFar = arabicCaptionPresentationWords(segment(), true, 1_500, "read-so-far");
+  assert.equal(readSoFar.at(-1)?.kind, "verse-number");
+  assert.equal(readSoFar.at(-1)?.highlighted, true);
+  assert.equal(arabicCaptionPresentationWords(segment(), true, 1_699, "current-word").at(-1)?.highlighted, true);
+  assert.equal(arabicCaptionPresentationWords(segment(), true, 1_700, "current-word").at(-1)?.highlighted, false);
+  assert.equal(arabicCaptionPresentationWords(segment(), true, 1_500, "off").at(-1)?.highlighted, false);
+});
+
+test("only the terminal piece of a split ayah carries and highlights the ornament", () => {
+  const [first, final] = splitCaptionSegment(segment(), 3);
+  assert.equal(arabicCaptionPresentationWords(first!, true, 1_300, "read-so-far").some((word) => word.kind === "verse-number"), false);
+  const finalWords = arabicCaptionPresentationWords(final!, true, 1_600, "read-so-far");
+  assert.equal(finalWords.at(-1)?.kind, "verse-number");
+  assert.equal(finalWords.at(-1)?.highlighted, true);
+});
+
+test("shared highlight presentation is vivid at the default intensity and only affects highlighted text", () => {
+  const highlighted = resolveWordHighlightPresentation({ baseTextColor: "#ffffff", highlightColor: "#B7FF00", intensity: 0.85, isHighlighted: true });
+  const normal = resolveWordHighlightPresentation({ baseTextColor: "#ffffff", highlightColor: "#B7FF00", intensity: 0.85, isHighlighted: false });
+  assert.equal(highlighted.color, "#B7FF00");
+  assert.ok(highlighted.glowBlurPx > 9);
+  assert.equal(normal.color, "#ffffff");
+  assert.equal(normal.glowBlurPx, 0);
+});
+
 test("split and merged pieces retain only their owned canonical word timings", () => {
   const split = splitCaptionSegment(segment(), 3);
   assert.deepEqual(split.map((piece) => piece.wordTimings?.map((word) => word.canonicalWordIndex)), [[1, 2], [3]]);
   assert.deepEqual(arabicCaptionPresentationWords(split[0]!, true, 1_600, "read-so-far").filter((word) => word.highlighted), [], "piece one is no longer visible");
-  assert.deepEqual(arabicCaptionPresentationWords(split[1]!, true, 1_600, "current-word").filter((word) => word.highlighted).map((word) => word.text), ["مِمَّنْ"]);
+  assert.deepEqual(arabicCaptionPresentationWords(split[1]!, true, 1_600, "current-word").filter((word) => word.kind === "quran-word" && word.highlighted).map((word) => word.text), ["مِمَّنْ"]);
   const merged = mergeCaptionWithNext(split, 0)[0]!;
   assert.deepEqual(merged.wordTimings?.map((word) => word.canonicalWordIndex), [1, 2, 3]);
   assert.deepEqual(arabicCaptionPresentationWords(merged, true, 1_220, "current-word").filter((word) => word.highlighted).map((word) => word.text), ["أَظْلَمُ"]);
@@ -75,5 +101,7 @@ test("basmalah without precise canonical word timings and legacy persistence bot
   assert.deepEqual(arabicCaptionPresentationWords(prelude, true, 1_250, "current-word").filter((word) => word.highlighted), []);
   const persisted = CaptionSegmentSchema.parse(segment());
   assert.equal(persisted.wordTimings?.length, 3);
-  assert.equal(TypographySchema.shape.wordHighlightMode.parse(undefined), "off");
+  assert.equal(TypographySchema.shape.wordHighlightMode.parse(undefined), "read-so-far");
+  assert.equal(TypographySchema.shape.wordHighlightColor.parse(undefined), "#B7FF00");
+  assert.equal(TypographySchema.shape.wordHighlightIntensity.parse(undefined), 0.85);
 });

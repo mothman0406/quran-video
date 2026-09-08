@@ -171,6 +171,15 @@ const formatDuration = (seconds: number) => {
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 };
 
+const WORD_HIGHLIGHT_PRESETS = [
+  ["Electric Lime", "#B7FF00"],
+  ["Neon Cyan", "#00F5FF"],
+  ["Hot Pink", "#FF2BD6"],
+  ["Electric Purple", "#B65CFF"],
+  ["Bright Yellow", "#FFE600"],
+  ["Electric Orange", "#FF6B00"],
+] as const;
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="editor-section-label">{children}</p>;
 }
@@ -376,7 +385,9 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
               <div className="editor-control-row"><label>Opacity <input type="range" min="0" max="1" step="0.01" value={inspectorTypography.arabicOpacity} onChange={(event) => updateObjectTypography("arabicOpacity", Number(event.target.value))} /></label><output>{Math.round(inspectorTypography.arabicOpacity * 100)}%</output></div>
               <div className="editor-color-row"><label>Arabic text color</label><input aria-label="Arabic text color" type="color" value={inspectorTypography.textColor} onChange={(event) => updateObjectTypography("textColor", event.target.value)} /></div>
               <label className="editor-field-label">Word highlight<select aria-label="Word Highlight" className="editor-select" value={inspectorTypography.wordHighlightMode} onChange={(event) => updateObjectTypography("wordHighlightMode", event.target.value as Typography["wordHighlightMode"])}><option value="off">Off</option><option value="current-word">Current word</option><option value="read-so-far">Read so far</option></select></label>
-              {inspectorTypography.wordHighlightMode !== "off" && <div className="editor-color-row"><label>Highlight color</label><input aria-label="Highlight color" type="color" value={inspectorTypography.wordHighlightColor} onChange={(event) => updateObjectTypography("wordHighlightColor", event.target.value)} /></div>}
+              <div className="editor-color-row"><label>Highlight color</label><input aria-label="Highlight color" type="color" value={inspectorTypography.wordHighlightColor} onChange={(event) => updateObjectTypography("wordHighlightColor", event.target.value)} /></div>
+              <div className="editor-highlight-presets" role="group" aria-label="Highlight color presets">{WORD_HIGHLIGHT_PRESETS.map(([name, color]) => <button key={color} type="button" aria-label={name} title={name} className={inspectorTypography.wordHighlightColor.toUpperCase() === color ? "is-selected" : ""} style={{ backgroundColor: color }} onClick={() => updateObjectTypography("wordHighlightColor", color)} />)}</div>
+              <div className="editor-control-row"><label>Highlight intensity <input aria-label="Highlight intensity" type="range" min="0" max="1" step="0.01" value={inspectorTypography.wordHighlightIntensity} onChange={(event) => updateObjectTypography("wordHighlightIntensity", Number(event.target.value))} /></label><output>{Math.round(inspectorTypography.wordHighlightIntensity * 100)}%</output></div>
               <SectionLabel>Alignment</SectionLabel><Segmented value={inspectorTypography.textAlign} options={[["left", "Left"], ["center", "Center"], ["right", "Right"]]} onChange={(value) => updateObjectTypography("textAlign", value as Typography["textAlign"])} />
               <label className="editor-toggle"><input checked={inspectorTypography.arabicOutlineEnabled} type="checkbox" onChange={(event) => updateObjectTypography("arabicOutlineEnabled", event.target.checked)} /><span />Outline</label>{inspectorTypography.arabicOutlineEnabled && <div className="editor-color-row"><label>Outline color</label><input type="color" value={inspectorTypography.arabicOutlineColor} onChange={(event) => updateObjectTypography("arabicOutlineColor", event.target.value)} /></div>}<label className="editor-toggle"><input checked={inspectorTypography.arabicShadowEnabled} type="checkbox" onChange={(event) => updateObjectTypography("arabicShadowEnabled", event.target.checked)} /><span />Shadow</label>
               <div className="editor-control-row"><label>Line spacing <input type="range" min="1" max="2" step="0.05" value={inspectorTypography.arabicLineSpacing} onChange={(event) => updateObjectTypography("arabicLineSpacing", Number(event.target.value))} /></label><output>{inspectorTypography.arabicLineSpacing}</output></div>

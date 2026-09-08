@@ -91,6 +91,16 @@ test("missing legacy verse-number state receives the new default without overwri
   assert.equal(loadSavedProject(project({ showVerseNumber: false })).showVerseNumber, false);
 });
 
+test("highlight setting migration preserves explicit choices while missing legacy defaults read so far", () => {
+  const legacyTypography = { ...project().typography } as Partial<SavedProject["typography"]>;
+  delete legacyTypography.wordHighlightMode;
+  delete legacyTypography.wordHighlightColor;
+  delete legacyTypography.wordHighlightIntensity;
+  assert.equal(loadSavedProject(project({ typography: legacyTypography as SavedProject["typography"] })).typography.wordHighlightMode, "read-so-far");
+  assert.equal(loadSavedProject(project({ typography: { ...DEFAULT_TYPOGRAPHY, wordHighlightMode: "off" } })).typography.wordHighlightMode, "off");
+  assert.equal(loadSavedProject(project({ typography: { ...DEFAULT_TYPOGRAPHY, wordHighlightMode: "current-word" } })).typography.wordHighlightMode, "current-word");
+});
+
 test("source verification accepts matching metadata and reports mismatch without attaching it silently", () => {
   const source = project().sourceMedia;
   const matching = { name: "recitation.mp4", size: 42, type: "video/mp4" };

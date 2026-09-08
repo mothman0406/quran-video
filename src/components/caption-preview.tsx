@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
-import { arabicCaptionPresentationWords, captionBackgroundStyle, captionVisualStatesAtTime, getActiveCaptionSegment, linkedCaptionStackLayout, translationDisplayText, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
+import { arabicCaptionPresentationWords, captionBackgroundStyle, captionVisualStatesAtTime, getActiveCaptionSegment, linkedCaptionStackLayout, resolveWordHighlightPresentation, translationDisplayText, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import { quranFontDefinitions } from "@/lib/quran/content";
 import type { ProjectFormat } from "@/lib/schemas/project";
@@ -154,7 +154,10 @@ function CaptionPreview({
       >
         <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic", segmentTypography), color: segmentTypography.textColor, fontFamily: quranFontDefinitions[segmentTypography.quranStyle].family, fontSize: segmentTypography.arabicFontSize, lineHeight: segmentTypography.arabicLineSpacing, opacity: segmentTypography.arabicOpacity }}><span data-caption-arabic-text>{arabicWords.map((word, index) => <Fragment key={`${segment.id}-${word.kind}-${index}`}>
           {index > 0 && (word.kind === "verse-number" ? "\u00a0" : " ")}
-          <span data-caption-quran-word={word.kind === "quran-word" ? "true" : undefined} data-caption-word-highlighted={word.highlighted ? "true" : "false"} style={word.highlighted ? { color: segmentTypography.wordHighlightColor } : undefined}>{word.text}</span>
+          {(() => {
+            const presentation = resolveWordHighlightPresentation({ baseTextColor: segmentTypography.textColor, highlightColor: segmentTypography.wordHighlightColor, intensity: segmentTypography.wordHighlightIntensity, isHighlighted: word.highlighted });
+            return <span data-caption-quran-word={word.kind === "quran-word" ? "true" : undefined} data-caption-word-highlighted={word.highlighted ? "true" : "false"} style={word.highlighted ? { color: presentation.color, textShadow: `0 0 ${presentation.glowBlurPx}px ${presentation.glowColor}` } : undefined}>{word.text}</span>;
+          })()}
         </Fragment>)}</span></p>
         {handles("arabic")}
       </div>;

@@ -22,6 +22,7 @@ test("built-in preset application returns editable styling state", () => {
   applied.typography.arabicFontSize = 51;
   assert.equal(preset.typography.arabicFontSize, 46);
   assert.deepEqual(CaptionStyleSchema.parse(preset), preset);
+  for (const style of Object.values(BUILT_IN_STYLES)) assert.notEqual(style.typography.wordHighlightMode, "off");
 });
 
 test("style snapshots contain styling only and local styles save, load, rename, and delete", () => {
@@ -45,4 +46,11 @@ test("legacy caption styles without an Arabic text color fall back to the existi
   const typographyWithoutColor = Object.fromEntries(Object.entries(legacy.typography).filter(([key]) => key !== "textColor"));
   const migrated = CaptionStyleSchema.parse({ ...legacy, typography: typographyWithoutColor });
   assert.equal(migrated.typography.textColor, "#ffffff");
+});
+
+test("new default caption style retains the vivid read-so-far highlight settings", () => {
+  const style = captionStyleFromState(DEFAULT_TYPOGRAPHY, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_BACKGROUND, DEFAULT_TRANSITION_SETTINGS);
+  assert.equal(style.typography.wordHighlightMode, "read-so-far");
+  assert.equal(style.typography.wordHighlightColor, "#B7FF00");
+  assert.equal(style.typography.wordHighlightIntensity, 0.85);
 });

@@ -52,3 +52,11 @@ test("layer overrides are property-level, inherit global changes, and reset safe
   assert.equal(resolveCaptionLayerStyle(global, overrides, "translation").typography.translationFontSize, global.typography.translationFontSize);
   assert.equal(clearCaptionLayerStyleOverrides(overrides, "arabic"), undefined);
 });
+
+test("highlight intensity can inherit globally or override just one Arabic segment", () => {
+  const global = captionStyleFromState({ ...DEFAULT_TYPOGRAPHY, wordHighlightIntensity: 0.85 }, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_BACKGROUND, DEFAULT_TRANSITION_SETTINGS);
+  const overrides = patchCaptionLayerStyleOverrides(undefined, "arabic", { typography: { wordHighlightIntensity: 0.35 } });
+  assert.deepEqual(overrides.arabic?.typography, { wordHighlightIntensity: 0.35 });
+  assert.equal(resolveCaptionLayerStyle(global, overrides, "arabic").typography.wordHighlightIntensity, 0.35);
+  assert.equal(resolveCaptionLayerStyle(global, undefined, "arabic").typography.wordHighlightIntensity, 0.85);
+});
