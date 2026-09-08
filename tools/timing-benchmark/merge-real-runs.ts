@@ -6,7 +6,7 @@ import { decideTimingPromotion, evaluateTimingBenchmark, timingBenchmarkMarkdown
 import type { BenchmarkWordTiming, TimingFixture, WordTimingResult } from "./types.ts";
 
 type Entry = { fixture: TimingFixture; canonicalWords: BenchmarkWordTiming[]; result: WordTimingResult };
-type Batch = { dataset: unknown; audio: unknown; manifest: unknown[]; exclusions: unknown[]; entries: { baseline: Entry[]; raw: Entry[]; refined: Entry[] }; historicalFixtures: string };
+type Batch = { dataset: unknown; audio: unknown; manifest: unknown[]; exclusions: unknown[]; entries: { baseline: Entry[]; transition: Entry[]; raw: Entry[]; refined: Entry[] }; phonemeDp?: unknown; historicalFixtures: string };
 
 function argument(name: string) {
   const index = process.argv.indexOf(name);
@@ -25,12 +25,13 @@ async function main() {
     return entry;
   });
   const baseline = merge("baseline");
+  const transition = merge("transition");
   const raw = merge("raw");
   const refined = merge("refined");
-  const reports: TimingBenchmarkReport[] = [evaluateTimingBenchmark(baseline), evaluateTimingBenchmark(raw), evaluateTimingBenchmark(refined)];
+  const reports: TimingBenchmarkReport[] = [evaluateTimingBenchmark(baseline), evaluateTimingBenchmark(transition), evaluateTimingBenchmark(raw), evaluateTimingBenchmark(refined)];
   const promotionDecisions = reports.slice(1).map((candidate) => decideTimingPromotion(reports[0]!, candidate));
-  const runtime = Object.fromEntries(["baseline", "raw", "refined"].map((key) => {
-    const entries = ({ baseline, raw, refined } as const)[key as "baseline" | "raw" | "refined"];
+  const runtime = Object.fromEntries(["baseline", "transition", "raw", "refined"].map((key) => {
+    const entries = ({ baseline, transition, raw, refined } as const)[key as "baseline" | "transition" | "raw" | "refined"];
     const totals = entries.map((entry) => entry.result.runtime?.totalMs ?? 0);
     const inferences = entries.map((entry) => Number(entry.result.diagnostics?.inferenceMs ?? 0));
     const alignments = entries.map((entry) => Number(entry.result.diagnostics?.alignmentMs ?? 0));
@@ -46,6 +47,7 @@ async function main() {
     exclusions: batches.flatMap((batch) => batch.exclusions),
     sourceExclusions: [{ reciter: "Abdurrahmaan_As-Sudais_192kbps", reason: "quran-align release-2016-11-24 asset is not JSON: it begins with the published alignment crash log; no fixture was guessed or repaired." }],
     reports,
+    phonemeDp: first.phonemeDp,
     runtime,
     promotionDecisions,
     productionWinner: "fastconformer-current",
@@ -55,7 +57,7 @@ async function main() {
   await mkdir(dirname(output), { recursive: true });
   await Promise.all([
     writeFile(`${output}.json`, `${JSON.stringify(payload, null, 2)}\n`),
-    writeFile(`${output}.md`, ["# Real Quran word-timing benchmark", "", `Merged fixed fixture count: ${baseline.length}.`, "", ...reports.flatMap((report) => [timingBenchmarkMarkdown(report), "", "## Per-reciter word timing", "", ...Object.entries(report.perReciter).map(([reciter, metrics]) => `- ${reciter}: starts median/p90/bias=${metrics.wordStarts.medianAbsoluteErrorMs}/${metrics.wordStarts.p90AbsoluteErrorMs}/${metrics.wordStarts.meanSignedErrorMs} ms; ends median/p90/bias=${metrics.wordEnds.medianAbsoluteErrorMs}/${metrics.wordEnds.p90AbsoluteErrorMs}/${metrics.wordEnds.meanSignedErrorMs} ms; start coverage=${metrics.wordStarts.coveragePercent}%.`), ""]), "## Promotion decision", "", ...promotionDecisions.map((decision) => `- ${decision.candidate}: ${decision.promote ? "PROMOTE" : "do not promote"}; ${decision.reasons.join("; ")}.`), "", "## Source exclusion", "", "- Abdurrahmaan_As-Sudais_192kbps: quran-align release-2016-11-24 asset is an alignment crash log, not JSON; no fixtures were guessed or repaired.", "", "## Runtime", "", ...Object.entries(runtime).map(([engine, metrics]) => `- ${engine}: mean total=${metrics.meanTotalMs} ms; inference=${metrics.meanInferenceMs} ms; alignment=${metrics.meanAlignmentMs} ms; model/supporting assets=${metrics.modelBytes} bytes.`), "", "## Historical reviewed fixtures", "", first.historicalFixtures, ""].join("\n")),
+    writeFile(`${output}.md`, ["# Real Quran word-timing benchmark", "", `Merged fixed fixture count: ${baseline.length}.`, "", ...reports.flatMap((report) => [timingBenchmarkMarkdown(report), "", "## Per-reciter word timing", "", ...Object.entries(report.perReciter).map(([reciter, metrics]) => `- ${reciter}: starts median/p90/bias=${metrics.wordStarts.medianAbsoluteErrorMs}/${metrics.wordStarts.p90AbsoluteErrorMs}/${metrics.wordStarts.meanSignedErrorMs} ms; ends median/p90/bias=${metrics.wordEnds.medianAbsoluteErrorMs}/${metrics.wordEnds.p90AbsoluteErrorMs}/${metrics.wordEnds.meanSignedErrorMs} ms; start coverage=${metrics.wordStarts.coveragePercent}%.`), ""]), "## Phoneme-DP qualification", "", JSON.stringify(first.phonemeDp ?? { status: "missing" }), "", "## Promotion decision", "", ...promotionDecisions.map((decision) => `- ${decision.candidate}: ${decision.promote ? "PROMOTE" : "do not promote"}; ${decision.reasons.join("; ")}.`), "", "## Source exclusion", "", "- Abdurrahmaan_As-Sudais_192kbps: quran-align release-2016-11-24 asset is an alignment crash log, not JSON; no fixtures were guessed or repaired.", "", "## Runtime", "", ...Object.entries(runtime).map(([engine, metrics]) => `- ${engine}: mean total=${metrics.meanTotalMs} ms; inference=${metrics.meanInferenceMs} ms; alignment=${metrics.meanAlignmentMs} ms; model/supporting assets=${metrics.modelBytes} bytes.`), "", "## Historical reviewed fixtures", "", first.historicalFixtures, ""].join("\n")),
   ]);
   process.stdout.write(`Wrote ${output}.json and ${output}.md from ${baseline.length} fixed real-audio fixtures.\n`);
 }

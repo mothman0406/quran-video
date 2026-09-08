@@ -1,5 +1,47 @@
 # Status
 
+## Current milestone: Local Quran phonetics/DP audit and FastConformer transition-end promotion
+
+Complete:
+
+- Audited QuranCaption’s `quran-multi-aligner` before implementation. The
+  public repository root is CC BY-NC 4.0; the embedded aligner README declares
+  MIT but has no separate LICENSE in the source tree and its relevant files
+  have no individual license headers. Its named phoneme ASR models use private
+  Hugging Face token support with Python/Torch/Transformers/Cython runtime;
+  permissive model licensing, ONNX export, size, and browser feasibility could
+  not be verified. No upstream code, model, cache, or CC BY-NC asset was copied
+  or shipped. Exact upstream paths and the qualification decision are in
+  `tools/timing-benchmark/README.md`.
+- Added an independent deterministic Hafs-oriented phonetic target and a
+  global CTC/Viterbi phoneme DP engine in the development benchmark. Targets
+  preserve reversible canonical word ownership and cover silent Uthmani signs,
+  shadda, wasl, hamza carriers, sun-letter assimilation, vowels, and pauses.
+  It is exercised on explicit frame-level phoneme scores but is not scored on
+  real audio or shipped because a commercially clear browser phoneme acoustic
+  model was not found; no synthetic acoustic evidence was substituted.
+- Added `fastconformer-transition-boundary`, a real browser-local CTC endpoint
+  policy using the existing global forced path’s current-terminal posterior,
+  blank evidence, and next-word onset posterior. It keeps first lexical-frame
+  starts and canonical order fixed, adds no inference pass and no model bytes,
+  and is now production’s default word-end policy. Benchmark-only callers can
+  still request the prior `first-aligned-token` ends for fixed baseline
+  comparison.
+- Ran the exact 45-ayah / 242-word quran-align benchmark in five deterministic
+  contiguous batches and merged the metrics-only reports at
+  `tools/timing-benchmark/results/20260907-quran-align-phoneme-dp.{json,md}`.
+  The promoted transition policy retained 100% coverage and identical starts
+  (79 ms median AE / 275 ms p90), while word ends improved from 300 ms median
+  AE / 860 ms p90 / -386.56 ms bias to 92 ms / 461 ms / -83.70 ms. Per-reciter
+  end medians are 92 ms Alafasy, 56 ms Hani Rifai, and 146 ms Husary Muallim;
+  no start regression occurred. The promotion gate passed on material endpoint
+  improvement with starts held within its 10 ms equivalence bound.
+
+Verification: `npx tsc --noEmit`, targeted timing tests (10 passing), full
+`npm test` (195 passing), `npm run lint -- --quiet`, `npm run build`, and
+`git diff --check` pass. Build retains the pre-existing non-fatal VAD ONNX
+Runtime dynamic-require warning.
+
 ## Current milestone: Quran word-timing benchmark and experimentation harness
 
 Complete:

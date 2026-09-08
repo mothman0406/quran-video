@@ -164,6 +164,24 @@ function locallyRefinedResult(base: WordTimingResult, audio: Float32Array): Word
   return { ...base, engineId: "fastconformer-local-rms-rise-80ms", words, diagnostics: { ...base.diagnostics, boundaryRule: "maximum local 10ms RMS rise within +/-80ms of fixed CTC onset" } };
 }
 
+/** Uses only the explicit CTC terminal → blank → next-onset transition evidence. */
+function transitionBoundaryResult(base: WordTimingResult, result: FastConformerResult): WordTimingResult {
+  const transitionWords = result.transitionBoundaryWords;
+  if (!transitionWords || transitionWords.length !== base.words.length) throw new Error(`${base.fixtureId} did not return requested CTC transition evidence.`);
+  return {
+    ...base,
+    engineId: "fastconformer-transition-boundary",
+    words: base.words.map((word, index) => ({
+      ...word,
+      // Starts remain the first observed lexical CTC frame. This experiment
+      // isolates the end boundary, where the current engine is materially early.
+      endMs: transitionWords[index]!.endMs,
+      diagnostics: { ...word.diagnostics, transition: transitionWords[index]!.transition },
+    })),
+    diagnostics: { ...base.diagnostics, boundaryRule: "global CTC Viterbi path; terminal-token + blank-region + next-onset posterior transition boundary" },
+  };
+}
+
 async function main() {
   const requestedOutput = argument("--output");
   const start = Number(argument("--start") ?? 0);
@@ -183,20 +201,28 @@ async function main() {
   const baseline: Array<{ fixture: TimingFixture; canonicalWords: BenchmarkWordTiming[]; result: WordTimingResult }> = [];
   const raw: typeof baseline = [];
   const refined: typeof baseline = [];
+  const transition: typeof baseline = [];
   for (const input of inputs) {
-    const runner = createFastConformerRunner(input.audio, [{ startMs: 0, endMs: input.fixture.audioDurationMs!, durationMs: input.fixture.audioDurationMs!, confidence: 1 }], `timing-benchmark-${input.fixture.fixtureId}`);
+    const runner = createFastConformerRunner(
+      input.audio,
+      [{ startMs: 0, endMs: input.fixture.audioDurationMs!, durationMs: input.fixture.audioDurationMs!, confidence: 1 }],
+      `timing-benchmark-${input.fixture.fixtureId}`,
+      { includeTransitionBoundaryDiagnostics: true, wordEndPolicy: "first-aligned-token" },
+    );
     const verse = hafsVerses.find((candidate) => candidate.verseKey === `${input.fixture.surah}:${input.fixture.ayahRange.start}`);
     if (!verse) throw new Error(`Canonical verse missing for ${input.fixture.fixtureId}.`);
-    const result = currentResult(input.fixture, await runner([verse], [{ startMs: 0, endMs: input.fixture.audioDurationMs! }]));
+    const fastResult = await runner([verse], [{ startMs: 0, endMs: input.fixture.audioDurationMs! }]);
+    const result = currentResult(input.fixture, fastResult);
     baseline.push({ fixture: input.fixture, canonicalWords: input.canonicalWords, result });
     raw.push({ fixture: input.fixture, canonicalWords: input.canonicalWords, result: rawBlankTransitionResult(result) });
     refined.push({ fixture: input.fixture, canonicalWords: input.canonicalWords, result: locallyRefinedResult(result, input.audio) });
+    transition.push({ fixture: input.fixture, canonicalWords: input.canonicalWords, result: transitionBoundaryResult(result, fastResult) });
     // ONNX Runtime Web owns native/WASM allocations. The benchmark is a CLI,
     // so an explicitly exposed collection point prevents a long fixed sample
     // from accumulating completed-output buffers between independent ayat.
     (globalThis as typeof globalThis & { gc?: () => void }).gc?.();
   }
-  const reports = [evaluateTimingBenchmark(baseline), evaluateTimingBenchmark(raw), evaluateTimingBenchmark(refined)];
+  const reports = [evaluateTimingBenchmark(baseline), evaluateTimingBenchmark(transition), evaluateTimingBenchmark(raw), evaluateTimingBenchmark(refined)];
   const decisions = reports.slice(1).map((candidate) => decideTimingPromotion(reports[0]!, candidate));
   const outputPayload = {
     schemaVersion: 1,
@@ -206,7 +232,12 @@ async function main() {
     manifest: inputs.map(({ fixture }) => ({ fixtureId: fixture.fixtureId, reciter: fixture.reciter, surah: fixture.surah, ayah: fixture.ayahRange.start, audioUrl: fixture.audioUrl, audioDurationMs: fixture.audioDurationMs, usableReferenceWords: fixture.words.length })),
     // Metrics-only, non-copyrighted intermediate data so short local batches
     // can be merged deterministically if a host limits one WASM process.
-    entries: { baseline, raw, refined },
+    entries: { baseline, transition, raw, refined },
+    phonemeDp: {
+      status: "implemented-but-not-real-audio-qualified",
+      reason: "The independent deterministic Hafs phonetic target and global DP are covered by tests, but no permissively licensed, browser-feasible Quran phoneme acoustic model was verified. The QuranCaption-linked phoneme models require private Hugging Face access/Python Torch and cannot be shipped here. It is deliberately not scored with fabricated phoneme evidence.",
+      productionEligible: false,
+    },
     exclusions,
     reports,
     promotionDecisions: decisions,
@@ -224,6 +255,10 @@ async function main() {
       `Usable ayah recordings: ${inputs.length}; usable word references: ${inputs.reduce((sum, input) => sum + input.fixture.words.length, 0)}; exclusions: ${exclusions.length}.`,
       "",
       ...reports.flatMap((report) => [timingBenchmarkMarkdown(report), ""]),
+      "## Phoneme-DP qualification",
+      "",
+      `${outputPayload.phonemeDp.status}: ${outputPayload.phonemeDp.reason}`,
+      "",
       "## Promotion decision",
       "",
       ...decisions.map((decision) => `- ${decision.candidate}: ${decision.promote ? "PROMOTE" : "do not promote"}; ${decision.reasons.join("; ")}; median word-start change=${decision.medianStartImprovementMs} ms; p90 change=${decision.p90StartDifferenceMs} ms.`),

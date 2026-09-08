@@ -271,10 +271,17 @@ export function decideTimingPromotion(current: TimingBenchmarkReport, candidate:
   const contender = candidate.aggregate.wordStarts;
   const medianImprovement = (baseline.medianAbsoluteErrorMs ?? Infinity) - (contender.medianAbsoluteErrorMs ?? Infinity);
   const p90Difference = (contender.p90AbsoluteErrorMs ?? Infinity) - (baseline.p90AbsoluteErrorMs ?? Infinity);
+  const currentEnds = current.aggregate.wordEnds;
+  const candidateEnds = candidate.aggregate.wordEnds;
+  const medianEndImprovement = (currentEnds.medianAbsoluteErrorMs ?? Infinity) - (candidateEnds.medianAbsoluteErrorMs ?? Infinity);
+  const p90EndDifference = (candidateEnds.p90AbsoluteErrorMs ?? Infinity) - (currentEnds.p90AbsoluteErrorMs ?? Infinity);
+  const endMateriallyImproved = medianEndImprovement >= 100 && p90EndDifference <= -100;
   const reasons: string[] = [];
   if (!candidate.aggregate.structural.valid) reasons.push("candidate structural validity failed");
   if (candidate.aggregate.structural.wordCoveragePercent < current.aggregate.structural.wordCoveragePercent) reasons.push("canonical coverage regressed");
-  if (medianImprovement < 25) reasons.push("median word-start improvement is not material (minimum 25 ms)");
+  if (medianImprovement < 25 && !(medianImprovement >= -10 && p90Difference <= 10 && endMateriallyImproved)) {
+    reasons.push("median word-start improvement is not material (minimum 25 ms, unless starts stay within 10 ms and word ends improve by at least 100 ms at median and p90)");
+  }
   if (p90Difference > 10) reasons.push("p90 word-start error regressed by more than 10 ms");
   if ((candidate.aggregate.wordStarts.withinPercent[500] ?? 0) + 1 < (current.aggregate.wordStarts.withinPercent[500] ?? 0)) reasons.push("catastrophic >500 ms boundary rate regressed");
   for (const [reciter, before] of Object.entries(current.perReciter)) {

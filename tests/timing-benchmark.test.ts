@@ -6,6 +6,9 @@ import { importCpFairReference } from "../tools/timing-benchmark/cpfair.ts";
 import { decideTimingPromotion, evaluateTimingBenchmark, evaluateTimingFixture, timingBenchmarkMarkdown, validateStructuralTiming } from "../tools/timing-benchmark/lib.ts";
 import type { BenchmarkWordTiming, TimingFixture, WordTimingResult } from "../tools/timing-benchmark/types.ts";
 import { createBenchmarkAudioVariant, transformTimestampForPlaybackSpeed } from "../tools/timing-benchmark/variants.ts";
+import { phonemizeQuranWord } from "../tools/timing-benchmark/quran-phonetics.ts";
+import { forceAlignPhonemeDp } from "../tools/timing-benchmark/phoneme-dp.ts";
+import { deriveCtcTransitionBoundaryWords } from "../src/lib/recognition/ctc-transition-boundary.ts";
 
 const canonical: BenchmarkWordTiming[] = [
   { verseKey: "1:1", canonicalWordIndex: 1, canonicalArabic: "بسم", startMs: 0 },
@@ -55,6 +58,13 @@ test("promotion gate rejects trivial timing noise even with complete canonical c
   assert.ok(decision.reasons.some((reason) => reason.includes("not material")));
 });
 
+test("promotion gate accepts a material CTC-derived word-end win when starts remain equivalent", () => {
+  const current = evaluateTimingBenchmark([{ fixture, canonicalWords: canonical, result: { ...result, words: result.words.map((word, index) => index === 0 ? { ...word, endMs: 111 } : word) } }]);
+  const candidate = evaluateTimingBenchmark([{ fixture, canonicalWords: canonical, result: { ...result, engineId: "fastconformer-transition-boundary", words: result.words.map((word, index) => index === 0 ? { ...word, endMs: 220 } : word) } }]);
+  const decision = decideTimingPromotion(current, candidate);
+  assert.equal(decision.promote, true);
+});
+
 test("word-timing benchmark rejects omissions, duplicates, reordered words, backwards timestamps, and non-positive ends", () => {
   const broken: WordTimingResult = {
     ...result,
@@ -101,6 +111,34 @@ test("raw CTC boundary experiments preserve the canonical path and emit useful d
   assert.equal(diagnostics.length, 2);
   assert.deepEqual(diagnostics[0]?.ctcTokens.map((token) => [token.tokenId, token.firstAlignedFrame, token.lastAlignedFrame]), [[1, 1, 1]]);
   assert.equal(diagnostics[0]?.nextWordStartMs, 300);
+});
+
+test("CTC transition boundary derives ordered ends from terminal, blank, and next-onset evidence", () => {
+  const words: CtcCanonicalWord[] = canonicalCtcWords([{ verseKey: "1:1", text: "بسم الله" }]);
+  const tokens: CtcTargetToken[] = [
+    { tokenId: 1, token: "a", globalWordIndex: 1 },
+    { tokenId: 2, token: "b", globalWordIndex: 2 },
+  ];
+  const timings = deriveCtcTransitionBoundaryWords(words, tokens, logitsFor([0, 1, 0, 0, 2, 0]), { blankTokenId: 0, startMs: 0, endMs: 600 });
+  assert.equal(timings?.length, 2);
+  assert.equal(timings?.[0]?.transition.terminalFrame, 1);
+  assert.equal(timings?.[0]?.transition.nextOnsetFrame, 4);
+  assert.ok((timings?.[0]?.endMs ?? 0) > (timings?.[0]?.startMs ?? 0));
+  assert.ok((timings?.[1]?.startMs ?? 0) >= (timings?.[0]?.startMs ?? 0));
+});
+
+test("Quran phonetics preserve word ownership and phoneme DP consumes the complete fixed sequence", () => {
+  const first = phonemizeQuranWord({ verseKey: "1:1", canonicalWordIndex: 1, canonicalArabic: "الشَّمْس" });
+  const second = phonemizeQuranWord({ verseKey: "1:1", canonicalWordIndex: 2, canonicalArabic: "مَدَّ" });
+  assert.ok(first.phonemes.includes("ʃ"), "sun-letter surface remains audible");
+  assert.equal(second.phonemes.filter((phone) => phone === "d").length, 2, "shadda expands the consonant");
+  const labels = ["<blank>", ...new Set([...first.phonemes, ...second.phonemes])];
+  const sequence = ["<blank>", ...first.phonemes, "<blank>", ...second.phonemes, "<blank>"];
+  const values = new Float32Array(sequence.length * labels.length).fill(-20);
+  sequence.forEach((label, frame) => { values[frame * labels.length + labels.indexOf(label)] = 0; });
+  const aligned = forceAlignPhonemeDp([first, second], { labels, values, frames: sequence.length });
+  assert.deepEqual(aligned?.map((word) => [word.verseKey, word.canonicalWordIndex]), [["1:1", 1], ["1:1", 2]]);
+  assert.ok((aligned?.[0]?.endFrame ?? 0) <= (aligned?.[1]?.startFrame ?? Infinity));
 });
 
 test("local acoustic refinement stays within its supplied CTC neighborhood", () => {

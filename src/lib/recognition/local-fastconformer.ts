@@ -5,6 +5,7 @@ import {
   type CtcForcedAlignmentResult,
   type CtcTargetToken,
 } from "./ctc-forced-alignment.ts";
+import { deriveCtcTransitionBoundaryWords, type CtcTransitionBoundaryWord } from "./ctc-transition-boundary.ts";
 import { hafsVerses, type QuranCorpusVerse } from "./core.ts";
 import type { VadSpeechRegion } from "./speech-regions.ts";
 import { normalizeTilawaArabic } from "./tilawa-lexical.ts";
@@ -167,6 +168,10 @@ export type FastConformerResult = {
   alignmentComplete: boolean;
   ayahTimings: Array<{ verseKey: string; startMs: number; endMs: number; acousticScore: number }>;
   rawLogits: { frames: number; vocabularySize: number; blankTokenId: number; frameDurationMs: number } | null;
+  /** The production default is the acoustically selected CTC transition boundary. */
+  wordEndPolicy?: "ctc-transition-boundary" | "first-aligned-token";
+  /** Development-only CTC transition evidence. Never requested by production timing. */
+  transitionBoundaryWords?: readonly CtcTransitionBoundaryWord[];
   alignment: CtcForcedAlignmentResult;
   performance: {
     modelArtifactBytes: number;
@@ -818,7 +823,12 @@ export function createFastConformerIdentificationRunner(audio: Float32Array, spe
 }
 
 /** Creates a lazy browser-only known-passage runner over the same decoded 16 kHz PCM. */
-export function createFastConformerRunner(audio: Float32Array, speechRegions: readonly VadSpeechRegion[], analysisRunId?: string): FastConformerRunner {
+export function createFastConformerRunner(
+  audio: Float32Array,
+  speechRegions: readonly VadSpeechRegion[],
+  analysisRunId?: string,
+  options: { includeTransitionBoundaryDiagnostics?: boolean; wordEndPolicy?: "ctc-transition-boundary" | "first-aligned-token" } = {},
+): FastConformerRunner {
   return async (verses, matches) => {
     const startedAt = performance.now();
     const window = passageWindow(audio, speechRegions, matches);
@@ -871,9 +881,21 @@ export function createFastConformerRunner(audio: Float32Array, speechRegions: re
       const withoutPreludeScore = alignmentWithoutPrelude.status === "complete" ? alignmentWithoutPrelude.normalizedPathScore ?? null : null;
       const withPreludeScore = alignmentWithPrelude?.status === "complete" ? alignmentWithPrelude.normalizedPathScore ?? null : null;
       const preludePresent = withPreludeScore !== null && (withoutPreludeScore === null || withPreludeScore > withoutPreludeScore);
-      const alignment = preludePresent ? alignmentWithPrelude! : alignmentWithoutPrelude;
+      const ctcAlignment = preludePresent ? alignmentWithPrelude! : alignmentWithoutPrelude;
       const alignmentMs = Math.round(performance.now() - alignmentStartedAt);
       const greedyTranscript = greedyDecode(output.data, frames, vocabularySize, loaded.assets.vocabulary);
+      const transitionBoundaryWords = ctcAlignment.status === "complete"
+        ? deriveCtcTransitionBoundaryWords(ctcAlignment.canonicalWords, ctcAlignment.targetTokens, { values: output.data, frames, vocabularySize }, { blankTokenId: BLANK_TOKEN_ID, startMs: window.startMs, endMs: window.endMs }) ?? undefined
+        : undefined;
+      const wordEndPolicy = options.wordEndPolicy ?? "ctc-transition-boundary";
+      const alignment = wordEndPolicy === "ctc-transition-boundary" && transitionBoundaryWords
+        ? {
+          ...ctcAlignment,
+          words: ctcAlignment.words.map((word, index) => ({ ...word, endMs: transitionBoundaryWords[index]?.endMs ?? word.endMs })),
+          // Verse starts and inter-ayah continuity remain the authoritative
+          // CTC values. Only word ends are replaced by transition evidence.
+        }
+        : ctcAlignment;
       const forcedAlignmentMeanScore = alignment.status === "complete" && alignment.words.length
         ? Number((alignment.words.reduce((sum, word) => sum + word.confidence, 0) / alignment.words.length).toFixed(4))
         : null;
@@ -916,6 +938,8 @@ export function createFastConformerRunner(audio: Float32Array, speechRegions: re
           return { verseKey: verse.verseKey, startMs: verse.startMs, endMs: verse.endMs, acousticScore: words.length ? Number((words.reduce((sum, word) => sum + word.alignmentScore, 0) / words.length).toFixed(4)) : 0 };
         }),
         rawLogits: { frames, vocabularySize, blankTokenId: BLANK_TOKEN_ID, frameDurationMs: Number(((window.endMs - window.startMs) / frames).toFixed(4)) },
+        wordEndPolicy,
+        transitionBoundaryWords: options.includeTransitionBoundaryDiagnostics ? transitionBoundaryWords : undefined,
         alignment,
         performance: {
           modelArtifactBytes: FASTCONFORMER_MODEL_BYTES,

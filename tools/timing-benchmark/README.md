@@ -81,14 +81,16 @@ does not become the benchmark artifact.
 
 ## Frame-stride and current boundary audit
 
-The current runner supplies raw-waveform 16 kHz PCM as `[1, N]` to the pinned
-ONNX graph. The graph produces CTC `[1, T, 1025]`; `forceAlignCtc` maps frame
-`f` to `windowStartMs + (windowEndMs - windowStartMs) * f / T`. Word start is
-the first Viterbi frame assigned to any non-repeat target token of that word;
-word end is one frame after the last assigned token frame. `frameExactEndpoints`
-keeps these values intact. It neither takes a midpoint nor uses the next word
-start, blank transition, character interpolation, caption splitting, or a
-one-millisecond collision repair.
+The runner supplies raw-waveform 16 kHz PCM as `[1, N]` to the pinned ONNX
+graph. The graph produces CTC `[1, T, 1025]`; `forceAlignCtc` maps frame `f`
+to `windowStartMs + (windowEndMs - windowStartMs) * f / T`. Word start is the
+first Viterbi frame assigned to any non-repeat target token. Production word
+end is the selected CTC transition frame, scored from that word's terminal
+posterior, blank evidence, and the next word's onset posterior; the final word
+uses its observed terminal frame. It does not use character percentages, ayah
+percentages, a global offset, equal durations, caption splitting, or a
+one-millisecond collision repair. Benchmark baseline calls retain the former
+one-frame-after-last-token policy only for fixed historical comparison.
 
 Therefore the quantization floor is one **observed CTC output frame**, not an
 assumed model constant. For the documented Surah 6 VAD-constrained run, the
@@ -110,15 +112,43 @@ audio input but does not make a generic timing file interchangeable with an
 arbitrary recording. No external data/audio is checked in here because that
 recording and license match has not been verified.
 
-## Phoneme DP and MFA research
+## Independent phoneme-DP experiment and upstream audit
 
-The QuranCaption application is CC BY-NC 4.0; do not copy its code. Its
-described phoneme CTC → word-boundary-constrained sequential DP approach is a
-useful independent design reference. Quranic-Phonemizer is MIT and can provide
-future Hafs phoneme targets, but the QuranCaption phoneme ASR models named in
-its materials are private/gated, so their model license, size, browser support,
-and commercial use cannot be verified. No qualified local browser phoneme model
-is currently available, hence `phoneme-dp` remains a research placeholder.
+`quran-phonetics.ts` is an independent, deterministic Hafs-oriented phonetic
+target. It preserves every `(verseKey, canonicalWordIndex)` boundary and covers
+Uthmani silent signs, hamza carriers, shadda expansion, initial/connected wasl,
+sun-letter lam assimilation, vowels, and waqf/silent marks without changing
+display text. `phoneme-dp.ts` consumes frame-level phoneme log probabilities
+with one global CTC/Viterbi DP; its state path cannot omit, duplicate, or
+reorder canonical words. The unit suite runs the complete DP on synthetic
+phoneme evidence.
+
+That is deliberately not yet a real-audio `phoneme-dp` benchmark contender:
+the audited QuranCaption repository is CC BY-NC 4.0 at its root. Its embedded
+`quran-multi-aligner/README.md` declares MIT, but the repository tree has no
+separate subcomponent LICENSE file; its relevant files (`phoneme_asr.py`,
+`phoneme_matcher.py`, `alignment_pipeline.py`, and `phonemizer_utils.py`) carry
+no independent license header. The README names `hetchyy/r15_95m` and
+`hetchyy/r7`; `phoneme_asr.py` loads them with an optional private HF token and
+the component requires Python, Torch, Transformers, Cython, and native audio
+packages. No model size, permissive model license, ONNX export, or browser
+runtime contract was verified. It is therefore not copied, downloaded, or
+shipped. A report explicitly records this as non-production-eligible rather
+than fabricating phoneme acoustic evidence.
+
+The separate CTC `fastconformer-transition-boundary` experiment is fully
+real-audio runnable. It preserves the existing first lexical-frame starts and
+selects each non-final end from the known forced CTC path's current terminal
+posterior, blank transition evidence, and next-word onset posterior. It adds
+no model assets and remains browser-local because it uses the existing
+FastConformer ONNX/WASM output.
+
+Upstream references audited on 2026-09-07: QuranCaption repository root
+`LICENCE` (CC BY-NC 4.0), `src-tauri/python/quran-multi-aligner/README.md`,
+`requirements.txt`, `setup.py`, and the four alignment sources above at
+`https://github.com/zonetecde/QuranCaption/tree/main`. Quranic-Phonemizer's
+public repository is MIT and documents a Hafs inventory, but it is a text G2P,
+not a browser phoneme acoustic model, so it was not bundled.
 
 Its optional MFA stage is a separate local/native forced-alignment workflow,
 not a browser model. Montreal Forced Aligner requires an acoustic model and
