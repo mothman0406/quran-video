@@ -1,5 +1,15 @@
 # Status
 
+## Current milestone: Final pre-production QA and release readiness
+
+Complete:
+
+- Confirmed the intended public/editor route boundary through the production build and local HTTP smoke checks for `/` and `/editor`; no product defects were reproduced in structural, deterministic, or build validation.
+- Re-ran Quran invariants and the fixed 45-fixture real-audio benchmark without retuning recognition: all 242 canonical words were timed exactly once; word starts measured 79ms median / 275ms p90 and transition-derived word ends 92ms median / 461ms p90.
+- Added a focused 15–20 minute real-browser/manual walkthrough and a production-readiness report. The report distinguishes code-level passes from real media/browser/TikTok validation and operational launch work.
+
+Verification: `npm run regression:quran`, `npm test` (264 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, `git diff --check`, and local production-server HTTP 200 smoke checks for `/` and `/editor` pass. The real benchmark was also run in bounded local batches and merged with the supplied metrics-only tool; production baselines were unchanged. The build retains the documented non-fatal VAD ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Pre-production TikTok Content Posting integration
 
 Complete:
