@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Cohesive editor UX polish
+
+Complete:
+
+- Refined the editor into a more consistent, compact workspace: Media, YouTube, Project Assets, and Canvas now use shared density and disclosure patterns; Project Assets remain collapsed by default, while the YouTube media choice remains contextual to the focused URL field.
+- Clarified the sticky Settings/Subtitles inspector, including the selected segment/layer context, labelled segmented controls, a visible per-segment custom-style indicator, and a direct **Use global style** action. Settings retains media/canvas controls without duplicating subtitle controls.
+- Improved the preview’s available-space behavior for vertical, square, and landscape projects while preserving contain/full-frame presentation and normalized caption geometry. Caption selection and resize affordances, safe-zone guides, timeline Arabic blocks, playhead, and panel restore rails now have more legible, restrained treatment.
+- Tightened timeline controls and added discoverable tooltips for resizing, collapsing, zooming, fitting, and trim reset. Interactive controls have consistent hover, focus-visible, and disabled states.
+- Simplified local-only YouTube copy, made generation/export status surfaces more cohesive, and fixed the error/success conflict: a previous export remains retained, but its success card does not coexist visually with an active export error.
+- No recognition, passage-identification, canonical timing, caption segmentation, word-timing, or export-rendering algorithm changed. Browser walkthrough remains pending because this workspace has no browser automation or recognized-video fixture.
+
 ## Current milestone: Export settings before every render
 
 - Export now opens an explicit settings step before each preflight/render, including **Export another version**. Quality is draft/session UI state until **Export video** is chosen; Standard remains the fresh default, while the latest chosen quality remains visible for another version.
