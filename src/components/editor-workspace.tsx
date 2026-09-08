@@ -25,6 +25,7 @@ import { quranFontDefinitions } from "@/lib/quran/content";
 import { formatTimelineClock, projectDurationMs, timeToViewportPosition, timelineItemGeometry, timelineRulerTicks, timelineTracks, type MediaSource, type MediaTrim, type TimelineItem, type TimelineViewport } from "@/lib/editor/media";
 import { waveformPeaksForViewport, type WaveformData } from "@/lib/editor/waveform";
 import type { CaptionCanvasBounds, PlatformCollision, SocialPlatformId } from "@/lib/editor/social-platform-guides";
+import { WORKSPACE_LAYOUT_DEFAULTS, clampWorkspacePanelWidth, clampWorkspaceTimelineHeight } from "@/lib/editor/workspace-layout";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage = "idle" | "preparing" | "detecting-speech" | "loading-model" | "transcribing" | "matching" | "captions" | "complete" | "error";
@@ -215,6 +216,13 @@ function Segmented({ value, options, onChange, label }: { value: string; options
   return <div className="editor-segmented" role="group" aria-label={label}>{options.map(([option, optionLabel]) => <button key={option} type="button" aria-pressed={value === option} className={value === option ? "is-active" : ""} onClick={() => onChange(option)}>{optionLabel}</button>)}</div>;
 }
 
+const WORKSPACE_PREFERENCES_KEY = "quran-video:editor-workspace:v1";
+type WorkspacePreferences = Pick<typeof WORKSPACE_LAYOUT_DEFAULTS, never> & {
+  leftPanelWidth?: number;
+  rightPanelWidth?: number;
+  timelineHeight?: number;
+};
+
 export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const [accountOpen, setAccountOpen] = useState(false);
   const [assetsExpanded, setAssetsExpanded] = useState(false);
@@ -223,8 +231,13 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [timelineCollapsed, setTimelineCollapsed] = useState(false);
-  const [timelineHeight, setTimelineHeight] = useState(300);
+  const [leftPanelWidth, setLeftPanelWidth] = useState<number>(WORKSPACE_LAYOUT_DEFAULTS.leftPanelWidth);
+  const [rightPanelWidth, setRightPanelWidth] = useState<number>(WORKSPACE_LAYOUT_DEFAULTS.rightPanelWidth);
+  const [timelineHeight, setTimelineHeight] = useState<number>(WORKSPACE_LAYOUT_DEFAULTS.timelineHeight);
+  const [workspacePreferencesReady, setWorkspacePreferencesReady] = useState(false);
+  const [layoutResizing, setLayoutResizing] = useState(false);
   const timelineResizeStart = useRef<{ y: number; height: number } | null>(null);
+  const panelResizeStart = useRef<{ panel: "left" | "right"; x: number; width: number } | null>(null);
   const {
     videoFile, videoUrl, videoMetadata, mediaSource, projectAssets, activeMediaAssetId, mediaTrim, videoRef, previewRef, timelineRef, stage, progress, support,
     alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
@@ -253,19 +266,82 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     ...(typography.transliterationVisible ? [{ id: "project-text:transliteration", type: "text" as const, name: "Transliteration", sourceOrigin: "project-text" as const, createdAt: "", availability: "available" as const, segmentCount: segments.length }] : []),
   ], [projectAssets, segments.length, typography.translationVisible, typography.transliterationVisible]);
   const visibleDuration = Math.max(1, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs);
-  const clampTimelineHeight = (value: number) => Math.max(180, Math.min(Math.max(220, typeof window === "undefined" ? 620 : window.innerHeight - 190), Math.round(value)));
+  const clampTimelineHeight = (value: number) => clampWorkspaceTimelineHeight(value, typeof window === "undefined" ? 620 : window.innerHeight - 48);
+  const clampPanelWidth = (panel: "left" | "right", value: number) => clampWorkspacePanelWidth(
+    panel,
+    value,
+    typeof window === "undefined" ? 1_440 : window.innerWidth,
+    panel === "left" ? rightPanelWidth : leftPanelWidth,
+    panel === "left" ? rightCollapsed : leftCollapsed,
+  );
   const toggleTimeline = () => setTimelineCollapsed((collapsed) => !collapsed);
   const onTimelineResizeDown = (event: PointerEvent<HTMLButtonElement>) => {
     if (timelineCollapsed) return;
+    event.preventDefault();
     timelineResizeStart.current = { y: event.clientY, height: timelineHeight };
     event.currentTarget.setPointerCapture(event.pointerId);
+    setLayoutResizing(true);
   };
   const onTimelineResizeMove = (event: PointerEvent<HTMLButtonElement>) => {
     const start = timelineResizeStart.current;
     if (!start) return;
     setTimelineHeight(clampTimelineHeight(start.height + start.y - event.clientY));
   };
-  const onTimelineResizeUp = () => { timelineResizeStart.current = null; };
+  const onTimelineResizeUp = () => { timelineResizeStart.current = null; setLayoutResizing(false); };
+  const onPanelResizeDown = (event: PointerEvent<HTMLButtonElement>, panel: "left" | "right") => {
+    event.preventDefault();
+    panelResizeStart.current = { panel, x: event.clientX, width: panel === "left" ? leftPanelWidth : rightPanelWidth };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setLayoutResizing(true);
+  };
+  const onPanelResizeMove = (event: PointerEvent<HTMLButtonElement>) => {
+    const start = panelResizeStart.current;
+    if (!start) return;
+    const delta = event.clientX - start.x;
+    const requested = start.panel === "left" ? start.width + delta : start.width - delta;
+    if (start.panel === "left") setLeftPanelWidth(clampPanelWidth("left", requested));
+    else setRightPanelWidth(clampPanelWidth("right", requested));
+  };
+  const onPanelResizeUp = () => { panelResizeStart.current = null; setLayoutResizing(false); };
+  const onPanelResizeKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, panel: "left" | "right") => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    if (panel === "left") setLeftPanelWidth((width) => clampPanelWidth("left", width + direction * 16));
+    else setRightPanelWidth((width) => clampPanelWidth("right", width - direction * 16));
+  };
+  useEffect(() => {
+    let saved: WorkspacePreferences = {};
+    try {
+      saved = JSON.parse(window.localStorage.getItem(WORKSPACE_PREFERENCES_KEY) ?? "{}") as WorkspacePreferences;
+    } catch {
+      // Invalid browser-local preferences must never affect the editor project.
+    }
+    const restore = window.requestAnimationFrame(() => {
+      if (typeof saved.leftPanelWidth === "number") setLeftPanelWidth(clampPanelWidth("left", saved.leftPanelWidth));
+      if (typeof saved.rightPanelWidth === "number") setRightPanelWidth(clampPanelWidth("right", saved.rightPanelWidth));
+      if (typeof saved.timelineHeight === "number") setTimelineHeight(clampTimelineHeight(saved.timelineHeight));
+      setWorkspacePreferencesReady(true);
+    });
+    return () => window.cancelAnimationFrame(restore);
+  // Browser-local layout settings are intentionally restored only once per editor mount.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    if (!workspacePreferencesReady) return;
+    window.localStorage.setItem(WORKSPACE_PREFERENCES_KEY, JSON.stringify({ leftPanelWidth, rightPanelWidth, timelineHeight } satisfies WorkspacePreferences));
+  }, [leftPanelWidth, rightPanelWidth, timelineHeight, workspacePreferencesReady]);
+  useEffect(() => {
+    const onWindowResize = () => {
+      setLeftPanelWidth((width) => clampPanelWidth("left", width));
+      setRightPanelWidth((width) => clampPanelWidth("right", width));
+      setTimelineHeight((height) => clampTimelineHeight(height));
+    };
+    window.addEventListener("resize", onWindowResize);
+    return () => window.removeEventListener("resize", onWindowResize);
+  // Width limits intentionally use the latest state through the rendered callback.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leftPanelWidth, rightPanelWidth, leftCollapsed, rightCollapsed]);
   useEffect(() => {
     const node = timelineRef.current;
     if (!node) return;
@@ -306,7 +382,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     return <button key={item.id} type="button" aria-label={`Caption ${displayText}`} onPointerDown={(event) => onSegmentPointerDown(event, segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.stopPropagation(); onSelectSegment(segment); }} className={`editor-caption-block ${segment.id === selectedSegmentId ? "is-selected" : ""} ${getActiveCaptionSegment(segments, currentTimeMs)?.id === segment.id ? "is-active" : ""}`} style={style}><span className="editor-caption-block-label" dir="rtl">{item.label}</span><span className="editor-timing-handle editor-timing-handle-start" aria-label={`Resize ${captionSegmentLabel(segment)} start`} onPointerDown={(event) => onEdgeDown(event, "start", segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /><span className="editor-timing-handle editor-timing-handle-end" aria-label={`Resize ${captionSegmentLabel(segment)} end`} onPointerDown={(event) => onEdgeDown(event, "end", segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /></button>;
   };
 
-  return <div className="editor-shell" style={{ "--timeline-height": `${timelineCollapsed ? 38 : timelineHeight}px` } as CSSProperties}>
+  return <div className={`editor-shell ${layoutResizing ? "is-resizing-layout" : ""}`} style={{ "--timeline-height": `${timelineCollapsed ? 38 : timelineHeight}px`, "--left-panel-width": `${leftPanelWidth}px`, "--right-panel-width": `${rightPanelWidth}px` } as CSSProperties}>
     <header className="editor-topbar">
       <div className="editor-brand"><span className="editor-brand-mark">۝</span><div><p>Quran Video</p><span>Recitation editor</span></div></div>
       <div className="editor-project-title"><input aria-label="Project name" value={projectName} onChange={(event) => onProjectNameChange(event.target.value)} /><span>{videoFile?.name ?? "No local source"}</span></div>
@@ -375,6 +451,8 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
         <div className="editor-sidebar-footer"><button className="editor-text-button" type="button" onClick={onOpenProjects}>Open local projects</button><button className="editor-text-button" type="button" onClick={onOpenCloudProjects}>Cloud projects</button><button className="editor-text-button" type="button" onClick={onNewProject}>New project</button></div>
       </aside>
 
+      <button className="editor-panel-resize editor-panel-resize-left" type="button" aria-label="Resize left panel" title="Drag to resize left panel · double-click to reset" onPointerDown={(event) => onPanelResizeDown(event, "left")} onPointerMove={onPanelResizeMove} onPointerUp={onPanelResizeUp} onDoubleClick={() => setLeftPanelWidth(WORKSPACE_LAYOUT_DEFAULTS.leftPanelWidth)} onKeyDown={(event) => onPanelResizeKeyDown(event, "left")} />
+
       <section className="editor-main-stage">
         <div className="editor-stage-header"><div><SectionLabel>Canvas</SectionLabel><h1>{videoFile ? "Caption composition" : "Begin with a recitation"}</h1></div><div className="editor-stage-info"><span>{selectedFormatDefinition.label}</span><span>{formatDuration(durationMs / 1000)}</span></div></div>
         <div className="editor-canvas-well">
@@ -386,7 +464,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
         </div>
         <div className="editor-playback-row"><span className="editor-playback-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(durationMs / 1000)}</span><span className="editor-playback-hint">Space to play · ← → to nudge</span></div>
-        {videoUrl && <div className="editor-timeline-panel"><button className="editor-timeline-resize" type="button" aria-label="Resize timeline" title="Drag to resize · double-click to reset" onPointerDown={onTimelineResizeDown} onPointerMove={onTimelineResizeMove} onPointerUp={onTimelineResizeUp} onDoubleClick={() => setTimelineHeight(300)} /><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><div className="editor-timeline-controls"><button type="button" aria-label={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} title={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} onClick={toggleTimeline}>{timelineCollapsed ? "↑" : "↓"}</button><button type="button" aria-label="Zoom out timeline" title="Zoom out" onClick={() => onTimelineZoom(timelineViewport.zoom / 2)}>−</button><input aria-label="Timeline zoom" title="Timeline zoom" type="range" min="1" max="128" step="1" value={timelineViewport.zoom} onChange={(event) => onTimelineZoom(Number(event.target.value))} /><button type="button" aria-label="Zoom in timeline" title="Zoom in" onClick={() => onTimelineZoom(timelineViewport.zoom * 2)}>+</button><button type="button" title="Fit the full project in the timeline" onClick={() => onTimelineZoom(1)}>Fit</button><button type="button" title="Reset media trim" onClick={onResetMediaTrim}>Reset trim</button></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
+        {videoUrl && <div className="editor-timeline-panel"><button className="editor-timeline-resize" type="button" aria-label="Resize timeline" title="Drag to resize · double-click to reset" onPointerDown={onTimelineResizeDown} onPointerMove={onTimelineResizeMove} onPointerUp={onTimelineResizeUp} onDoubleClick={() => setTimelineHeight(WORKSPACE_LAYOUT_DEFAULTS.timelineHeight)} /><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><div className="editor-timeline-controls"><button type="button" aria-label={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} title={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} onClick={toggleTimeline}>{timelineCollapsed ? "↑" : "↓"}</button><button type="button" aria-label="Zoom out timeline" title="Zoom out" onClick={() => onTimelineZoom(timelineViewport.zoom / 2)}>−</button><input aria-label="Timeline zoom" title="Timeline zoom" type="range" min="1" max="128" step="1" value={timelineViewport.zoom} onChange={(event) => onTimelineZoom(Number(event.target.value))} /><button type="button" aria-label="Zoom in timeline" title="Zoom in" onClick={() => onTimelineZoom(timelineViewport.zoom * 2)}>+</button><button type="button" title="Fit the full project in the timeline" onClick={() => onTimelineZoom(1)}>Fit</button><button type="button" title="Reset media trim" onClick={onResetMediaTrim}>Reset trim</button></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
           <div className="editor-timeline-labels">{tracks.map((track) => <span className="editor-track-label" key={track.kind}>{track.label}</span>)}</div>
           <div ref={timelineRef} className="editor-timeline-content" onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove}>
             <div className="editor-timeline-ruler">{rulerTicks.map((tick) => <span key={tick} style={{ left: `${timeToViewportPosition(tick, timelineViewport) * 100}%` }}>{formatTimelineClock(tick, visibleDuration < 2_000)}</span>)}</div>
@@ -410,6 +488,8 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           {exportState && exportState !== "complete" && <div className="editor-notice"><strong>{exportState === "error" ? "Export stopped" : `Exporting · ${exportState.phase}`}</strong><span>{exportError ?? "Source media is processed locally."}</span></div>}
         </div>}
       </section>
+
+      <button className="editor-panel-resize editor-panel-resize-right" type="button" aria-label="Resize right panel" title="Drag to resize right panel · double-click to reset" onPointerDown={(event) => onPanelResizeDown(event, "right")} onPointerMove={onPanelResizeMove} onPointerUp={onPanelResizeUp} onDoubleClick={() => setRightPanelWidth(WORKSPACE_LAYOUT_DEFAULTS.rightPanelWidth)} onKeyDown={(event) => onPanelResizeKeyDown(event, "right")} />
 
       <aside className="editor-sidebar editor-sidebar-right">
         <button className="editor-panel-collapse editor-panel-collapse-right" type="button" aria-label={rightCollapsed ? "Expand inspector" : "Collapse inspector"} title={rightCollapsed ? "Expand Inspector" : "Collapse Inspector"} aria-expanded={!rightCollapsed} onClick={() => setRightCollapsed((value) => !value)}>{rightCollapsed ? "‹" : "›"}</button>

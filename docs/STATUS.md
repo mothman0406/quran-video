@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Resizable center-only editor workspace
+
+Complete:
+
+- Rebuilt the desktop workspace as left panel, center preview/timeline workspace, and right inspector. The timeline is now a child of the center column, so it no longer overlays either full-height sidebar.
+- Made left and right panel content independently scrollable, retaining the sticky Settings/Subtitles switch in the right inspector so long subtitle controls remain reachable.
+- Added subtle pointer-captured left/right column resize handles, keyboard arrow adjustments, and double-click defaults. The timeline height divider remains continuous, uses a row-resize affordance, and also restores its saved custom size after collapse.
+- Added browser-local UI preferences for left-panel width, right-panel width, and timeline height. These values are clamped to keep a 440px desktop center workspace, do not enter project persistence or Undo/Redo history, and survive collapse/restore and reopen.
+- Added focused layout regression coverage for center-only timeline bounds, sidebar exclusion, collapse/restore sizing, desktop width clamps, and continuous timeline-height clamps. Existing timeline tests continue to cover content-rect seeking, screen-space snapping, anchored pinch zoom, and waveform alignment.
+
+Verification: focused workspace/timeline tests, `npx tsc --noEmit`, `npm run lint -- --quiet`, and `git diff --check` pass. Browser validation remains pending because this workspace has no browser automation or recognized-video fixture.
+
 ## Current milestone: Pre-production real-video Quran regression
 
 Complete:
