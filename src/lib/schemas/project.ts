@@ -4,6 +4,7 @@ const PositiveNumber = z.number().finite().nonnegative();
 const PositiveInteger = z.number().int().positive();
 
 const MediaMetadataSchema = z.strictObject({
+  assetId: z.string().min(1).optional(),
   fileName: z.string().min(1),
   mimeType: z.string().min(1),
   fileSize: PositiveNumber.optional(),
@@ -20,6 +21,23 @@ export const MediaSourceSchema = z.discriminatedUnion("kind", [
   MediaMetadataSchema.extend({ kind: z.literal("video"), hasVideo: z.literal(true), hasAudio: z.boolean() }),
   MediaMetadataSchema.extend({ kind: z.literal("audio"), hasVideo: z.literal(false), hasAudio: z.literal(true) }),
 ]);
+
+export const ProjectAssetSchema = z.strictObject({
+  id: z.string().min(1),
+  type: z.enum(["video", "audio", "image", "text"]),
+  name: z.string().min(1),
+  sourceOrigin: z.enum(["local-file", "youtube-import", "project-text"]),
+  createdAt: z.string().min(1),
+  durationMs: PositiveNumber.optional(),
+  width: PositiveInteger.optional(),
+  height: PositiveInteger.optional(),
+  mimeType: z.string().min(1).optional(),
+  sourceUrl: z.string().url().optional(),
+  /** Files are deliberately not persisted; local items require relinking after reload. */
+  availability: z.enum(["available", "needs-relink"]),
+  sourceSessionId: z.string().min(1).optional(),
+  segmentCount: z.number().int().nonnegative().optional(),
+});
 
 export const MediaTrimSchema = z.strictObject({
   startMs: PositiveNumber,
@@ -166,6 +184,8 @@ export const ProjectSchema = z.strictObject({
   id: z.string().min(1),
   title: z.string().min(1),
   sourceMedia: MediaSourceSchema.nullable(),
+  projectAssets: z.array(ProjectAssetSchema),
+  activeMediaAssetId: z.string().min(1).nullable(),
   mediaTrim: MediaTrimSchema,
   format: ProjectFormatSchema,
   verseAlignments: z.array(VerseAlignmentSchema),
@@ -184,6 +204,7 @@ export const ProjectSchema = z.strictObject({
 export const SavedProjectSchema = ProjectSchema;
 
 export type Project = z.infer<typeof ProjectSchema>;
+export type ProjectAsset = z.infer<typeof ProjectAssetSchema>;
 export type ProjectFormat = z.infer<typeof ProjectFormatSchema>;
 export type ProjectInput = z.input<typeof ProjectSchema>;
 export type SavedProject = z.infer<typeof SavedProjectSchema>;

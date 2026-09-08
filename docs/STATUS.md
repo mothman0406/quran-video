@@ -1,5 +1,32 @@
 # Status
 
+## Current milestone: Project Assets and timeline interaction improvements
+
+Complete:
+
+- Added the metadata-only `ProjectAsset` registry with one persisted active
+  media asset ID. Local video/audio and local-development YouTube imports add
+  assets without replacing prior entries; the existing single active media
+  pipeline remains authoritative. Persisted browser-local assets visibly
+  require relinking rather than silently disappearing.
+- Simplified the left sidebar with an initially collapsed Project Assets bin,
+  compact active/relink/use/remove controls, and grouped Quran Caption,
+  Translation, and Transliteration text entries. This is deliberately not
+  multi-clip editing.
+- Replaced the permanent YouTube mode dropdown with focus/pointer-revealed
+  Video and Audio only chips. The source URL remains intact and Escape or
+  focus-out dismisses the choices.
+- Increased the responsive no-scroll timeline workspace and track heights.
+  The native timeline wheel surface now consumes only Ctrl-wheel pinch events,
+  uses shared pointer-anchored viewport geometry, and leaves ordinary trackpad
+  scrolling untouched.
+
+Verification: `npm test` (184 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. Lint retains four existing
+unused legacy timing-helper warnings; build retains the existing non-fatal VAD
+ONNX Runtime dynamic-require warning. Direct browser/trackpad validation is
+pending because no browser automation is installed in this workspace.
+
 ## Current milestone: FastConformer Quran-wide identification primary
 
 Complete:

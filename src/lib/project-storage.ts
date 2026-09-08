@@ -48,12 +48,33 @@ function migrateSavedProject(value: unknown): unknown {
     : undefined;
   const withoutLegacySource = Object.fromEntries(Object.entries(project).filter(([key]) => key !== "sourceVideo"));
   const resolvedSource = "sourceMedia" in project ? project.sourceMedia : sourceMedia ?? null;
+  const legacyAsset = resolvedSource && typeof resolvedSource === "object" && !Array.isArray(resolvedSource)
+    ? (() => {
+        const source = resolvedSource as Record<string, unknown>;
+        const kind = source.kind === "audio" ? "audio" : "video";
+        return {
+          id: "legacy-active-media",
+          type: kind,
+          name: typeof source.displayName === "string" ? source.displayName : source.fileName,
+          sourceOrigin: source.origin === "youtube-import" ? "youtube-import" : "local-file",
+          createdAt: typeof project.createdAt === "string" ? project.createdAt : new Date(0).toISOString(),
+          durationMs: source.durationMs,
+          width: source.width,
+          height: source.height,
+          mimeType: source.mimeType,
+          sourceUrl: source.sourceUrl,
+          availability: "needs-relink",
+        };
+      })()
+    : null;
   const sourceDurationMs = resolvedSource && typeof resolvedSource === "object" && !Array.isArray(resolvedSource) && typeof (resolvedSource as Record<string, unknown>).durationMs === "number"
     ? Math.max(0, Math.round((resolvedSource as Record<string, number>).durationMs))
     : 0;
   return {
     ...withoutLegacySource,
     ...("sourceMedia" in project ? {} : { sourceMedia: sourceMedia ?? null }),
+    ...("projectAssets" in project ? {} : { projectAssets: legacyAsset ? [legacyAsset] : [] }),
+    ...("activeMediaAssetId" in project ? {} : { activeMediaAssetId: legacyAsset?.id ?? null }),
     // Source-time trim was introduced after persisted media metadata. Old
     // projects retain their full original source range.
     ...("mediaTrim" in project ? {} : { mediaTrim: { startMs: 0, endMs: sourceDurationMs } }),

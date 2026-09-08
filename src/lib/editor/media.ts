@@ -18,6 +18,7 @@ export type MediaSource = ({
   hasVideo: false;
   hasAudio: true;
 }) & {
+  assetId?: string;
   fileName: string;
   mimeType: string;
   fileSize?: number;
@@ -92,6 +93,18 @@ export function zoomTimelineViewport(viewport: TimelineViewport, durationMs: num
   return clampTimelineViewport({ ...next, visibleStartMs: anchorTimeMs - ratio * nextWindow }, durationMs);
 }
 
+export const TIMELINE_PINCH_ZOOM_SENSITIVITY = 0.0025;
+
+/** Chromium trackpad pinch helper: negative wheel delta (fingers spread) zooms in. */
+export function pinchTimelineViewport(viewport: TimelineViewport, durationMs: number, pointerRatio: number, deltaY: number): TimelineViewport {
+  const current = clampTimelineViewport(viewport, durationMs);
+  const ratio = Math.max(0, Math.min(1, pointerRatio));
+  if (!Number.isFinite(deltaY) || durationMs <= 0) return current;
+  const anchorTimeMs = viewportPositionToTime(ratio, current);
+  const nextZoom = current.zoom * Math.exp(-deltaY * TIMELINE_PINCH_ZOOM_SENSITIVITY);
+  return zoomTimelineViewport(current, durationMs, nextZoom, anchorTimeMs);
+}
+
 export function panTimelineViewport(viewport: TimelineViewport, durationMs: number, visibleStartMs: number): TimelineViewport {
   return clampTimelineViewport({ ...viewport, visibleStartMs }, durationMs);
 }
@@ -118,9 +131,10 @@ export function mediaKindForFile(file: Pick<File, "type">): MediaKind | null {
   return null;
 }
 
-export function mediaSourceFromFile(file: Pick<File, "name" | "size" | "type">, kind: MediaKind, metadata?: { durationMs?: number; width?: number; height?: number; origin?: NonNullable<MediaSource["origin"]>; sourceUrl?: string; displayName?: string }): MediaSource {
+export function mediaSourceFromFile(file: Pick<File, "name" | "size" | "type">, kind: MediaKind, metadata?: { assetId?: string; durationMs?: number; width?: number; height?: number; origin?: NonNullable<MediaSource["origin"]>; sourceUrl?: string; displayName?: string }): MediaSource {
   const common = {
     fileName: file.name,
+    assetId: metadata?.assetId,
     fileSize: file.size,
     mimeType: file.type || `${kind}/*`,
     durationMs: metadata?.durationMs,

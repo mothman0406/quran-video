@@ -52,7 +52,7 @@ import {
   projectFormatDefinition,
 } from "@/lib/editor/formats";
 import type { ProjectFormat, ProjectFormatPreset } from "@/lib/schemas/project";
-import type { SavedProject } from "@/lib/schemas/project";
+import type { ProjectAsset, SavedProject } from "@/lib/schemas/project";
 import {
   createProjectRepository,
   verifySourceFile,
@@ -104,9 +104,10 @@ import type { Session } from "@supabase/supabase-js";
 import { recordAuthenticatedUsage } from "@/lib/usage/client";
 import { getCloudProjectLimit, getCustomStyleLimit, getPlanEntitlements, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
-import { clampMediaTrim, clampTimelineViewport, createMediaTrim, createTimelineViewport, mediaKindForFile, mediaSourceFromFile, panTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, snapCaptionBoundaryToPlayhead, timelineContentPosition, viewportPositionToTime, zoomTimelineViewport, type MediaSource, type MediaTrim, type TimelineViewport } from "@/lib/editor/media";
+import { clampMediaTrim, clampTimelineViewport, createMediaTrim, createTimelineViewport, mediaKindForFile, mediaSourceFromFile, panTimelineViewport, pinchTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, snapCaptionBoundaryToPlayhead, timelineContentPosition, viewportPositionToTime, zoomTimelineViewport, type MediaSource, type MediaTrim, type TimelineViewport } from "@/lib/editor/media";
 import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 import { waveformPeaksFromPcm, type WaveformData } from "@/lib/editor/waveform";
+import { projectAssetFromMediaSource } from "@/lib/editor/project-assets";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -188,6 +189,8 @@ export default function Home() {
     null,
   );
   const [mediaSource, setMediaSource] = useState<MediaSource | null>(null);
+  const [projectAssets, setProjectAssets] = useState<ProjectAsset[]>([]);
+  const [activeMediaAssetId, setActiveMediaAssetId] = useState<string | null>(null);
   const [mediaTrim, setMediaTrim] = useState<MediaTrim>(createMediaTrim(0));
   const [stage, setStage] = useState<Stage>("idle");
   // eslint-disable-next-line @typescript-eslint/no-unused-vars -- consumed by JSX below; this ESLint setup does not mark JSX expressions as references.
@@ -300,6 +303,8 @@ export default function Home() {
   const exportAbort = useRef<AbortController | null>(null);
   const youtubeImportAbort = useRef<AbortController | null>(null);
   const youtubeImportSession = useRef<string | null>(null);
+  const assetFiles = useRef(new Map<string, { file: File; source: MediaSource }>());
+  const assetYouTubeSessions = useRef(new Map<string, string>());
   const exportCoordinator = useRef(new ExportCoordinator());
   const playbackClock = useRef<MediaPlaybackClock | null>(null);
 
@@ -405,8 +410,9 @@ export default function Home() {
   useEffect(() => () => {
     exportAbort.current?.abort();
     youtubeImportAbort.current?.abort();
-    const sessionId = youtubeImportSession.current;
-    if (sessionId) void fetch(`/api/local-youtube-import?sessionId=${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+    for (const sessionId of assetYouTubeSessions.current.values()) {
+      void fetch(`/api/local-youtube-import?sessionId=${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+    }
   }, []);
   useEffect(() => {
     const font = quranFontDefinitions[typography.quranStyle];
@@ -418,6 +424,8 @@ export default function Home() {
   const editorSignature = JSON.stringify({
     projectName,
     sourceMedia: videoFile ? mediaSource : (savedProject?.sourceMedia ?? null),
+    projectAssets,
+    activeMediaAssetId,
     mediaTrim,
     format: projectFormat,
     verseAlignments: alignments,
@@ -504,12 +512,12 @@ export default function Home() {
       /* Arabic remains available when translation enrichment fails. */
     }
   }
-  function releaseYouTubeImport(sessionId = youtubeImportSession.current) {
+  function releaseYouTubeImport(sessionId: string | null | undefined) {
     if (!sessionId) return;
     if (youtubeImportSession.current === sessionId) youtubeImportSession.current = null;
     void fetch(`/api/local-youtube-import?sessionId=${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => undefined);
   }
-  function loadSelectedSource(next: File, nextSource: MediaSource) {
+  function loadSelectedSource(next: File, nextSource: MediaSource, options?: { preserveCaptions?: boolean }) {
     exportAbort.current?.abort();
     generation.current += 1;
     const waveformJob = ++waveformGeneration.current;
@@ -519,14 +527,14 @@ export default function Home() {
     setVideoFile(next);
     setVideoUrl(URL.createObjectURL(next));
     setMediaSource(nextSource);
-    setMediaTrim(opening?.mediaTrim ?? createMediaTrim(projectDurationMs(nextSource)));
+    setMediaTrim(opening?.mediaTrim ?? (options?.preserveCaptions ? mediaTrim : createMediaTrim(projectDurationMs(nextSource))));
     setTimelineViewport(createTimelineViewport(projectDurationMs(nextSource)));
     void loadWaveform(next, waveformJob);
     setVideoMetadata(null);
     setErrorMessage(opening ? `Reselect source media: ${opening.sourceMedia?.fileName ?? next.name}` : null);
     setStage("idle");
     setProgress(null);
-    if (!opening) {
+    if (!opening && !options?.preserveCaptions) {
       setAlignments([]);
       setSegments([]);
       setContent({});
@@ -542,13 +550,17 @@ export default function Home() {
     generation.current += 1;
     waveformGeneration.current += 1;
     if (videoUrl) URL.revokeObjectURL(videoUrl);
-    releaseYouTubeImport();
+    for (const sessionId of assetYouTubeSessions.current.values()) releaseYouTubeImport(sessionId);
+    assetYouTubeSessions.current.clear();
+    assetFiles.current.clear();
     setYoutubeImportStatus("idle");
     setYoutubeImportError(null);
     setVideoFile(null);
     setVideoUrl(null);
     setVideoMetadata(null);
     setMediaSource(null);
+    setProjectAssets([]);
+    setActiveMediaAssetId(null);
     setMediaTrim(createMediaTrim(0));
     setAlignments([]);
     setSegments([]);
@@ -585,6 +597,8 @@ export default function Home() {
       sourceMedia: videoFile
         ? mediaSource
         : (savedProject?.sourceMedia ?? null),
+      projectAssets,
+      activeMediaAssetId,
       mediaTrim: clampMediaTrim(mediaTrim, projectDurationMs(videoFile ? mediaSource : savedProject?.sourceMedia ?? null)),
       format: projectFormat,
       verseAlignments: alignments,
@@ -630,6 +644,8 @@ export default function Home() {
       savedSignature.current = JSON.stringify({
         projectName: title,
         sourceMedia: project.sourceMedia,
+        projectAssets: project.projectAssets,
+        activeMediaAssetId: project.activeMediaAssetId,
         mediaTrim: project.mediaTrim,
         format: project.format,
         verseAlignments: project.verseAlignments,
@@ -718,6 +734,10 @@ export default function Home() {
     setProjectsOpen(false);
     clearVideo();
     setSavedProject(project);
+    setProjectAssets(project.projectAssets.map((asset) => asset.type === "text" ? asset : { ...asset, availability: "needs-relink" }));
+    setActiveMediaAssetId(project.activeMediaAssetId);
+    assetFiles.current.clear();
+    assetYouTubeSessions.current.clear();
     setPendingOpenProject(project);
     setProjectName(project.title);
     setProjectFormat(project.format);
@@ -739,6 +759,8 @@ export default function Home() {
     savedSignature.current = JSON.stringify({
       projectName: project.title,
       sourceMedia: project.sourceMedia,
+      projectAssets: project.projectAssets,
+      activeMediaAssetId: project.activeMediaAssetId,
       mediaTrim: project.mediaTrim,
       format: project.format,
       verseAlignments: project.verseAlignments,
@@ -769,6 +791,9 @@ export default function Home() {
     )
       return;
     await repository.current.delete(project.id);
+    for (const asset of project.projectAssets) {
+      if (asset.sourceOrigin === "youtube-import" && asset.sourceSessionId) releaseYouTubeImport(asset.sourceSessionId);
+    }
     setProjects(await repository.current.list());
     if (savedProject?.id === project.id) resetEditorState();
   }
@@ -826,10 +851,48 @@ export default function Home() {
       setErrorMessage("Choose browser-supported video or audio to start a local editing session.");
       return;
     }
-    releaseYouTubeImport();
     setYoutubeImportStatus("idle");
     setYoutubeImportError(null);
-    loadSelectedSource(next, mediaSourceFromFile(next, mediaKindForFile(next)!));
+    const assetId = crypto.randomUUID();
+    const source = mediaSourceFromFile(next, mediaKindForFile(next)!, { assetId });
+    assetFiles.current.set(assetId, { file: next, source });
+    setProjectAssets((current) => [...current, projectAssetFromMediaSource(source, assetId)]);
+    setActiveMediaAssetId(assetId);
+    loadSelectedSource(next, source);
+  }
+  function relinkProjectAsset(assetId: string, event: ChangeEvent<HTMLInputElement>) {
+    const next = event.target.files?.[0];
+    const asset = projectAssets.find((candidate) => candidate.id === assetId);
+    if (!next || !asset || !mediaKindForFile(next)) return;
+    const wouldDiscardCaptions = Boolean(segments.length && activeMediaAssetId !== assetId);
+    if (wouldDiscardCaptions && !window.confirm("Switching source clears the current recognition and caption timing. Continue?")) return;
+    const source = mediaSourceFromFile(next, mediaKindForFile(next)!, { assetId, durationMs: asset.durationMs, width: asset.width, height: asset.height, origin: asset.sourceOrigin === "youtube-import" ? "youtube-import" : "local-file", sourceUrl: asset.sourceUrl, displayName: asset.name });
+    assetFiles.current.set(assetId, { file: next, source });
+    setProjectAssets((current) => current.map((candidate) => candidate.id === assetId ? { ...candidate, name: next.name, mimeType: next.type, availability: "available" } : candidate));
+    setActiveMediaAssetId(assetId);
+    loadSelectedSource(next, source, { preserveCaptions: !wouldDiscardCaptions });
+  }
+  function activateProjectAsset(assetId: string) {
+    const runtime = assetFiles.current.get(assetId);
+    if (!runtime) return;
+    const wouldDiscardCaptions = Boolean(segments.length && activeMediaAssetId !== assetId);
+    if (wouldDiscardCaptions && !window.confirm("Switching source clears the current recognition and caption timing. Continue?")) return;
+    setActiveMediaAssetId(assetId);
+    loadSelectedSource(runtime.file, runtime.source, { preserveCaptions: !wouldDiscardCaptions });
+  }
+  function removeProjectAsset(assetId: string) {
+    const asset = projectAssets.find((candidate) => candidate.id === assetId);
+    if (!asset || !window.confirm(`Remove “${asset.name}” from this project?`)) return;
+    const sessionId = assetYouTubeSessions.current.get(assetId);
+    if (sessionId) releaseYouTubeImport(sessionId);
+    assetYouTubeSessions.current.delete(assetId);
+    assetFiles.current.delete(assetId);
+    setProjectAssets((current) => current.filter((candidate) => candidate.id !== assetId));
+    if (activeMediaAssetId === assetId) {
+      setActiveMediaAssetId(null);
+      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      setVideoFile(null); setVideoUrl(null); setVideoMetadata(null); setMediaSource(null); setMediaTrim(createMediaTrim(0)); setWaveformData(null); setTimelineViewport(createTimelineViewport(0));
+    }
   }
   async function importYouTube() {
     if (!["idle", "failed", "ready"].includes(youtubeImportStatus)) return;
@@ -856,7 +919,9 @@ export default function Home() {
       const mediaResponse = await fetch(payload.mediaUrl, { signal: controller.signal });
       if (!mediaResponse.ok) throw new Error("The temporary imported media is no longer available. Please import it again.");
       const file = new File([await mediaResponse.blob()], payload.fileName, { type: payload.mimeType });
+      const assetId = crypto.randomUUID();
       const nextSource = mediaSourceFromFile(file, payload.hasVideo ? "video" : "audio", {
+        assetId,
         durationMs: payload.durationMs,
         width: payload.width,
         height: payload.height,
@@ -864,9 +929,11 @@ export default function Home() {
         sourceUrl: payload.sourceUrl,
         displayName: payload.title,
       });
-      const previousSession = youtubeImportSession.current;
       youtubeImportSession.current = sessionId;
-      if (previousSession) releaseYouTubeImport(previousSession);
+      assetFiles.current.set(assetId, { file, source: nextSource });
+      assetYouTubeSessions.current.set(assetId, sessionId);
+      setProjectAssets((current) => [...current, projectAssetFromMediaSource(nextSource, assetId, new Date().toISOString(), sessionId)]);
+      setActiveMediaAssetId(assetId);
       loadSelectedSource(file, nextSource);
       setYoutubeImportStatus("ready");
     } catch (error) {
@@ -891,6 +958,7 @@ export default function Home() {
     setVideoMetadata(metadata);
     const durationMs = Math.round(metadata.durationSeconds * 1_000);
     setMediaSource((current) => current ? { ...current, durationMs, ...(current.hasVideo ? { width: metadata.width, height: metadata.height } : {}) } : current);
+    if (activeMediaAssetId) setProjectAssets((current) => current.map((asset) => asset.id === activeMediaAssetId ? { ...asset, durationMs, ...(mediaSource?.hasVideo ? { width: metadata.width, height: metadata.height } : {}) } : asset));
     setMediaTrim((current) => pendingOpenProject ? clampMediaTrim(current, durationMs) : createMediaTrim(durationMs));
     setTimelineViewport((current) => current.visibleEndMs > 0 ? clampTimelineViewport(current, durationMs) : createTimelineViewport(durationMs));
     if (pendingOpenProject) {
@@ -1157,13 +1225,13 @@ export default function Home() {
     setWaveformData(null);
     setTimelineViewport(createTimelineViewport(0));
     if (videoUrl) URL.revokeObjectURL(videoUrl);
-    releaseYouTubeImport();
     setYoutubeImportStatus("idle");
     setYoutubeImportError(null);
     setVideoFile(null);
     setVideoUrl(null);
     setVideoMetadata(null);
     setMediaSource(null);
+    setActiveMediaAssetId(null);
     setMediaTrim(createMediaTrim(0));
     setAlignments([]);
     setSegments([]);
@@ -1492,6 +1560,16 @@ export default function Home() {
     const anchor = playheadIsVisible ? currentTimeMs : (timelineViewport.visibleStartMs + timelineViewport.visibleEndMs) / 2;
     setTimelineViewport(zoomTimelineViewport(timelineViewport, durationMs, zoom, anchor));
   }
+  function pinchTimelineZoom(clientX: number, deltaY: number): boolean {
+    if (draggingEdge.current || draggingMediaTrim.current || draggingPlayhead.current || timelineInteraction.current) return false;
+    const durationMs = projectDurationMs(mediaSource);
+    const rect = timelineRef.current?.getBoundingClientRect();
+    if (!durationMs || !rect || !Number.isFinite(deltaY)) return false;
+    const next = pinchTimelineViewport(timelineViewport, durationMs, timelineContentPosition(clientX, rect.left, rect.width), deltaY);
+    if (Math.abs(next.zoom - timelineViewport.zoom) < 0.0001) return false;
+    setTimelineViewport(next);
+    return true;
+  }
   function panTimelineTo(visibleStartMs: number) {
     setTimelineViewport(panTimelineViewport(timelineViewport, projectDurationMs(mediaSource), visibleStartMs));
   }
@@ -1712,6 +1790,8 @@ export default function Home() {
         videoUrl={videoUrl}
         videoMetadata={videoMetadata}
         mediaSource={mediaSource}
+        projectAssets={projectAssets}
+        activeMediaAssetId={activeMediaAssetId}
         mediaTrim={mediaTrim}
         videoRef={videoRef}
         previewRef={previewRef}
@@ -1766,6 +1846,9 @@ export default function Home() {
         selectedFormatDefinition={selectedFormatDefinition}
         onProjectNameChange={setProjectName}
         onVideoSelect={selectVideo}
+        onRelinkAsset={relinkProjectAsset}
+        onActivateAsset={activateProjectAsset}
+        onRemoveAsset={removeProjectAsset}
         onYoutubeUrlChange={setYoutubeUrl}
         onYoutubeModeChange={setYoutubeMode}
         onImportYouTube={() => void importYouTube()}
@@ -1794,6 +1877,7 @@ export default function Home() {
         onResetMediaTrim={resetMediaTrim}
         onTimelineZoom={setTimelineZoom}
         onTimelinePan={panTimelineTo}
+        onTimelinePinchZoom={pinchTimelineZoom}
         onChangeFormat={changeFormat}
         onDetect={() => void detect()}
         onCopyAlignmentDebug={() => { void copyAlignmentDebug(); }}

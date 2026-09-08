@@ -1,5 +1,21 @@
 # Architecture
 
+## Project assets and source selection
+
+Projects persist a metadata-only `ProjectAsset[]` registry for video, audio,
+image, and grouped text sources, plus one `activeMediaAssetId`. The editor
+continues to have exactly one active `MediaSource`; it alone drives preview,
+playback, waveform, recognition, trim, and export. The asset registry is not a
+multi-clip composition model. Browser-local files are runtime-only and become
+`needs-relink` after reload. App-owned local YouTube temporary files are kept
+while their asset remains in the project and are removed only on asset/project
+cleanup or stale/failed import cleanup.
+
+The timeline remains one shared viewport for ruler, tracks, waveform,
+playhead, seeking, trimming, and caption editing. Pointer-anchored trackpad
+pinch zoom updates that existing viewport; future multi-clip editing remains a
+separate milestone.
+
 ## Current foundation
 
 - Next.js App Router with TypeScript and Tailwind.

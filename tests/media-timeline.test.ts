@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getActiveCaptionSegment, resizeCaptionBoundary } from "../src/lib/editor/captions.ts";
-import { CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX, clampMediaTrim, createMediaTrim, createTimelineViewport, exportOutputTimeToSourceTime, mediaSourceFromFile, panTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, shouldStopMediaPlayback, snapCaptionBoundaryToPlayhead, timeToTimelinePosition, timelineContentPosition, timelineItemGeometry, timelinePositionToTime, timelineRulerTicks, timelineTracks, timeToViewportPosition, viewportPositionToTime, zoomTimelineViewport } from "../src/lib/editor/media.ts";
+import { CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX, clampMediaTrim, createMediaTrim, createTimelineViewport, exportOutputTimeToSourceTime, mediaSourceFromFile, panTimelineViewport, pinchTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, shouldStopMediaPlayback, snapCaptionBoundaryToPlayhead, timeToTimelinePosition, timelineContentPosition, timelineItemGeometry, timelinePositionToTime, timelineRulerTicks, timelineTracks, timeToViewportPosition, viewportPositionToTime, zoomTimelineViewport } from "../src/lib/editor/media.ts";
 import { MediaPlaybackClock } from "../src/lib/editor/playback-clock.ts";
 import { loadSavedProject } from "../src/lib/project-storage.ts";
 import { waveformPeaksForViewport, waveformPeaksFromPcm } from "../src/lib/editor/waveform.ts";
@@ -124,6 +124,22 @@ test("zoomed viewport maps all timeline geometry through one visible time window
   assert.ok(timelineRulerTicks(viewport, 800).every((tick) => tick >= 20_000 && tick <= 30_000));
   const anchored = zoomTimelineViewport(viewport, 60_000, 12, 25_000);
   assert.equal(timeToViewportPosition(25_000, anchored), .5, "zoom retains the playhead position when it is visible");
+});
+
+test("trackpad pinch zooms in and out around its pointer anchor without changing timeline bounds", () => {
+  const durationMs = 60_000;
+  const viewport = panTimelineViewport(createTimelineViewport(durationMs, 4), durationMs, 15_000);
+  const anchorRatio = .72;
+  const anchorTime = viewportPositionToTime(anchorRatio, viewport);
+  const zoomedIn = pinchTimelineViewport(viewport, durationMs, anchorRatio, -120);
+  assert.ok(zoomedIn.zoom > viewport.zoom, "negative Chromium pinch delta zooms in");
+  assert.ok(Math.abs(viewportPositionToTime(anchorRatio, zoomedIn) - anchorTime) <= 1, "pointer time remains anchored");
+  const zoomedOut = pinchTimelineViewport(zoomedIn, durationMs, anchorRatio, 120);
+  assert.ok(zoomedOut.zoom < zoomedIn.zoom, "positive Chromium pinch delta zooms out");
+  for (const candidate of [zoomedIn, zoomedOut, pinchTimelineViewport(viewport, durationMs, 0, -100_000), pinchTimelineViewport(viewport, durationMs, 1, 100_000)]) {
+    assert.ok(candidate.zoom >= 1 && candidate.zoom <= 128);
+    assert.ok(candidate.visibleStartMs >= 0 && candidate.visibleEndMs <= durationMs);
+  }
 });
 
 test("zoomed screen-space playhead snapping still resolves to the exact stationary time", () => {

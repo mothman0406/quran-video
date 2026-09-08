@@ -4,9 +4,11 @@ import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSI
 import { DEFAULT_PROJECT_FORMAT } from "../src/lib/editor/formats.ts";
 import { createMemoryProjectRepository, loadSavedProject, serializeSavedProject, sourceFingerprint, validateSavedProject, verifySourceFile } from "../src/lib/project-storage.ts";
 import type { SavedProject } from "../src/lib/schemas/project.ts";
+import { projectAssetFromMediaSource, projectTextAssets } from "../src/lib/editor/project-assets.ts";
+import { mediaSourceFromFile } from "../src/lib/editor/media.ts";
 
 function project(overrides: Partial<SavedProject> = {}): SavedProject {
-  return { version: 2, id: "project-1", title: "Evening recitation", sourceMedia: { kind: "video", hasVideo: true, hasAudio: true, fileName: "recitation.mp4", fileSize: 42, mimeType: "video/mp4", durationMs: 12_000, fingerprint: "recitation.mp4:42:video/mp4" }, mediaTrim: { startMs: 0, endMs: 12_000 }, format: DEFAULT_PROJECT_FORMAT, verseAlignments: [], captionSegments: [], captions: { arabic: true, translation: true, transliteration: false, translationEdition: "english_saheeh" }, positioning: DEFAULT_CAPTION_POSITIONING, captionBackground: DEFAULT_CAPTION_BACKGROUND, typography: DEFAULT_TYPOGRAPHY, transitionSettings: DEFAULT_TRANSITION_SETTINGS, showVerseNumber: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", ...overrides };
+  return { version: 2, id: "project-1", title: "Evening recitation", sourceMedia: { kind: "video", hasVideo: true, hasAudio: true, fileName: "recitation.mp4", fileSize: 42, mimeType: "video/mp4", durationMs: 12_000, fingerprint: "recitation.mp4:42:video/mp4" }, mediaTrim: { startMs: 0, endMs: 12_000 }, format: DEFAULT_PROJECT_FORMAT, verseAlignments: [], captionSegments: [], captions: { arabic: true, translation: true, transliteration: false, translationEdition: "english_saheeh" }, positioning: DEFAULT_CAPTION_POSITIONING, captionBackground: DEFAULT_CAPTION_BACKGROUND, typography: DEFAULT_TYPOGRAPHY, transitionSettings: DEFAULT_TRANSITION_SETTINGS, showVerseNumber: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", ...overrides, projectAssets: overrides.projectAssets ?? [], activeMediaAssetId: overrides.activeMediaAssetId ?? null };
 }
 
 test("save creates metadata, updates by stable id, and stores no media bytes", async () => {
@@ -20,6 +22,16 @@ test("save creates metadata, updates by stable id, and stores no media bytes", a
   assert.equal(JSON.stringify(projects[0]).includes("blob:"), false);
   assert.equal(JSON.stringify(projects[0]).includes("data:video"), false);
   assert.throws(() => validateSavedProject({ ...saved, media: new ArrayBuffer(2) } as SavedProject & { media: ArrayBuffer }), /media|unsupported/i);
+});
+
+test("project assets persist metadata only and group project text by source", () => {
+  const source = mediaSourceFromFile({ name: "recitation.mp3", size: 42, type: "audio/mpeg" }, "audio", { assetId: "asset-a", durationMs: 12_000 });
+  const asset = projectAssetFromMediaSource(source, "asset-a", "2026-01-01T00:00:00.000Z");
+  const saved = project({ projectAssets: [asset], activeMediaAssetId: asset.id, sourceMedia: source });
+  const serialized = serializeSavedProject(saved);
+  assert.equal(serialized.includes("blob:"), false);
+  assert.deepEqual(loadSavedProject(serialized).projectAssets, [asset]);
+  assert.deepEqual(projectTextAssets(8, true, true).map((item) => item.name), ["Quran Captions", "Translation", "Transliteration"]);
 });
 
 test("current verse alignments round-trip through serialization, validation, and loading", async () => {

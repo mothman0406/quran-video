@@ -1,5 +1,14 @@
 # Product
 
+## Editor assets and timeline interaction
+
+The compact left sidebar exposes Media import, a contextual YouTube URL import
+mode selector, a collapsed Project Assets bin, and Canvas controls. Project
+Assets lists imported project media and logical Quran text sources without
+turning caption segments into individual files. The desktop timeline is taller
+for waveform and timing inspection and supports pointer-anchored trackpad
+pinch-to-zoom in addition to its visible zoom and pan controls.
+
 Quran-first caption editor for local recitation video or audio. The product identifies the recited surah and ayat, aligns canonical Hafs Arabic, and optionally shows Saheeh International translation and transliteration over video or an audio-only neutral canvas.
 
 Defaults: vertical 9:16, centered Arabic with translation below, ayah-level timing, and editable fades. Users will eventually be able to adjust text, timing, position, style, typography, and output format.
