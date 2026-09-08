@@ -739,6 +739,10 @@ export default function Home() {
     setTransitionSettings(DEFAULT_TRANSITION_SETTINGS);
     setPlaybackRate(DEFAULT_PLAYBACK_RATE);
     setShowVerseNumber(DEFAULT_CAPTION_PRESENTATION.showVerseNumber);
+    setExportQuality(DEFAULT_EXPORT_QUALITY);
+    setExportOpen(false);
+    setExportPreflight(null);
+    setOutputPlan(null);
     setExportState(null);
     setExportError(null);
     setExportDiagnostics(null);
@@ -899,6 +903,9 @@ export default function Home() {
       return;
     setProjectsOpen(false);
     clearVideo();
+    setExportQuality(DEFAULT_EXPORT_QUALITY);
+    setExportPreflight(null);
+    setOutputPlan(null);
     setSavedProject(project);
     setProjectAssets(project.projectAssets.map((asset) => asset.type === "text" ? asset : { ...asset, availability: "needs-relink" }));
     setActiveMediaAssetId(project.activeMediaAssetId);
@@ -2266,7 +2273,7 @@ export default function Home() {
         setExportOpen(false);
         await exportVideo(preflight);
       } else {
-        setExportState(null);
+        setExportState(exportResult ? "complete" : null);
         setExportOpen(true);
       }
     } finally {
@@ -2416,14 +2423,13 @@ export default function Home() {
         onPlanChange={setSubscriptionPlan}
         onDiscard={savedProject ? () => void openProject(savedProject) : newProject}
         onNewProject={newProject}
-        onExportOpen={() => { void startExport(); }}
-        onExport={() => void exportVideo()}
-        onRecheckExport={() => { void checkExportPreflight(); }}
+        onExportOpen={() => { setExportOpen(true); setExportPreflight(null); setExportError(null); if (exportState === "error") setExportState(exportResult ? "complete" : null); }}
+        onExport={() => void startExport()}
         onExportPreflightAction={handleExportPreflightAction}
         onCancelExport={cancelExport}
         onDownloadExport={downloadExport}
         onSetExportQuality={(quality) => { setExportQuality(quality); setOutputPlan(null); setExportPreflight(null); }}
-        onSetExportOpen={(open) => { setExportOpen(open); if (!open) setExportPreflight(null); }}
+        onSetExportOpen={(open) => { setExportOpen(open); if (!open) { setExportPreflight(null); if (exportState === "error") { setExportError(null); setExportState(exportResult ? "complete" : null); } } }}
         onTypographyChange={updateTypography}
         onBackgroundChange={updateCaptionBackground}
         onTransitionChange={(patch) => updateProjectHistory((current) => ({ ...current, transitionSettings: { ...current.transitionSettings, ...patch } }))}

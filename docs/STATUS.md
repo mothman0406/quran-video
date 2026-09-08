@@ -1,5 +1,11 @@
 # Status
 
+## Current milestone: Export settings before every render
+
+- Export now opens an explicit settings step before each preflight/render, including **Export another version**. Quality is draft/session UI state until **Export video** is chosen; Standard remains the fresh default, while the latest chosen quality remains visible for another version.
+- Settings show the three development quality levels, watermark result, the authoritative editable project playback rate, locked project format, actual export dimensions, and MP4 output. Ultra runs the existing capability-aware preflight before a render begins.
+- The completed Blob stays downloadable while another version is configured and after a failed replacement. It is revoked only when a newly rendered result completes successfully. Completed metadata now identifies the exact quality, resolution, watermark state, speed, and file size.
+
 ## Current milestone: Completed-export download handoff and 720p / 1080p / 4K quality ladder
 
 Complete:
