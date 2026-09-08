@@ -17,3 +17,7 @@ test("project cards open editor documents rather than implying cloud export down
   assert.match(dashboard, /Open project/);
   assert.doesNotMatch(dashboard, /Download export/);
 });
+
+test("undetected projects remain visible with an explicit recovery-safe label", () => {
+  assert.match(dashboard, /Passage not detected yet/);
+});

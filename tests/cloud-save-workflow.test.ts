@@ -16,4 +16,13 @@ test("cloud save stages media before completing state and keeps failure dirty", 
   assert.match(editor, /completeCloudProjectSave\(snapshot/);
   assert.match(editor, /cleanupReplacedCloudMedia/);
   assert.match(editor, /setCloudSaveStatus\(message\); setErrorMessage\(message\)/);
+  assert.match(editor, /cloudProjectError\(error, cloudSaveStage\)/);
+  assert.match(editor, /let cloudSaveStage: CloudSaveStage = "database"/);
+});
+
+test("new media schedules automatic detection while restored completed recognition is preserved", () => {
+  assert.match(editor, /setAutomaticRecognitionRequest\(/);
+  assert.match(editor, /new AutomaticRecognitionController\(\)/);
+  assert.match(editor, /restoredCompletedRecognition: record\.project\.captionSegments\.length > 0/);
+  assert.match(editor, /void detect\(automaticRecognitionRequest\)/);
 });

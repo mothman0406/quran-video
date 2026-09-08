@@ -1,6 +1,18 @@
 # Status
 
-## Current milestone: Production cloud projects and project library
+## Current milestone: Cloud-save schema repair and automatic Quran detection
+
+Complete:
+
+- Diagnosed the live `GET /rest/v1/projects?...save_complete=eq.true` 400 as migration drift: the client and partial-save workflow require `save_complete`, but the live project has not applied `20260908000000_production_cloud_projects.sql`.
+- Kept `save_complete` as the incomplete-upload safety boundary, documented the exact live migration, table schema, private `project-media` bucket, RLS, Storage policies, and RPC contract. The client now classifies schema drift with a safe database-stage diagnostic rather than a generic save failure.
+- Made undetected cloud projects valid: Quran metadata and `auto_title` remain nullable, the default name is `My project`, custom names survive later detection, and `/projects` renders **Passage not detected yet**.
+- Made initial local video, local audio, and YouTube media recognition automatic after source acceptance. A source identity controller prevents rerender duplicates and starts a fresh run for a genuinely new source. Restored completed cloud/local projects preserve their saved recognition; restored undetected media can detect once available. Retry/Detect again and Correct detection remain recovery paths.
+- Cloud saves remain available before recognition, while it runs, after a failure, and while manual passage correction is unresolved. A later successful recognition simply dirties the existing project for an in-place update on the next save.
+
+Verification: focused cloud/recognition tests and `npm test` (284 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes the production invariant probes; its optional ignored local real-audio benchmark fails in this workspace, with the generated evidence recorded in `docs/regression/results/20260908.md`. No recognition algorithm changed. The build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning. Live Supabase/browser validation remains manual because this workspace has no configured cloud test account or browser automation.
+
+## Previous milestone: Production cloud projects and project library
 
 Complete:
 

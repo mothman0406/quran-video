@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { captionForPlaybackTime, recognitionToVerseAlignments } from "../src/lib/editor/recognition.ts";
+import { AutomaticRecognitionController, captionForPlaybackTime, recognitionToVerseAlignments } from "../src/lib/editor/recognition.ts";
 
 const match = {
   verseKey: "93:1",
@@ -39,4 +39,15 @@ test("selects the caption at a playback time without creating pause-boundary cap
   assert.equal(captionForPlaybackTime(captions, 999)?.verseKey, "1:1");
   assert.equal(captionForPlaybackTime(captions, 1_000)?.verseKey, "1:2");
   assert.equal(captionForPlaybackTime(captions, 2_000), null);
+});
+
+test("automatic recognition runs once for a new source, changes source cleanly, and never reruns restored completed work", () => {
+  const controller = new AutomaticRecognitionController();
+  assert.equal(controller.start("local:video-a", false), true);
+  assert.equal(controller.start("local:video-a", false), false);
+  assert.equal(controller.start("youtube:audio-b", false), true);
+  assert.equal(controller.start("cloud:recognized-c", true), false);
+  assert.equal(controller.start("cloud:undetected-c", false), true);
+  controller.reset();
+  assert.equal(controller.start("local:video-a", false), true);
 });

@@ -22,6 +22,7 @@ import {
 } from "@/lib/editor/caption-generation-progress";
 import {
   recognitionToVerseAlignments,
+  AutomaticRecognitionController,
   type VerseAlignment,
 } from "@/lib/editor/recognition";
 import {
@@ -125,6 +126,8 @@ import {
   newCloudThumbnailPath,
   removePrivateProjectObjects,
   uploadPrivateProjectObject,
+  cloudProjectError,
+  type CloudSaveStage,
 } from "@/lib/cloud-sync";
 import { exportAuthIntent, rememberAuthContinuation, rememberAuthResumeProject, takeAuthContinuation, takeAuthResumeProject } from "@/lib/auth-flow";
 import type { Session } from "@supabase/supabase-js";
@@ -165,6 +168,7 @@ type ExportState =
   | null;
 type YouTubeImportStatus = "idle" | "validating" | "fetching-metadata" | "downloading" | "preparing-media" | "ready" | "failed";
 type YouTubeImportResponse = { sessionId: string; sourceUrl: string; fileName: string; mimeType: string; title?: string; durationMs?: number; width?: number; height?: number; hasVideo: boolean; mediaUrl: string };
+type AutomaticRecognitionRequest = { identity: string; file: File; sourceUrl: string | null; restoredCompletedRecognition: boolean };
 type EditorProjectHistoryState = {
   segments: CaptionSegment[];
   mediaTrim: MediaTrim;
@@ -331,6 +335,7 @@ export default function Home() {
   const [pendingOpenProject, setPendingOpenProject] =
     useState<SavedProject | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [automaticRecognitionRequest, setAutomaticRecognitionRequest] = useState<AutomaticRecognitionRequest | null>(null);
   const plan = resolveClientPlan(Boolean(session), subscriptionPlan);
   const repository = useRef<ProjectRepository | null>(null);
   const savedSignature = useRef<string | null>(null);
@@ -339,6 +344,7 @@ export default function Home() {
   const cloudProjectLoadStarted = useRef(false);
   const localSafetyProjectId = useRef<string | null>(null);
   const generation = useRef(0);
+  const automaticRecognition = useRef(new AutomaticRecognitionController());
   const captionProgress = useRef(new CaptionGenerationProgressController());
   const alignmentDebug = useRef<AlignmentDebug | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -602,7 +608,7 @@ export default function Home() {
         const source = await downloadCloudProjectSource(record.row);
         if (!source) { setErrorMessage("Source media needs to be relinked."); return; }
         setPendingOpenProject(null);
-        loadSelectedSource(source, record.project.sourceMedia ?? mediaSourceFromFile(source, record.row.source_media_type?.startsWith("audio/") ? "audio" : "video"), { preserveCaptions: true });
+        loadSelectedSource(source, record.project.sourceMedia ?? mediaSourceFromFile(source, record.row.source_media_type?.startsWith("audio/") ? "audio" : "video"), { preserveCaptions: true, restoredCompletedRecognition: record.project.captionSegments.length > 0 });
       } catch (error) {
         setErrorMessage(error instanceof Error ? `${error.message} Source media needs to be relinked.` : "Source media needs to be relinked.");
       }
@@ -756,7 +762,7 @@ export default function Home() {
     if (youtubeImportSession.current === sessionId) youtubeImportSession.current = null;
     void fetch(`/api/local-youtube-import?sessionId=${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => undefined);
   }
-  function loadSelectedSource(next: File, nextSource: MediaSource, options?: { preserveCaptions?: boolean }) {
+  function loadSelectedSource(next: File, nextSource: MediaSource, options?: { preserveCaptions?: boolean; restoredCompletedRecognition?: boolean }) {
     exportAbort.current?.abort();
     clearCompletedExport();
     generation.current += 1;
@@ -766,7 +772,8 @@ export default function Home() {
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     const opening = pendingOpenProject;
     setVideoFile(next);
-    setVideoUrl(URL.createObjectURL(next));
+    const nextUrl = URL.createObjectURL(next);
+    setVideoUrl(nextUrl);
     setMediaSource(nextSource);
     setMediaTrim(opening?.mediaTrim ?? (options?.preserveCaptions ? mediaTrim : createMediaTrim(projectDurationMs(nextSource))));
     setTimelineViewport(createTimelineViewport(projectDurationMs(nextSource)));
@@ -776,6 +783,12 @@ export default function Home() {
     setShowCorrection(false);
     setStage("idle");
     setProgress(null);
+    setAutomaticRecognitionRequest({
+      identity: `${nextSource.assetId ?? "source"}:${nextSource.fingerprint ?? `${next.name}:${next.size}:${next.type}`}:${next.lastModified}`,
+      file: next,
+      sourceUrl: nextUrl,
+      restoredCompletedRecognition: options?.restoredCompletedRecognition ?? Boolean((options?.preserveCaptions || opening) && (opening?.captionSegments.length || segments.length)),
+    });
     if (!opening && !options?.preserveCaptions) {
       resetProjectHistory();
       setAlignments([]);
@@ -839,6 +852,8 @@ export default function Home() {
     setCloudProjectId(null);
     setPendingOpenProject(null);
     setProjectName("Untitled project");
+    setAutomaticRecognitionRequest(null);
+    automaticRecognition.current.reset();
     localSafetyProjectId.current = null;
     savedSignature.current = null;
     cloudBaselineUpdatedAt.current = null;
@@ -944,6 +959,7 @@ export default function Home() {
     const id = cloudProjectId ?? savedProject?.id ?? crypto.randomUUID();
     const snapshot = projectSnapshot(id, name, savedProject?.createdAt ?? now);
     let reserved = false;
+    let cloudSaveStage: CloudSaveStage = "database";
     const uploaded: string[] = [];
     const oldSourcePath = cloudMedia.current.sourcePath;
     const oldThumbnailPath = cloudMedia.current.thumbnailPath;
@@ -964,21 +980,24 @@ export default function Home() {
       let thumbnailPath = oldThumbnailPath;
       let thumbnailSize: number | null = cloudMedia.current.thumbnailSize;
       if (sourceChanged && videoFile) {
+        cloudSaveStage = "source-upload";
         setCloudSaveStatus("Uploading source media…");
         sourcePath = newCloudSourcePath(session.user.id, id, videoFile);
-        await uploadPrivateProjectObject(sourcePath, videoFile, videoFile.type || "application/octet-stream");
+        await uploadPrivateProjectObject(sourcePath, videoFile, videoFile.type || "application/octet-stream", cloudSaveStage);
         uploaded.push(sourcePath);
         sourceType = videoFile.type || mediaSource?.mimeType || "application/octet-stream";
         sourceName = videoFile.name; sourceSize = videoFile.size;
       }
       if (sourceChanged || !thumbnailPath) {
+        cloudSaveStage = "thumbnail";
         setCloudSaveStatus("Creating project thumbnail…");
         const thumbnail = await createProjectThumbnail(videoFile, Boolean(mediaSource?.hasVideo));
         thumbnailPath = newCloudThumbnailPath(session.user.id, id);
         setCloudSaveStatus("Uploading project thumbnail…");
-        await uploadPrivateProjectObject(thumbnailPath, thumbnail, "image/webp");
+        await uploadPrivateProjectObject(thumbnailPath, thumbnail, "image/webp", cloudSaveStage);
         uploaded.push(thumbnailPath); thumbnailSize = thumbnail.size;
       }
+      cloudSaveStage = "finalize";
       setCloudSaveStatus("Saving project state…");
       const row = await completeCloudProjectSave(snapshot, { source_media_path: sourcePath, source_media_type: sourceType, source_media_name: sourceName, source_media_size_bytes: sourceSize, thumbnail_path: thumbnailPath, thumbnail_size_bytes: thumbnailSize });
       void cleanupReplacedCloudMedia(id, oldSourcePath, oldThumbnailPath).catch(() => undefined);
@@ -992,7 +1011,7 @@ export default function Home() {
     } catch (error) {
       if (uploaded.length) void removePrivateProjectObjects(uploaded).catch(() => undefined);
       if (reserved) void cancelCloudProjectSave(id).catch(() => undefined);
-      const message = error instanceof Error ? error.message : "Could not save the project to the cloud.";
+      const message = cloudProjectError(error, cloudSaveStage).message;
       setCloudSaveStatus(message); setErrorMessage(message);
     }
   }
@@ -1263,8 +1282,10 @@ export default function Home() {
       }
     }
   }
-  async function detect() {
-    if (!videoFile || !support?.supported || busyStages.includes(stage)) return;
+  async function detect(request?: Pick<AutomaticRecognitionRequest, "file" | "sourceUrl">) {
+    const sourceFile = request?.file ?? videoFile;
+    const sourceUrl = request?.sourceUrl ?? videoUrl;
+    if (!sourceFile || !support?.supported || busyStages.includes(stage)) return;
     const job = ++generation.current;
     setErrorMessage(null);
     setProgress(null);
@@ -1298,7 +1319,7 @@ export default function Home() {
       const { localWhisperTranscriber } =
         await import("@/lib/recognition/local-whisper");
       const prepared = await localWhisperTranscriber.transcribe(
-        videoFile,
+        sourceFile,
         (next) => {
           if (job !== generation.current) return;
           if (next.phase === "decoding") {
@@ -1313,7 +1334,7 @@ export default function Home() {
             setStage("transcribing");
           }
         },
-        { analysisRunId: crypto.randomUUID(), sourceIdentity: `${videoFile.name}:${videoFile.size}:${videoFile.lastModified}`, sourceObjectUrl: videoUrl, deferWhisper: true },
+        { analysisRunId: crypto.randomUUID(), sourceIdentity: `${sourceFile.name}:${sourceFile.size}:${sourceFile.lastModified}`, sourceObjectUrl: sourceUrl, deferWhisper: true },
       );
       if (job !== generation.current) return;
       setStage("matching");
@@ -1564,6 +1585,11 @@ export default function Home() {
     }
   }
   useEffect(() => {
+    if (!automaticRecognitionRequest || !support?.supported || busyStages.includes(stage)) return;
+    if (!automaticRecognition.current.start(automaticRecognitionRequest.identity, automaticRecognitionRequest.restoredCompletedRecognition)) return;
+    void detect(automaticRecognitionRequest);
+  }, [automaticRecognitionRequest, stage, support?.supported]);
+  useEffect(() => {
     const debug = alignmentDebug.current;
     if (!debug?.transitions?.length) return;
     const boundaries = generatedCaptionBoundaryTrace(segments);
@@ -1617,6 +1643,8 @@ export default function Home() {
     setContent({});
     setProgress(null);
     setStage("idle");
+    setAutomaticRecognitionRequest(null);
+    automaticRecognition.current.reset();
     setShowCorrection(false);
     setErrorMessage(null);
     setCurrentTimeMs(0);

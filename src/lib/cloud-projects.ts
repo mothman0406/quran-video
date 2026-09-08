@@ -5,7 +5,8 @@ export const PROJECT_MEDIA_BUCKET = "project-media";
 export const FREE_CLOUD_PROJECT_LIMIT = 3;
 
 export type QuranProjectMetadata = {
-  autoTitle: string;
+  /** A canonical title exists only after a Quran passage is known. */
+  autoTitle: string | null;
   passageLabel: string | null;
   surahStart: number | null;
   ayahStart: number | null;
@@ -26,10 +27,10 @@ function firstAndLastVerse(project: SavedProject) {
 /** Deterministic, canonical Quran metadata—never generated from editable Arabic text. */
 export function quranProjectMetadata(project: SavedProject): QuranProjectMetadata {
   const range = firstAndLastVerse(project);
-  if (!range) return { autoTitle: "Untitled Quran Project", passageLabel: null, surahStart: null, ayahStart: null, surahEnd: null, ayahEnd: null };
+  if (!range) return { autoTitle: null, passageLabel: null, surahStart: null, ayahStart: null, surahEnd: null, ayahEnd: null };
   const startSurah = getSurah(range.start.surah);
   const endSurah = getSurah(range.end.surah);
-  if (!startSurah || !endSurah) return { autoTitle: "Untitled Quran Project", passageLabel: null, surahStart: null, ayahStart: null, surahEnd: null, ayahEnd: null };
+  if (!startSurah || !endSurah) return { autoTitle: null, passageLabel: null, surahStart: null, ayahStart: null, surahEnd: null, ayahEnd: null };
   const sameSurah = range.start.surah === range.end.surah;
   const rangeText = sameSurah
     ? `${startSurah.transliteration} ${range.start.ayah}${range.start.ayah === range.end.ayah ? "" : `–${range.end.ayah}`}`
@@ -42,7 +43,7 @@ export function quranProjectMetadata(project: SavedProject): QuranProjectMetadat
 
 export function cloudProjectName(project: SavedProject): string {
   const requested = project.title.trim();
-  return requested && requested !== "Untitled project" ? requested.slice(0, 200) : quranProjectMetadata(project).autoTitle;
+  return requested && requested !== "Untitled project" ? requested.slice(0, 200) : quranProjectMetadata(project).autoTitle ?? "My project";
 }
 
 export function projectMediaPath(userId: string, projectId: string, kind: "source" | "thumbnail", extension: string, nonce = crypto.randomUUID()): string {

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY } from "../src/lib/editor/captions.ts";
 import { DEFAULT_PROJECT_FORMAT } from "../src/lib/editor/formats.ts";
-import { fromCloudProjectRow, hasProjectConflict, toCloudProjectPayload, type CloudProjectRow } from "../src/lib/cloud-sync.ts";
-import { FREE_CLOUD_PROJECT_LIMIT, projectMediaPath, quranProjectMetadata } from "../src/lib/cloud-projects.ts";
+import { cloudProjectError, fromCloudProjectRow, hasProjectConflict, toCloudProjectPayload, type CloudProjectRow } from "../src/lib/cloud-sync.ts";
+import { cloudProjectName, FREE_CLOUD_PROJECT_LIMIT, projectMediaPath, quranProjectMetadata } from "../src/lib/cloud-projects.ts";
 import type { SavedProject } from "../src/lib/schemas/project.ts";
 
 function project(overrides: Partial<SavedProject> = {}): SavedProject {
@@ -41,6 +41,25 @@ test("cloud project metadata derives a deterministic canonical Quran range", () 
   const metadata = quranProjectMetadata(project({ captionSegments: [caption] }));
   assert.equal(metadata.autoTitle, "Al-Ma'arij 1–7");
   assert.equal(metadata.passageLabel, "Surah Al-Ma'arij · 70:1–7");
+});
+
+test("undetected projects have nullable Quran metadata, retain a safe name, and can later accept detected metadata", () => {
+  const undetected = project({ title: "Untitled project" });
+  const firstPayload = toCloudProjectPayload(undetected);
+  assert.equal(firstPayload.name, "My project");
+  assert.equal(firstPayload.auto_title, null);
+  assert.equal(firstPayload.surah_start, null);
+  const detected = project({ title: "My custom name", captionSegments: [{ id: "c", contentKind: "ayah", verseKeys: ["70:1"], startMs: 0, endMs: 1_000, arabic: "x", translation: null, transliteration: null, wordStart: 0, wordEnd: 1, wordCount: 1 }] });
+  assert.equal(cloudProjectName(detected), "My custom name");
+  assert.equal(toCloudProjectPayload(detected).surah_start, 70);
+});
+
+test("PostgREST schema drift receives a safe, stage-aware migration diagnostic", () => {
+  const error = cloudProjectError({ code: "PGRST204", message: "Could not find the 'save_complete' column of 'projects'" }, "database");
+  assert.equal(error.stage, "database");
+  assert.equal(error.code, "PGRST204");
+  assert.match(error.message, /missing the required migration/);
+  assert.match(error.message, /stage: database/);
 });
 
 test("private media paths are scoped by user and project and Free is three projects", () => {

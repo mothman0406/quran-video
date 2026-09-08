@@ -20,6 +20,47 @@ export type CloudProjectRow = {
 export type CloudProjectPayload = Omit<CloudProjectRow, "user_id" | "created_at" | "updated_at" | "save_complete" | "source_media_path" | "source_media_type" | "source_media_name" | "source_media_size_bytes" | "thumbnail_path" | "thumbnail_size_bytes" | "last_export_quality" | "last_exported_at"> & { created_at: string; updated_at: string };
 export type CloudProjectRecord = { row: CloudProjectRow; project: SavedProject };
 export type CloudStorageSummary = { project_count: number; total_source_bytes: number; total_duration_ms: number };
+export type CloudSaveStage = "configuration" | "database" | "source-upload" | "thumbnail" | "finalize" | "cleanup";
+
+type SupabaseErrorLike = { code?: unknown; message?: unknown };
+
+/** A safe, stage-aware error suitable for UI display; never includes credentials. */
+export class CloudProjectError extends Error {
+  readonly stage: CloudSaveStage;
+  readonly code: string | null;
+
+  constructor(stage: CloudSaveStage, message: string, code: string | null = null) {
+    super(message);
+    this.name = "CloudProjectError";
+    this.stage = stage;
+    this.code = code;
+  }
+}
+
+export function cloudProjectError(error: unknown, stage: CloudSaveStage): CloudProjectError {
+  if (error instanceof CloudProjectError) return error;
+  const candidate = error && typeof error === "object" ? error as SupabaseErrorLike : null;
+  const code = typeof candidate?.code === "string" ? candidate.code : null;
+  const rawMessage = typeof candidate?.message === "string" ? candidate.message : error instanceof Error ? error.message : "";
+  const missingProjectSchema = code === "42703" || code === "PGRST204" || /save_complete|column .*projects|schema cache/i.test(rawMessage);
+  const message = stage === "configuration"
+    ? "Cloud project database is not configured."
+    : missingProjectSchema
+      ? "Cloud project database is missing the required migration. Apply 20260908000000_production_cloud_projects.sql."
+      : stage === "source-upload" || stage === "thumbnail"
+        ? /bucket|not found/i.test(rawMessage)
+          ? "The project-media bucket does not exist."
+          : /permission|policy|not authorized|row-level/i.test(rawMessage)
+            ? "Project media upload was blocked by Storage security policy."
+            : "Project media could not be uploaded."
+        : /permission|policy|not authorized|row-level|42501/i.test(rawMessage)
+          ? "Project creation was blocked by database security policy."
+          : rawMessage || "Could not save the project to the cloud.";
+  const diagnostic = process.env.NODE_ENV !== "production"
+    ? `${message} [stage: ${stage}${code ? `; code: ${code}` : ""}]`
+    : message;
+  return new CloudProjectError(stage, diagnostic, code);
+}
 
 let client: SupabaseClient | null | undefined;
 
@@ -58,7 +99,7 @@ export function hasProjectConflict(local: SavedProject | null, cloud: SavedProje
 
 function requireClient(): SupabaseClient {
   const supabase = getSupabaseClient();
-  if (!supabase) throw new Error("Cloud saving is not configured. Add the Supabase public URL and key to enable it.");
+  if (!supabase) throw cloudProjectError(null, "configuration");
   return supabase;
 }
 
@@ -71,13 +112,13 @@ export async function signOut(): Promise<void> { const { error } = await require
 function rows(data: unknown): CloudProjectRow[] { return (Array.isArray(data) ? data : data ? [data] : []) as CloudProjectRow[]; }
 export async function listCloudProjectRecords(): Promise<CloudProjectRecord[]> {
   const { data, error } = await requireClient().from("projects").select("*").eq("save_complete", true).order("updated_at", { ascending: false });
-  if (error) throw error;
+  if (error) throw cloudProjectError(error, "database");
   return rows(data).map(cloudRecord);
 }
 export async function listCloudProjects(): Promise<SavedProject[]> { return (await listCloudProjectRecords()).map((record) => record.project); }
 export async function getCloudProjectRecord(id: string): Promise<CloudProjectRecord | null> {
   const { data, error } = await requireClient().from("projects").select("*").eq("id", id).eq("save_complete", true).maybeSingle();
-  if (error) throw error;
+  if (error) throw cloudProjectError(error, "database");
   return data ? cloudRecord(data as CloudProjectRow) : null;
 }
 export async function getCloudProject(id: string): Promise<SavedProject | null> { return (await getCloudProjectRecord(id))?.project ?? null; }
@@ -91,14 +132,14 @@ export async function saveCloudProject(project: SavedProject): Promise<SavedProj
 export async function beginCloudProjectSave(project: SavedProject): Promise<CloudProjectRow> {
   const payload = toCloudProjectPayload(project);
   const { data, error } = await requireClient().rpc("begin_cloud_project_save", { p_id: payload.id, p_name: payload.name, p_auto_title: payload.auto_title, p_surah_start: payload.surah_start, p_ayah_start: payload.ayah_start, p_surah_end: payload.surah_end, p_ayah_end: payload.ayah_end, p_duration_ms: payload.duration_ms, p_aspect_ratio: payload.aspect_ratio, p_project_data: payload.project_data, p_source_filename: payload.source_filename, p_source_metadata: payload.source_metadata, p_schema_version: payload.schema_version });
-  if (error) throw error;
+  if (error) throw cloudProjectError(error, "database");
   const row = rows(data)[0]; if (!row) throw new Error("Cloud save did not create a project reservation."); return row;
 }
 
 export async function completeCloudProjectSave(project: SavedProject, media: Pick<CloudProjectRow, "source_media_path" | "source_media_type" | "source_media_name" | "source_media_size_bytes" | "thumbnail_path" | "thumbnail_size_bytes">): Promise<CloudProjectRow> {
   const payload = toCloudProjectPayload(project);
   const { data, error } = await requireClient().rpc("complete_cloud_project_save", { p_id: payload.id, p_name: payload.name, p_auto_title: payload.auto_title, p_surah_start: payload.surah_start, p_ayah_start: payload.ayah_start, p_surah_end: payload.surah_end, p_ayah_end: payload.ayah_end, p_duration_ms: payload.duration_ms, p_aspect_ratio: payload.aspect_ratio, p_project_data: payload.project_data, p_source_filename: payload.source_filename, p_source_metadata: payload.source_metadata, p_schema_version: payload.schema_version, p_source_media_path: media.source_media_path, p_source_media_type: media.source_media_type, p_source_media_name: media.source_media_name, p_source_media_size_bytes: media.source_media_size_bytes, p_thumbnail_path: media.thumbnail_path, p_thumbnail_size_bytes: media.thumbnail_size_bytes });
-  if (error) throw error;
+  if (error) throw cloudProjectError(error, "finalize");
   const row = rows(data)[0]; if (!row) throw new Error("Cloud save did not return the updated project."); return row;
 }
 
@@ -108,7 +149,7 @@ export async function cleanupReplacedCloudMedia(id: string, sourcePath: string |
 export async function cancelCloudProjectSave(id: string): Promise<void> { const { error } = await requireClient().rpc("cancel_cloud_project_save", { p_id: id }); if (error) throw error; }
 export async function getCloudStorageSummary(): Promise<CloudStorageSummary> { const { data, error } = await requireClient().rpc("cloud_project_storage_summary"); if (error) throw error; return ((Array.isArray(data) ? data[0] : data) as CloudStorageSummary | null) ?? { project_count: 0, total_source_bytes: 0, total_duration_ms: 0 }; }
 
-export async function uploadPrivateProjectObject(path: string, body: Blob, contentType: string): Promise<void> { const { error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).upload(path, body, { contentType, upsert: false, cacheControl: "3600" }); if (error) throw error; }
+export async function uploadPrivateProjectObject(path: string, body: Blob, contentType: string, stage: Extract<CloudSaveStage, "source-upload" | "thumbnail"> = "source-upload"): Promise<void> { const { error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).upload(path, body, { contentType, upsert: false, cacheControl: "3600" }); if (error) throw cloudProjectError(error, stage); }
 export async function removePrivateProjectObjects(paths: string[]): Promise<void> { if (!paths.length) return; const { error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).remove(paths); if (error) throw error; }
 export async function getPrivateThumbnailUrl(row: CloudProjectRow): Promise<string | null> { if (!row.thumbnail_path) return null; const { data, error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).createSignedUrl(row.thumbnail_path, 60 * 30); if (error) throw error; return data.signedUrl; }
 export async function downloadCloudProjectSource(row: CloudProjectRow): Promise<File | null> { if (!row.source_media_path || !row.source_media_name) return null; const { data, error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).download(row.source_media_path); if (error) throw error; return new File([data], row.source_media_name, { type: row.source_media_type ?? data.type ?? "application/octet-stream" }); }
