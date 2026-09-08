@@ -1,5 +1,19 @@
 # Status
 
+## Current milestone: Pre-production TikTok Content Posting integration
+
+Complete:
+
+- Extended Export Complete with an independent **Post to TikTok** surface that uses the already-rendered `CompletedExport` Blob. Download remains available throughout and TikTok errors, retries, or cancellation never rerender, revoke, or alter the completed export.
+- Added a self-contained `src/lib/tiktok/` boundary for deterministic Quran-based social captions, media validation, documented FILE_UPLOAD chunk planning, OAuth state comparison, TikTok status semantics, a browser transfer client, and a deterministic test mock. It imports no recognition pipeline.
+- Added server-only Content Posting routes for connection state, OAuth start/callback, fresh creator info, Direct Post or draft initialization, publish status, and cancellation. Client secret, access token, and refresh token stay server-side; the encrypted HttpOnly connection cookie is deliberately separable from future Quran Video account persistence.
+- Direct Post fetches current creator capabilities before rendering controls and again when confirming the post. Available privacy/options and interaction controls come from TikTok rather than hard-coded product assumptions. Unreviewed Direct Post is explicitly Only-you/private and server-enforced; draft upload is clearly labelled as a TikTok inbox handoff.
+- Basic watermarked 720p exports cannot be posted. The dialog explains the TikTok watermark/content-sharing requirement and routes the user back to Export Settings with Standard selected; it never strips an existing watermark.
+- Implemented direct browser-to-TikTok, sequential `FILE_UPLOAD` transfer with actual XHR byte progress and rate-safe publish-status polling. The application server handles lightweight OAuth/API calls only and never proxies or stores video bytes.
+- Added `.env.example` placeholders and `docs/TIKTOK_SETUP.md` with current TikTok setup, Sandbox/URL verification, scope, audit, privacy, transfer, and compliance guidance.
+
+Verification: `npm test` (264 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the pre-existing non-fatal VAD ONNX Runtime dynamic-require warning. Browser/live TikTok validation remains manual because no credentials or browser automation are available in this workspace.
+
 ## Current milestone: First-party landing product visuals
 
 Complete:

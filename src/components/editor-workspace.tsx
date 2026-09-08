@@ -20,6 +20,7 @@ import CaptionPreview from "@/components/caption-preview";
 import SafeAreaOverlay from "@/components/safe-area-overlay";
 import SocialPlatformGuideOverlay from "@/components/social-platform-guide-overlay";
 import AccountPanel from "@/components/account-panel";
+import TikTokPosting from "@/components/tiktok-posting";
 import { DEFAULT_SOURCE_VIDEO_FIT, PROJECT_FORMATS, projectFormatDefinition } from "@/lib/editor/formats";
 import { BUILT_IN_STYLES, type BuiltInStyleName } from "@/lib/editor/styles";
 import { quranFontDefinitions } from "@/lib/quran/content";
@@ -89,6 +90,7 @@ type EditorWorkspaceProps = {
   exportState: ExportState;
   exportError: string | null;
   exportDiagnostics: LocalExportDiagnostics | null;
+  tiktokCaption: string;
   errorMessage: string | null;
   timingWarning: string | null;
   timelineTooltip: { label: string; position: number } | null;
@@ -244,7 +246,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
     selectedObject, rightInspectorMode, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, playbackRate, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, canUndo, canRedo, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
-    exportOpen, exportPreflight, exportQuality, exportFormat, outputPlan, exportResult, exportIsStale, exportState, exportError, exportDiagnostics, errorMessage, timingWarning,
+    exportOpen, exportPreflight, exportQuality, exportFormat, outputPlan, exportResult, exportIsStale, exportState, exportError, exportDiagnostics, tiktokCaption, errorMessage, timingWarning,
     showCorrection, surah, startAyah, endAyah, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
     onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown, onSetRightInspectorMode, onSelectMedia,
@@ -485,7 +487,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           {timingWarning && <div className="editor-notice">{timingWarning}</div>}
           {showCorrection && <div className="editor-correction"><SectionLabel>Choose the Quran passage</SectionLabel><div><select aria-label="Surah" className="editor-select" value={surah} onChange={(event) => onSurahChange(Number(event.target.value))}><option value={0} disabled>Choose a Surah</option>{hafsSurahs.map((item) => <option key={item.number} value={item.number}>Surah {item.number} · {item.name}</option>)}</select><input aria-label="First ayah" type="number" min="1" value={startAyah} onChange={(event) => onStartAyahChange(Number(event.target.value))} /><input aria-label="Last ayah" type="number" min="1" value={endAyah} onChange={(event) => onEndAyahChange(Number(event.target.value))} /><button className="editor-button editor-button-primary" type="button" onClick={onCorrectDetection}>Use range</button></div></div>}
           {errorMessage && <div className="editor-notice editor-notice-error"><span>{errorMessage}</span><button className="editor-text-button" type="button" onClick={onDetect}>Try again</button></div>}
-          {exportResult && exportState !== "error" ? <div className="editor-export-complete" role="status"><div><strong>✓ Export complete</strong><span>{exportQualityPreset(exportResult.quality).label} · {exportQualityPreset(exportResult.quality).resolutionLabel} · {exportQualityPreset(exportResult.quality).watermarkRequired ? "Watermark included" : "No watermark"}</span><span>{exportResult.width} × {exportResult.height} · {exportResult.mimeType.split(";")[0]?.replace("video/", "").toUpperCase()} · {playbackRateLabel(exportResult.playbackRate)} · {formatFileSize(exportResult.fileSizeBytes)}</span>{exportIsStale && <small>Project changed since this export.</small>}</div><div className="editor-export-complete-actions"><button className="editor-button editor-button-accent" type="button" onClick={onDownloadExport}>Download video</button><button className="editor-button editor-button-quiet" type="button" disabled={Boolean(exportState && typeof exportState === "object")} onClick={onExportOpen}>Export another version</button></div></div> : null}
+          {exportResult && exportState !== "error" ? <div className="editor-export-complete" role="status"><div><strong>✓ Export complete</strong><span>{exportQualityPreset(exportResult.quality).label} · {exportQualityPreset(exportResult.quality).resolutionLabel} · {exportQualityPreset(exportResult.quality).watermarkRequired ? "Watermark included" : "No watermark"}</span><span>{exportResult.width} × {exportResult.height} · {exportResult.mimeType.split(";")[0]?.replace("video/", "").toUpperCase()} · {playbackRateLabel(exportResult.playbackRate)} · {formatFileSize(exportResult.fileSizeBytes)}</span>{exportIsStale && <small>Project changed since this export.</small>}</div><div className="editor-export-complete-actions"><button className="editor-button editor-button-accent" type="button" onClick={onDownloadExport}>Download video</button><TikTokPosting exported={exportResult} generatedCaption={tiktokCaption} onExportStandardVersion={() => { onSetExportQuality("standard"); onExportOpen(); }} /><button className="editor-button editor-button-quiet" type="button" disabled={Boolean(exportState && typeof exportState === "object")} onClick={onExportOpen}>Export another version</button></div></div> : null}
           {exportState && exportState !== "complete" && <div className="editor-notice"><strong>{exportState === "error" ? "Export stopped" : `Exporting · ${exportState.phase}`}</strong><span>{exportError ?? "Source media is processed locally."}</span></div>}
         </div>}
       </section>

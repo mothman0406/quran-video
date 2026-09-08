@@ -128,6 +128,7 @@ import { clearCaptionSelection, rightInspectorModeForSelection, selectCaptionLay
 import { EditorHistory } from "@/lib/editor/history";
 import { DEFAULT_SOCIAL_PLATFORM_PREVIEW, moveRectToSafeArea, platformCaptionCollisions, socialPlatformGuide, type CaptionCanvasBounds, type SocialPlatformId } from "@/lib/editor/social-platform-guides";
 import { applyPlaybackRate, DEFAULT_PLAYBACK_RATE, resolvePlaybackRate, type PlaybackRate } from "@/lib/editor/playback-rate";
+import { createTikTokCaption } from "@/lib/tiktok/caption";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -1948,6 +1949,7 @@ export default function Home() {
     () => platformCaptionCollisions(platformPreview, captionCanvasBounds),
     [captionCanvasBounds, platformPreview],
   );
+  const tiktokCaption = useMemo(() => createTikTokCaption(segments, content), [content, segments]);
   const handleCaptionBoundsChange = useCallback((next: CaptionCanvasBounds[]) => {
     setCaptionCanvasBounds((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
   }, []);
@@ -2352,6 +2354,7 @@ export default function Home() {
         exportState={exportState}
         exportError={exportError}
         exportDiagnostics={exportDiagnostics}
+        tiktokCaption={tiktokCaption}
         errorMessage={errorMessage}
         timingWarning={timingWarning}
         timelineTooltip={timelineTooltip}
