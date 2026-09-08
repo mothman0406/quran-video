@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { CaptionSegmentSchema, ProjectFormatSchema } from "../src/lib/schemas/project.ts";
 import { clampCaptionPositioning, DEFAULT_CAPTION_POSITIONING, linkedCaptionStackLayout, resetCaptionPositioning } from "../src/lib/editor/captions.ts";
-import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, SAFE_AREA_GUIDES, SAFE_AREA_OVERLAY_METADATA, safeAreaGuidesForFormat } from "../src/lib/editor/formats.ts";
+import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, SAFE_AREA_GUIDES, SAFE_AREA_OVERLAY_METADATA, projectFormatForSourceDimensions, safeAreaGuidesForFormat } from "../src/lib/editor/formats.ts";
 
 test("the default project format is 9:16 vertical", () => {
   assert.deepEqual(DEFAULT_PROJECT_FORMAT, { preset: "vertical", width: 1080, height: 1920 });
@@ -14,6 +14,13 @@ test("project format presets expose the expected dimensions and aspect ratios", 
   assert.equal(PROJECT_FORMATS.vertical.width / PROJECT_FORMATS.vertical.height, 9 / 16);
   assert.equal(PROJECT_FORMATS.landscape.width / PROJECT_FORMATS.landscape.height, 16 / 9);
   assert.equal(PROJECT_FORMATS.square.width / PROJECT_FORMATS.square.height, 1);
+});
+
+test("new source dimensions select portrait, landscape, or square canvas defaults", () => {
+  assert.equal(projectFormatForSourceDimensions(1080, 1920).preset, "vertical");
+  assert.equal(projectFormatForSourceDimensions(1920, 1080).preset, "landscape");
+  assert.equal(projectFormatForSourceDimensions(1080, 1080).preset, "square");
+  assert.equal(projectFormatForSourceDimensions(0, 1080).preset, DEFAULT_PROJECT_FORMAT.preset);
 });
 
 test("switching formats preserves a reachable normalized caption position", () => {

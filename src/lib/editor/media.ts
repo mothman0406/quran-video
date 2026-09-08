@@ -1,4 +1,4 @@
-import type { CaptionSegment } from "./captions.ts";
+import { arabicCaptionDisplay, type CaptionSegment } from "./captions.ts";
 
 export type MediaKind = "video" | "audio";
 
@@ -48,6 +48,11 @@ export type TimelineTrack = {
   label: "Text" | "Video" | "Audio";
   items: TimelineItem[];
 };
+
+/** The timeline reads the same display-only Arabic text as preview and export. */
+export function timelineCaptionText(segment: CaptionSegment): string {
+  return arabicCaptionDisplay(segment, false).text;
+}
 
 /** Screen-space threshold keeps caption/playhead snapping stable across zoom. */
 export const CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX = 8;
@@ -237,7 +242,7 @@ export function timelineTracks(source: MediaSource | null, segments: readonly Ca
   const durationMs = projectDurationMs(source);
   const trim = clampMediaTrim(mediaTrim, durationMs);
   return [
-    { kind: "text", label: "Text", items: segments.map((segment) => ({ id: `text:${segment.id}`, track: "text", startMs: segment.startMs, endMs: segment.endMs, label: segment.contentKind === "basmalah-prelude" ? "Basmalah" : segment.verseKeys[0] ?? "Caption", captionSegmentId: segment.id })) },
+    { kind: "text", label: "Text", items: segments.map((segment) => ({ id: `text:${segment.id}`, track: "text", startMs: segment.startMs, endMs: segment.endMs, label: timelineCaptionText(segment), captionSegmentId: segment.id })) },
     { kind: "video", label: "Video", items: source?.hasVideo && durationMs > 0 ? [{ id: "video:source", track: "video", startMs: trim.startMs, endMs: trim.endMs, label: source.fileName || "Video" }] : [] },
     { kind: "audio", label: "Audio", items: source?.hasAudio && durationMs > 0 ? [{ id: "audio:source", track: "audio", startMs: trim.startMs, endMs: trim.endMs, label: source.fileName || "Audio" }] : [] },
   ];

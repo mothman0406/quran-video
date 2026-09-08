@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getActiveCaptionSegment, resizeCaptionBoundary } from "../src/lib/editor/captions.ts";
-import { CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX, clampMediaTrim, createMediaTrim, createTimelineViewport, exportOutputTimeToSourceTime, mediaSourceFromFile, panTimelineViewport, pinchTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, shouldStopMediaPlayback, snapCaptionBoundaryToPlayhead, timeToTimelinePosition, timelineContentPosition, timelineItemGeometry, timelinePositionToTime, timelineRulerTicks, timelineTracks, timeToViewportPosition, viewportPositionToTime, zoomTimelineViewport } from "../src/lib/editor/media.ts";
+import { CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX, clampMediaTrim, createMediaTrim, createTimelineViewport, exportOutputTimeToSourceTime, mediaSourceFromFile, panTimelineViewport, pinchTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, shouldStopMediaPlayback, snapCaptionBoundaryToPlayhead, timeToTimelinePosition, timelineCaptionText, timelineContentPosition, timelineItemGeometry, timelinePositionToTime, timelineRulerTicks, timelineTracks, timeToViewportPosition, viewportPositionToTime, zoomTimelineViewport } from "../src/lib/editor/media.ts";
 import { MediaPlaybackClock } from "../src/lib/editor/playback-clock.ts";
 import { loadSavedProject } from "../src/lib/project-storage.ts";
 import { waveformPeaksForViewport, waveformPeaksFromPcm } from "../src/lib/editor/waveform.ts";
@@ -37,6 +37,16 @@ test("video source creates distinct video and audio timeline items on one durati
   const tracks = timelineTracks(source, [segment]);
   assert.deepEqual(tracks.map((track) => [track.kind, track.items.length]), [["text", 1], ["video", 1], ["audio", 1]]);
   assert.equal(projectDurationMs(source), 12_000);
+});
+
+test("timeline labels use each authoritative caption piece's cleaned Arabic display text", () => {
+  const firstPiece = { ...segment, id: "18:57.1", arabic: "وَمَنْ أَظْلَمُۖ مِمَّنْ" };
+  const secondPiece = { ...segment, id: "18:57.2", arabic: "ذُكِّرَ بِآيَاتِ رَبِّهِ" };
+  const prelude = { ...segment, id: "basmalah-prelude#1", contentKind: "basmalah-prelude" as const, verseKeys: [], arabic: "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ" };
+  assert.equal(timelineCaptionText(firstPiece), "وَمَنْ أَظْلَمُ مِمَّنْ");
+  assert.equal(timelineCaptionText(secondPiece), secondPiece.arabic, "a split piece never repeats its parent ayah");
+  assert.equal(timelineCaptionText(prelude), prelude.arabic);
+  assert.deepEqual(timelineTracks(null, [firstPiece, secondPiece, prelude])[0]?.items.map((item) => item.label), [timelineCaptionText(firstPiece), timelineCaptionText(secondPiece), timelineCaptionText(prelude)]);
 });
 
 test("audio-only source creates an empty video track and a local audio track", () => {

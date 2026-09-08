@@ -1,5 +1,34 @@
 # Status
 
+## Current milestone: Timeline caption labels and source-safe media fit
+
+Complete:
+
+- Text-track blocks now render the same display-cleaned Arabic from their
+  authoritative `CaptionSegment` as preview and export. Each split piece keeps
+  only its own Arabic range; basmalah preludes render their basmalah text.
+  Labels are centered RTL, truncate within their exact timing geometry, and do
+  not receive pointer events, preserving selection and edge-resize handling.
+- Replaced the prior shared `cover` default with `contain` in both the preview
+  and Mediabunny export paths. Source frames are centered on the existing black
+  project canvas without stretching or automatic cropping; audio-only remains
+  unchanged.
+- New unspecialized projects select vertical, landscape, or square canvas
+  defaults from the browser-decoded video dimensions. Explicit format choices,
+  including saved-project formats, remain preserved. Browser `videoWidth` and
+  `videoHeight` are used so phone rotation metadata follows browser display.
+- Added timeline-display, split-piece, basmalah, Quran-annotation-cleaning,
+  source-orientation, and contain-composition regressions. The caption timing
+  array, manual edits, waveform, media trim, playback clock, and project asset
+  model are unchanged.
+
+Verification: `npm test` (186 passing), `npx tsc --noEmit`, `npm run lint`,
+`npm run build`, and `git diff --check` pass. Lint retains four existing
+unused legacy timing-helper warnings; the build retains the existing non-fatal
+VAD ONNX Runtime dynamic-require warning. Direct browser validation with the
+reported portrait phone recording and a short exported sample remains pending:
+that media fixture and browser automation are not available in this workspace.
+
 ## Current milestone: Project Assets and timeline interaction improvements
 
 Complete:

@@ -5,7 +5,7 @@ import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSI
 import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, SAFE_AREA_OVERLAY_METADATA, mediabunnyVideoTransform, sourceVideoFitForMediabunny, sourceVideoFitForPreview } from "../src/lib/editor/formats.ts";
 import { audioOutputIsValid, selectOutputProfile, sourceAudioRequiresOutput } from "../src/lib/export/output.ts";
 import { DEFAULT_LOCAL_RENDERER_ID } from "../src/lib/export/offline-webcodecs.ts";
-import { coverPlacement, durationMatches, frameTimeline, onceCleanup, resolveExportFrameRate } from "../src/lib/export/timeline.ts";
+import { containPlacement, durationMatches, frameTimeline, onceCleanup, resolveExportFrameRate } from "../src/lib/export/timeline.ts";
 import { DEFAULT_EXPORT_QUALITY, EXPORT_QUALITY_PRESETS, exportQualityPreset } from "../src/lib/export/quality.ts";
 import { generateExportFileName } from "../src/lib/export/filename.ts";
 import { ExportCoordinator } from "../src/lib/export/lifecycle.ts";
@@ -117,21 +117,22 @@ test("all supported aspect ratios retain their output dimensions", () => {
   assert.deepEqual(Object.values(PROJECT_FORMATS).map(({ width, height }) => [width, height]), [[1080, 1920], [1920, 1080], [1080, 1080]]);
 });
 
-test("export composition uses source cover mapping and excludes safe-area overlays", () => {
-  assert.deepEqual(coverPlacement(1920, 1080, 1080, 1920), { x: -1166.6666666666665, y: 0, width: 3413.333333333333, height: 1920 });
-  assert.equal(sourceVideoFitForPreview(), "cover");
-  assert.equal(sourceVideoFitForMediabunny(), "cover");
+test("preview and export use the same source contain mapping and exclude safe-area overlays", () => {
+  assert.deepEqual(containPlacement(1920, 1080, 1080, 1920), { x: 0, y: 656.25, width: 1080, height: 607.5 });
+  assert.equal(sourceVideoFitForPreview(), "contain");
+  assert.equal(sourceVideoFitForMediabunny(), "contain");
   assert.equal(SAFE_AREA_OVERLAY_METADATA.exportable, false);
 });
 
-test("Mediabunny transforms include fit for every project canvas without stretching source video", () => {
+test("Mediabunny transforms contain every source frame without stretching", () => {
   for (const format of Object.values(PROJECT_FORMATS)) {
     const transform = mediabunnyVideoTransform(format);
-    assert.deepEqual(transform, { width: format.width, height: format.height, fit: "cover" });
+    assert.deepEqual(transform, { width: format.width, height: format.height, fit: "contain" });
     assert.notEqual(transform.fit, "fill");
     assert.equal(format.width / format.height, PROJECT_FORMATS[format.preset].aspectRatio);
-    const placement = coverPlacement(1920, 1080, format.width, format.height);
+    const placement = containPlacement(1920, 1080, format.width, format.height);
     assert.ok(Math.abs(placement.width / placement.height - 16 / 9) < 1e-12);
+    assert.ok(placement.width <= format.width && placement.height <= format.height, "contain never crops the source frame");
   }
 });
 

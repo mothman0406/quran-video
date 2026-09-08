@@ -26,6 +26,14 @@ export function coverPlacement(sourceWidth: number, sourceHeight: number, target
   return { x: (targetWidth - width) / 2, y: (targetHeight - height) / 2, width, height };
 }
 
+/** Centers the entire source frame inside a project canvas without distortion. */
+export function containPlacement(sourceWidth: number, sourceHeight: number, targetWidth: number, targetHeight: number) {
+  const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
+  return { x: (targetWidth - width) / 2, y: (targetHeight - height) / 2, width, height };
+}
+
 /** Gives cleanup a single, testable cancellation boundary. */
 export function onceCleanup(cleanup: () => void): () => void {
   let complete = false;

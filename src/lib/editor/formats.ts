@@ -22,7 +22,8 @@ const SOURCE_VIDEO_FIT_MAPPING: Record<SourceVideoFit, { preview: SourceVideoFit
   contain: { preview: "contain", mediabunny: "contain" },
 };
 
-export const DEFAULT_SOURCE_VIDEO_FIT: SourceVideoFit = "cover";
+/** Fits source media inside the canvas without implicit cropping. */
+export const DEFAULT_SOURCE_VIDEO_FIT: SourceVideoFit = "contain";
 
 export function sourceVideoFitForPreview(fit: SourceVideoFit = DEFAULT_SOURCE_VIDEO_FIT): SourceVideoFit {
   return SOURCE_VIDEO_FIT_MAPPING[fit].preview;
@@ -34,6 +35,15 @@ export function sourceVideoFitForMediabunny(fit: SourceVideoFit = DEFAULT_SOURCE
 
 export function mediabunnyVideoTransform(format: ProjectFormat) {
   return { width: format.width, height: format.height, fit: sourceVideoFitForMediabunny() } as const;
+}
+
+/** Selects a new project's canvas from browser-decoded source dimensions. */
+export function projectFormatForSourceDimensions(width: number, height: number): ProjectFormat {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return DEFAULT_PROJECT_FORMAT;
+  const ratio = width / height;
+  if (ratio > 1.1) return PROJECT_FORMATS.landscape;
+  if (ratio < 1 / 1.1) return PROJECT_FORMATS.vertical;
+  return PROJECT_FORMATS.square;
 }
 
 export function projectFormatDefinition(format: ProjectFormat): ProjectFormatDefinition {

@@ -49,6 +49,7 @@ import {
 import {
   DEFAULT_PROJECT_FORMAT,
   PROJECT_FORMATS,
+  projectFormatForSourceDimensions,
   projectFormatDefinition,
 } from "@/lib/editor/formats";
 import type { ProjectFormat, ProjectFormatPreset } from "@/lib/schemas/project";
@@ -227,6 +228,7 @@ export default function Home() {
   const [projectFormat, setProjectFormat] = useState<ProjectFormat>(
     DEFAULT_PROJECT_FORMAT,
   );
+  const [projectFormatExplicitlyChosen, setProjectFormatExplicitlyChosen] = useState(false);
   const [positioning, setPositioning] = useState<CaptionPositioning>(
     resetCaptionPositioning(DEFAULT_PROJECT_FORMAT),
   );
@@ -547,6 +549,7 @@ export default function Home() {
   }
   function resetEditorState() {
     exportAbort.current?.abort();
+    setProjectFormatExplicitlyChosen(false);
     generation.current += 1;
     waveformGeneration.current += 1;
     if (videoUrl) URL.revokeObjectURL(videoUrl);
@@ -741,6 +744,7 @@ export default function Home() {
     setPendingOpenProject(project);
     setProjectName(project.title);
     setProjectFormat(project.format);
+    setProjectFormatExplicitlyChosen(true);
     setAlignments(project.verseAlignments as VerseAlignment[]);
     setSegments(project.captionSegments as CaptionSegment[]);
     setPositioning(project.positioning);
@@ -956,6 +960,11 @@ export default function Home() {
       height: Number.isFinite(visual.videoHeight) ? visual.videoHeight : 0,
     };
     setVideoMetadata(metadata);
+    if (metadata.width > 0 && metadata.height > 0 && !projectFormatExplicitlyChosen) {
+      const sourceAwareFormat = projectFormatForSourceDimensions(metadata.width, metadata.height);
+      setProjectFormat(sourceAwareFormat);
+      setPositioning((current) => clampCaptionPositioning(current, sourceAwareFormat));
+    }
     const durationMs = Math.round(metadata.durationSeconds * 1_000);
     setMediaSource((current) => current ? { ...current, durationMs, ...(current.hasVideo ? { width: metadata.width, height: metadata.height } : {}) } : current);
     if (activeMediaAssetId) setProjectAssets((current) => current.map((asset) => asset.id === activeMediaAssetId ? { ...asset, durationMs, ...(mediaSource?.hasVideo ? { width: metadata.width, height: metadata.height } : {}) } : asset));
@@ -1661,6 +1670,7 @@ export default function Home() {
       height: definition.height,
     };
     setProjectFormat(next);
+    setProjectFormatExplicitlyChosen(true);
     setPositioning((current) => clampCaptionPositioning(current, next));
   }
   function splitSelected() {
