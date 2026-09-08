@@ -2,6 +2,7 @@ import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionS
 import type { ProjectFormat } from "../schemas/project.ts";
 import type { ExportQuality } from "./quality.ts";
 import type { MediaTrim } from "../editor/media.ts";
+import type { PlaybackRate } from "../editor/playback-rate.ts";
 
 export type ExportPhase = "preparing" | "decoding" | "rendering" | "encoding" | "muxing" | "finalizing";
 
@@ -35,6 +36,8 @@ export type LocalExportConfiguration = {
   watermarkRequired: boolean;
   /** Source-time bounds. Omitted legacy snapshots export the full source. */
   mediaTrim?: MediaTrim;
+  /** Presentation rate; source caption and word timing remains unchanged. */
+  playbackRate: PlaybackRate;
 };
 
 export type LocalExportRequest = LocalExportConfiguration & {
@@ -44,7 +47,7 @@ export type LocalExportRequest = LocalExportConfiguration & {
   onProgress?: (progress: { phase: ExportPhase; fraction: number; elapsedSeconds: number; estimatedRemainingSeconds?: number }) => void;
 };
 
-export type LocalExportResult = { blob: Blob; fileName: string; mimeType: string; durationSeconds: number; fileSizeBytes: number; diagnostics: LocalExportDiagnostics };
+export type LocalExportResult = { blob: Blob; fileName: string; mimeType: string; durationSeconds: number; fileSizeBytes: number; playbackRate: PlaybackRate; outputDurationSeconds: number; diagnostics: LocalExportDiagnostics };
 
 export type LocalExportSupport = { supported: boolean; path: string; reason: string; mimeType?: string };
 

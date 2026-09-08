@@ -125,6 +125,7 @@ import { projectAssetFromMediaSource } from "@/lib/editor/project-assets";
 import { clearCaptionSelection, rightInspectorModeForSelection, selectCaptionLayer, selectTimelineCaption, type CaptionSelection, type RightInspectorMode } from "@/lib/editor/selection";
 import { EditorHistory } from "@/lib/editor/history";
 import { DEFAULT_SOCIAL_PLATFORM_PREVIEW, moveRectToSafeArea, platformCaptionCollisions, socialPlatformGuide, type CaptionCanvasBounds, type SocialPlatformId } from "@/lib/editor/social-platform-guides";
+import { applyPlaybackRate, DEFAULT_PLAYBACK_RATE, resolvePlaybackRate, type PlaybackRate } from "@/lib/editor/playback-rate";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -157,6 +158,7 @@ type EditorProjectHistoryState = {
   projectFormat: ProjectFormat;
   positioning: CaptionPositioning;
   transitionSettings: TransitionSettings;
+  playbackRate: PlaybackRate;
   showVerseNumber: boolean;
 };
 
@@ -266,6 +268,7 @@ export default function Home() {
   );
   const [transitionSettings, setTransitionSettings] =
     useState<TransitionSettings>(DEFAULT_TRANSITION_SETTINGS);
+  const [playbackRate, setPlaybackRate] = useState<PlaybackRate>(DEFAULT_PLAYBACK_RATE);
   const [showVerseNumber, setShowVerseNumber] = useState(
     DEFAULT_CAPTION_PRESENTATION.showVerseNumber,
   );
@@ -354,6 +357,7 @@ export default function Home() {
     projectFormat,
     positioning,
     transitionSettings,
+    playbackRate,
     showVerseNumber,
   });
   projectHistoryStateRef.current = {
@@ -364,6 +368,7 @@ export default function Home() {
     projectFormat,
     positioning,
     transitionSettings,
+    playbackRate,
     showVerseNumber,
   };
 
@@ -377,6 +382,7 @@ export default function Home() {
     setProjectFormat(next.projectFormat);
     setPositioning(next.positioning);
     setTransitionSettings(next.transitionSettings);
+    setPlaybackRate(next.playbackRate);
     setShowVerseNumber(next.showVerseNumber);
   }
   function updateProjectHistory(
@@ -441,6 +447,13 @@ export default function Home() {
   useEffect(() => {
     playbackClock.current?.setMedia(videoUrl ? videoRef.current : null);
   }, [videoUrl]);
+
+  useEffect(() => {
+    const media = videoRef.current;
+    if (!media) return;
+    // HTML media currentTime remains source time at every presentation rate.
+    applyPlaybackRate(media, playbackRate);
+  }, [playbackRate, videoUrl]);
 
   useEffect(() => {
     const durationMs = projectDurationMs(mediaSource);
@@ -690,6 +703,7 @@ export default function Home() {
     setTypography(resetTypographyDefaults());
     setCaptionBackground(DEFAULT_CAPTION_BACKGROUND);
     setTransitionSettings(DEFAULT_TRANSITION_SETTINGS);
+    setPlaybackRate(DEFAULT_PLAYBACK_RATE);
     setShowVerseNumber(DEFAULT_CAPTION_PRESENTATION.showVerseNumber);
     setExportState(null);
     setExportError(null);
@@ -729,6 +743,7 @@ export default function Home() {
       captionBackground,
       typography,
       transitionSettings,
+      playbackRate,
       showVerseNumber,
       createdAt,
       updatedAt: new Date().toISOString(),
@@ -771,6 +786,7 @@ export default function Home() {
         captionBackground: project.captionBackground,
         typography: project.typography,
         transitionSettings: project.transitionSettings,
+        playbackRate: project.playbackRate,
         showVerseNumber: project.showVerseNumber,
       });
       setDirty(false);
@@ -864,6 +880,7 @@ export default function Home() {
     setCaptionBackground(project.captionBackground);
     setTypography(project.typography);
     setTransitionSettings(project.transitionSettings);
+    setPlaybackRate(resolvePlaybackRate(project.playbackRate));
     setShowVerseNumber(project.showVerseNumber);
     setMediaTrim(project.mediaTrim);
     setSelectedSegmentId(null);
@@ -887,6 +904,7 @@ export default function Home() {
       captionBackground: project.captionBackground,
       typography: project.typography,
       transitionSettings: project.transitionSettings,
+      playbackRate: project.playbackRate,
       showVerseNumber: project.showVerseNumber,
     });
     setDirty(false);
@@ -2033,11 +2051,6 @@ export default function Home() {
   async function exportVideo() {
     if (!videoFile || exportAbort.current || !exportCoordinator.current.start())
       return;
-    if (mediaSource?.kind === "audio") {
-      setExportError("Audio-only export is not available yet. Playback, captioning, and local recognition remain available.");
-      exportCoordinator.current.finish();
-      return;
-    }
     const capability = offlineWebCodecsSupport();
     if (!capability.supported) {
       setExportError(capability.reason);
@@ -2053,6 +2066,7 @@ export default function Home() {
       transitionSettings,
       showVerseNumber,
       mediaTrim,
+      playbackRate,
       plan,
     });
     const validationErrors = validateLocalExportInputs(videoFile, snapshot);
@@ -2158,6 +2172,7 @@ export default function Home() {
         projectFormat={projectFormat}
         positioning={positioning}
         transitionSettings={transitionSettings}
+        playbackRate={playbackRate}
         showVerseNumber={showVerseNumber}
         showSafeArea={showSafeArea}
         platformPreview={platformPreview}
@@ -2259,6 +2274,7 @@ export default function Home() {
         onTypographyChange={updateTypography}
         onBackgroundChange={updateCaptionBackground}
         onTransitionChange={(patch) => updateProjectHistory((current) => ({ ...current, transitionSettings: { ...current.transitionSettings, ...patch } }))}
+        onPlaybackRateChange={(rate) => updateProjectHistory((current) => ({ ...current, playbackRate: rate }))}
         onSetShowVerseNumber={(value) => updateProjectHistory((current) => ({ ...current, showVerseNumber: value }))}
         onSetShowSafeArea={setShowSafeArea}
         onSetPlatformPreview={setPlatformPreview}

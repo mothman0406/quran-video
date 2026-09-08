@@ -3,6 +3,7 @@ import type { ProjectFormat } from "../schemas/project.ts";
 import type { LocalExportConfiguration } from "./types.ts";
 import { exportFormatForPlan, getPlanEntitlements, type Plan } from "../entitlements.ts";
 import type { MediaTrim } from "../editor/media.ts";
+import { resolvePlaybackRate, type PlaybackRate } from "../editor/playback-rate.ts";
 
 export function createLocalExportConfiguration(input: {
   format: ProjectFormat;
@@ -13,6 +14,7 @@ export function createLocalExportConfiguration(input: {
   transitionSettings: TransitionSettings;
   showVerseNumber: boolean;
   mediaTrim?: MediaTrim;
+  playbackRate?: PlaybackRate;
   plan?: Plan;
 }): LocalExportConfiguration {
   const entitlements = getPlanEntitlements(input.plan ?? "Free");
@@ -26,6 +28,7 @@ export function createLocalExportConfiguration(input: {
     transitionSettings: { ...input.transitionSettings },
     showVerseNumber: input.showVerseNumber,
     watermarkRequired: entitlements.watermarkRequired,
+    playbackRate: resolvePlaybackRate(input.playbackRate),
     ...(input.mediaTrim ? { mediaTrim: { ...input.mediaTrim } } : {}),
   };
 }

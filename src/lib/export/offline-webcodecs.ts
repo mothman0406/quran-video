@@ -1,6 +1,7 @@
 import {
   ALL_FORMATS,
   AudioSampleSink,
+  AudioSample,
   AudioSampleSource,
   BlobSource,
   BufferTarget,
@@ -18,7 +19,8 @@ import {
 import { quranFontDefinitions } from "../quran/content.ts";
 import { mediabunnyVideoTransform, sourceVideoFitForMediabunny } from "../editor/formats.ts";
 import { drawExportCaptions } from "./caption-canvas.ts";
-import { clampMediaTrim, exportOutputTimeToSourceTime } from "../editor/media.ts";
+import { clampMediaTrim, exportOutputDurationMs, exportOutputTimeToSourceTime } from "../editor/media.ts";
+import { StreamingWsola } from "./audio-time-stretch.ts";
 import { audioOutputIsValid, selectOutputProfile } from "./output.ts";
 import { generateExportFileName } from "./filename.ts";
 import { exportQualityPreset } from "./quality.ts";
@@ -76,12 +78,13 @@ async function copyOrEncodeAudio(options: {
   outputAudioCodec: "aac" | "opus";
   sourceStart: number;
   sourceDuration: number;
+  playbackRate: number;
   audioBitrate: number;
   signal?: AbortSignal;
 }): Promise<void> {
-  const { audioTrack, output, outputAudioCodec, sourceStart, sourceDuration, audioBitrate, signal } = options;
+  const { audioTrack, output, outputAudioCodec, sourceStart, sourceDuration, playbackRate, audioBitrate, signal } = options;
   const inputCodec = await audioTrack.getCodec();
-  const canCopy = inputCodec === outputAudioCodec;
+  const canCopy = inputCodec === outputAudioCodec && playbackRate === 1;
   if (canCopy) {
     const source = new EncodedAudioPacketSource(inputCodec);
     output.addAudioTrack(source, { decoderConfig: await audioTrack.getDecoderConfig() ?? undefined });
@@ -100,10 +103,27 @@ async function copyOrEncodeAudio(options: {
   const source = new AudioSampleSource({ codec: outputAudioCodec, bitrate: audioBitrate });
   output.addAudioTrack(source, { decoderConfig: { codec: outputAudioCodec === "aac" ? "mp4a.40.2" : "opus", sampleRate, numberOfChannels } });
   await output.start();
+  const expectedOutputFrames = Math.round(sourceDuration * sampleRate / playbackRate);
+  const stretcher = playbackRate === 1 ? null : new StreamingWsola(playbackRate, sampleRate, numberOfChannels);
+  let outputFrames = 0;
   for await (const sample of new AudioSampleSink(audioTrack).samples(sourceStart, sourceStart + sourceDuration)) {
     ensureNotAborted(signal);
-    try { sample.setTimestamp(Math.max(0, sample.timestamp - sourceStart)); await source.add(sample); } finally { sample.close(); }
+    try {
+      if (!stretcher) {
+        sample.setTimestamp(Math.max(0, sample.timestamp - sourceStart));
+        await source.add(sample);
+      } else {
+        const buffer = sample.toAudioBuffer();
+        for (const stretched of stretcher.append(buffer, expectedOutputFrames)) {
+          for (const encoded of AudioSample.fromAudioBuffer(stretched, outputFrames / sampleRate)) {
+            outputFrames += encoded.numberOfFrames;
+            await source.add(encoded);
+          }
+        }
+      }
+    } finally { sample.close(); }
   }
+  if (stretcher) for (const stretched of stretcher.finish(expectedOutputFrames)) for (const encoded of AudioSample.fromAudioBuffer(stretched, outputFrames / sampleRate)) { outputFrames += encoded.numberOfFrames; await source.add(encoded); }
 }
 
 export const offlineWebCodecsRenderer: LocalVideoRenderer = {
@@ -130,19 +150,20 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
     request.signal?.addEventListener("abort", abort, { once: true });
     try {
       const [videoTrack, audioTrack, sourceFormat] = await Promise.all([input.getPrimaryVideoTrack(), input.getPrimaryAudioTrack(), input.getFormat()]);
-      if (!videoTrack) throw new Error("The selected source does not contain a video track.");
+      if (!videoTrack && !audioTrack) throw new Error("The selected source does not contain playable audio or video.");
       const sourceHasAudio = Boolean(audioTrack);
       const sourceEnd = await input.computeDuration();
-      const sourceStart = await input.getFirstTimestamp(audioTrack ? [videoTrack, audioTrack] : [videoTrack]);
-      const [sourceVideoCodec, sourceAudioCodec, frameRateMetrics, outputCapabilities] = await Promise.all([videoTrack.getCodec(), audioTrack?.getCodec() ?? null, videoTrack.computeFrameRateMetrics(), capabilities(request.format.width, request.format.height, quality)]);
+      const sourceStart = await input.getFirstTimestamp(videoTrack && audioTrack ? [videoTrack, audioTrack] : videoTrack ? [videoTrack] : [audioTrack!]);
+      const [sourceVideoCodec, sourceAudioCodec, frameRateMetrics, outputCapabilities] = await Promise.all([videoTrack?.getCodec() ?? null, audioTrack?.getCodec() ?? null, videoTrack ? videoTrack.computeFrameRateMetrics() : Promise.resolve({ underlyingFrameRate: null, bestGuessFrameRate: 30 }), capabilities(request.format.width, request.format.height, quality)]);
       const profile = selectOutputProfile(outputCapabilities, sourceHasAudio, quality);
       if (!profile) throw new Error(sourceHasAudio ? "This browser cannot encode an audio/video combination for a local export. H.264/AAC and VP9/Opus were both unavailable." : "This browser cannot encode H.264 or VP9 for local export.");
       const fullSourceDuration = sourceEnd - sourceStart;
       const trim = clampMediaTrim(request.mediaTrim, Math.round(fullSourceDuration * 1_000));
       const sourceStartForTrim = sourceStart + trim.startMs / 1_000;
       const sourceDuration = (trim.endMs - trim.startMs) / 1_000;
+      const outputDuration = exportOutputDurationMs(trim, Math.round(fullSourceDuration * 1_000), request.playbackRate) / 1_000;
       const targetFps = resolveExportFrameRate(frameRateMetrics.underlyingFrameRate);
-      const timeline = frameTimeline(sourceDuration, targetFps);
+      const timeline = frameTimeline(outputDuration, targetFps);
       if (!timeline.length) throw new Error("The source duration could not be determined for deterministic export.");
       report("decoding", 0);
       const canvas = document.createElement("canvas"); canvas.width = request.format.width; canvas.height = request.format.height;
@@ -153,17 +174,18 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
       output.addVideoTrack(videoSource, { frameRate: targetFps });
       if (audioTrack && profile.audioCodec) {
         // Audio is appended from file packets/samples, never from an HTMLMediaElement stream.
-        await copyOrEncodeAudio({ audioTrack, output, outputAudioCodec: profile.audioCodec, sourceStart: sourceStartForTrim, sourceDuration, audioBitrate: profile.audioBitrate, signal: request.signal });
+        await copyOrEncodeAudio({ audioTrack, output, outputAudioCodec: profile.audioCodec, sourceStart: sourceStartForTrim, sourceDuration, playbackRate: request.playbackRate, audioBitrate: profile.audioBitrate, signal: request.signal });
       } else await output.start();
-      const sink = new VideoSampleSink(videoTrack);
+      const sink = videoTrack ? new VideoSampleSink(videoTrack) : null;
       let renderedFrameCount = 0;
-      for await (const sample of sink.samplesAtTimestamps(timeline.map(({ timestamp }) => sourceStartForTrim + timestamp))) {
+      const sourceFrameTimes = timeline.map(({ timestamp }) => sourceStartForTrim + timestamp * request.playbackRate);
+      for await (const sample of sink ? sink.samplesAtTimestamps(sourceFrameTimes) : (async function* () { for (let index = 0; index < timeline.length; index += 1) yield null; })()) {
         ensureNotAborted(request.signal);
         const frame = timeline[renderedFrameCount]; if (!frame) break;
         try {
           context.clearRect(0, 0, canvas.width, canvas.height);
           if (sample) sample.drawWithFit(context, { fit: sourceVideoFitForMediabunny() });
-          drawExportCaptions(context, request, exportOutputTimeToSourceTime(frame.timestamp * 1_000, trim, Math.round(fullSourceDuration * 1_000)), arabicFont);
+          drawExportCaptions(context, request, exportOutputTimeToSourceTime(frame.timestamp * 1_000, trim, Math.round(fullSourceDuration * 1_000), request.playbackRate), arabicFont);
           report("rendering", renderedFrameCount / timeline.length);
           report("encoding", renderedFrameCount / timeline.length);
           await videoSource.add(frame.timestamp, frame.duration);
@@ -182,7 +204,7 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
       try {
         const [outputDurationSeconds, outputAudioTrack] = await Promise.all([verification.computeDuration(), verification.getPrimaryAudioTrack()]);
         const outputHasAudio = Boolean(outputAudioTrack);
-        if (!durationMatches(sourceDuration, outputDurationSeconds)) throw new Error(`The locally muxed duration (${outputDurationSeconds.toFixed(3)}s) did not match the source timeline (${sourceDuration.toFixed(3)}s). The export was not downloaded.`);
+        if (!durationMatches(outputDuration, outputDurationSeconds)) throw new Error(`The locally muxed duration (${outputDurationSeconds.toFixed(3)}s) did not match the playback-speed timeline (${outputDuration.toFixed(3)}s). The export was not downloaded.`);
         if (!audioOutputIsValid(sourceHasAudio, outputHasAudio)) throw new Error("The source contained audio, but the locally muxed file did not. The export was not downloaded.");
         const elapsedSeconds = (performance.now() - startedAt) / 1_000;
         const diagnostics: LocalExportDiagnostics = {
@@ -203,7 +225,7 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
           elapsedSeconds,
           effectiveRenderingFps: renderedFrameCount / Math.max(elapsedSeconds, 0.001),
         };
-        return { blob, fileName: generateExportFileName(request.source.name, request.segments, profile), mimeType: profile.mimeType, durationSeconds: outputDurationSeconds, fileSizeBytes: blob.size, diagnostics };
+        return { blob, fileName: generateExportFileName(request.source.name, request.segments, profile), mimeType: profile.mimeType, durationSeconds: outputDurationSeconds, outputDurationSeconds, playbackRate: request.playbackRate, fileSizeBytes: blob.size, diagnostics };
       } finally { verification.dispose(); }
     } finally {
       request.signal?.removeEventListener("abort", abort);

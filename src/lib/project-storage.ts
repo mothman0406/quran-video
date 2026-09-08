@@ -81,6 +81,8 @@ function migrateSavedProject(value: unknown): unknown {
     // Projects created before inline ayah numbers had no explicit preference.
     // Preserve saved false, but give missing legacy state the new default.
     ...(typeof project.showVerseNumber === "boolean" ? {} : { showVerseNumber: true }),
+    // Playback rate is presentation-only. Legacy projects retain neutral playback.
+    ...("playbackRate" in project ? {} : { playbackRate: 1 }),
     verseAlignments: project.verseAlignments.map((alignment) => {
       if (!alignment || typeof alignment !== "object" || Array.isArray(alignment)) return alignment;
       const current = alignment as Record<string, unknown>;

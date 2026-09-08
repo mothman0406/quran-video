@@ -10,6 +10,8 @@ import { DEFAULT_EXPORT_QUALITY, EXPORT_QUALITY_PRESETS, exportQualityPreset } f
 import { generateExportFileName } from "../src/lib/export/filename.ts";
 import { ExportCoordinator } from "../src/lib/export/lifecycle.ts";
 import { validateLocalExportInputs } from "../src/lib/export/validation.ts";
+import { exportOutputDurationMs, exportOutputTimeToSourceTime, projectDurationMs } from "../src/lib/editor/media.ts";
+import { applyPlaybackRate } from "../src/lib/editor/playback-rate.ts";
 
 const segment = { id: "93:1#1", contentKind: "ayah" as const, verseKeys: ["93:1"], startMs: 1_000, endMs: 2_000, arabic: "وَالضُّحَى", translation: "By the morning brightness", transliteration: "Wa ad-duha", wordStart: 0, wordEnd: 1, wordCount: 1, timingEvidence: { start: { timestampMs: 1_000, source: "direct-asr-word" as const }, end: { timestampMs: 2_000, source: "chunk-text-alignment" as const }, derived: false } };
 
@@ -35,6 +37,33 @@ test("export mapping preserves manual timings, translation visibility, and verse
   assert.equal(value.segments[0].endMs, 1_875);
   assert.equal(value.typography.translationVisible, false);
   assert.equal(value.showVerseNumber, true);
+});
+
+test("speed maps output time back to source time without changing caption or word timing", () => {
+  const timed = { ...segment, wordTimings: [{ canonicalWordIndex: 1, sourceWordStart: 0, sourceWordEnd: 1, startMs: 1_200, endMs: 1_800 }] };
+  const value = config({ segments: [timed], playbackRate: 2, mediaTrim: { startMs: 10_000, endMs: 40_000 } });
+  assert.equal(value.playbackRate, 2);
+  assert.equal(exportOutputDurationMs(value.mediaTrim!, 60_000, value.playbackRate), 15_000);
+  assert.equal(exportOutputTimeToSourceTime(7_500, value.mediaTrim!, 60_000, value.playbackRate), 25_000);
+  assert.deepEqual(value.segments[0].wordTimings, timed.wordTimings);
+  assert.deepEqual(captionVisualStatesAtTime(value.segments, exportOutputTimeToSourceTime(625, { startMs: 0, endMs: 2_000 }, 2_000, 2), value.transitionSettings).map((state) => state.segment.id), [segment.id]);
+});
+
+test("speed duration follows trim source time for both slow and fast exports", () => {
+  assert.equal(exportOutputDurationMs({ startMs: 0, endMs: 60_000 }, 60_000, 2), 30_000);
+  assert.equal(exportOutputDurationMs({ startMs: 0, endMs: 60_000 }, 60_000, 0.5), 120_000);
+  assert.equal(exportOutputDurationMs({ startMs: 10_000, endMs: 40_000 }, 60_000, 2), 15_000);
+  assert.equal(projectDurationMs({ kind: "video", hasVideo: true, hasAudio: true, fileName: "source.mp4", mimeType: "video/mp4", durationMs: 60_000 }), 60_000);
+});
+
+test("preview media rate changes preserve source currentTime and pitch where supported", () => {
+  const media = { currentTime: 12.345, playbackRate: 1, defaultPlaybackRate: 1, paused: false, preservesPitch: false };
+  applyPlaybackRate(media, 2);
+  assert.deepEqual(media, { currentTime: 12.345, playbackRate: 2, defaultPlaybackRate: 2, paused: false, preservesPitch: true });
+  media.paused = true;
+  applyPlaybackRate(media, 0.5);
+  assert.equal(media.currentTime, 12.345);
+  assert.equal(media.playbackRate, 0.5);
 });
 
 test("export reuses the preview transition interpolation without a second timing model", () => {

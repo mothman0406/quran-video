@@ -201,9 +201,16 @@ export function shouldStopMediaPlayback(currentTimeMs: number, trim: MediaTrim, 
 }
 
 /** Export output time is zero-based, while caption data remains absolute source time. */
-export function exportOutputTimeToSourceTime(outputTimeMs: number, trim: MediaTrim, durationMs: number): number {
+export function exportOutputDurationMs(trim: MediaTrim, durationMs: number, playbackRate = 1): number {
   const range = clampMediaTrim(trim, durationMs);
-  return Math.max(range.startMs, Math.min(range.endMs, range.startMs + Math.max(0, outputTimeMs)));
+  const safeRate = Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
+  return (range.endMs - range.startMs) / safeRate;
+}
+
+export function exportOutputTimeToSourceTime(outputTimeMs: number, trim: MediaTrim, durationMs: number, playbackRate = 1): number {
+  const range = clampMediaTrim(trim, durationMs);
+  const safeRate = Number.isFinite(playbackRate) && playbackRate > 0 ? playbackRate : 1;
+  return Math.max(range.startMs, Math.min(range.endMs, range.startMs + Math.max(0, outputTimeMs) * safeRate));
 }
 
 export function timeToTimelinePosition(timeMs: number, durationMs: number, startMs = 0): number {

@@ -8,7 +8,7 @@ import { projectAssetFromMediaSource, projectTextAssets } from "../src/lib/edito
 import { mediaSourceFromFile } from "../src/lib/editor/media.ts";
 
 function project(overrides: Partial<SavedProject> = {}): SavedProject {
-  return { version: 2, id: "project-1", title: "Evening recitation", sourceMedia: { kind: "video", hasVideo: true, hasAudio: true, fileName: "recitation.mp4", fileSize: 42, mimeType: "video/mp4", durationMs: 12_000, fingerprint: "recitation.mp4:42:video/mp4" }, mediaTrim: { startMs: 0, endMs: 12_000 }, format: DEFAULT_PROJECT_FORMAT, verseAlignments: [], captionSegments: [], captions: { arabic: true, translation: true, transliteration: false, translationEdition: "english_saheeh" }, positioning: DEFAULT_CAPTION_POSITIONING, captionBackground: DEFAULT_CAPTION_BACKGROUND, typography: DEFAULT_TYPOGRAPHY, transitionSettings: DEFAULT_TRANSITION_SETTINGS, showVerseNumber: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", ...overrides, projectAssets: overrides.projectAssets ?? [], activeMediaAssetId: overrides.activeMediaAssetId ?? null };
+  return { version: 2, id: "project-1", title: "Evening recitation", sourceMedia: { kind: "video", hasVideo: true, hasAudio: true, fileName: "recitation.mp4", fileSize: 42, mimeType: "video/mp4", durationMs: 12_000, fingerprint: "recitation.mp4:42:video/mp4" }, mediaTrim: { startMs: 0, endMs: 12_000 }, format: DEFAULT_PROJECT_FORMAT, verseAlignments: [], captionSegments: [], captions: { arabic: true, translation: true, transliteration: false, translationEdition: "english_saheeh" }, positioning: DEFAULT_CAPTION_POSITIONING, captionBackground: DEFAULT_CAPTION_BACKGROUND, typography: DEFAULT_TYPOGRAPHY, transitionSettings: DEFAULT_TRANSITION_SETTINGS, showVerseNumber: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", ...overrides, playbackRate: overrides.playbackRate ?? 1, projectAssets: overrides.projectAssets ?? [], activeMediaAssetId: overrides.activeMediaAssetId ?? null };
 }
 
 test("save creates metadata, updates by stable id, and stores no media bytes", async () => {
@@ -89,6 +89,24 @@ test("missing legacy verse-number state receives the new default without overwri
   const legacy = { ...project(), showVerseNumber: undefined } as unknown as SavedProject;
   assert.equal(loadSavedProject(legacy).showVerseNumber, true);
   assert.equal(loadSavedProject(project({ showVerseNumber: false })).showVerseNumber, false);
+});
+
+test("playback rate defaults legacy projects to 1x and persists supported selections", async () => {
+  const legacy = { ...project(), playbackRate: undefined } as unknown as SavedProject;
+  assert.equal(loadSavedProject(legacy).playbackRate, 1);
+  const repository = createMemoryProjectRepository();
+  await repository.put(project({ playbackRate: 0.5 }));
+  await repository.put(project({ playbackRate: 2 }));
+  assert.equal((await repository.get("project-1"))?.playbackRate, 2);
+  assert.equal(loadSavedProject(serializeSavedProject(project({ playbackRate: 0.5 }))).playbackRate, 0.5);
+});
+
+test("playback rate migration is presentation-only and never rewrites caption or word timing", () => {
+  const caption = { id: "93:1#1", contentKind: "ayah" as const, verseKeys: ["93:1"], startMs: 1_000, endMs: 2_000, arabic: "وَالضُّحَى", translation: null, transliteration: null, wordStart: 0, wordEnd: 1, wordCount: 1, wordTimings: [{ canonicalWordIndex: 1, sourceWordStart: 0, sourceWordEnd: 1, startMs: 1_100, endMs: 1_900 }] };
+  const slow = loadSavedProject(project({ playbackRate: 0.5, captionSegments: [caption] }));
+  const fast = loadSavedProject(project({ playbackRate: 2, captionSegments: [caption] }));
+  assert.deepEqual(slow.captionSegments[0].wordTimings, fast.captionSegments[0].wordTimings);
+  assert.deepEqual([slow.captionSegments[0].startMs, slow.captionSegments[0].endMs], [1_000, 2_000]);
 });
 
 test("highlight setting migration preserves explicit choices while missing legacy defaults read so far", () => {

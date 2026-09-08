@@ -3,7 +3,7 @@ import type { LocalExportConfiguration } from "./types.ts";
 
 export function validateLocalExportInputs(source: File | null | undefined, configuration: LocalExportConfiguration): string[] {
   const errors: string[] = [];
-  if (!source || source.size <= 0 || !source.type.startsWith("video/")) errors.push("Choose a non-empty local video file.");
+  if (!source || source.size <= 0 || !(source.type.startsWith("video/") || source.type.startsWith("audio/"))) errors.push("Choose a non-empty local video or audio file.");
   const format = PROJECT_FORMATS[configuration.format.preset];
   if (!format || format.width !== configuration.format.width || format.height !== configuration.format.height) errors.push("The selected project format is invalid.");
   if (configuration.segments.length === 0) errors.push("Add at least one caption segment before exporting.");

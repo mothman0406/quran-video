@@ -1,6 +1,36 @@
 # Status
 
-## Current milestone: Social-platform safe-zone previews
+## Current milestone: Project playback-speed controls
+
+Complete:
+
+- Added a persisted project `playbackRate` presentation setting with 0.5x,
+  0.75x, 1x, 1.25x, 1.5x, and 2x choices. New and migrated projects resolve
+  to 1x; the settings-inspector control is Undo/Redo-aware and participates in
+  the saved-project dirty signature.
+- Playback still uses one shared HTML media source-time clock. Changing the
+  rate does not seek, rebuild captions, or rerun recognition; browser preview
+  sets pitch-preservation properties where supported. The editing timeline,
+  trims, waveform, playhead geometry, Quran word timings, and captions remain
+  in original source time.
+- Local WebCodecs export maps output time to source time with
+  `sourceTime = trimStart + outputTime * playbackRate`; output duration is the
+  selected source trim duration divided by playback rate. Frames, transitions,
+  translations, word highlights, and verse ornaments evaluate at that mapped
+  source time. Safe-zone guides remain editor-only.
+- Non-1x audio export uses a small browser-local streaming WSOLA-style tempo
+  processor to retain sample rate/perceived pitch while matching video duration.
+  It keeps a rolling PCM window rather than an entire expanded 0.5x recording;
+  1x retains the existing direct-copy/re-encode path. Audio-only sources render
+  their existing neutral canvas with the same local/$0 speed mapping.
+
+Verification: `npm test` (237 passing), `npx tsc --noEmit`, `npm run lint --
+--quiet`, `npm run build`, and `git diff --check` pass. The build retains the
+pre-existing non-fatal VAD ONNX Runtime dynamic-require warning. Real browser
+validation remains unavailable in this workspace because it has no browser
+automation or recognized-video fixture.
+
+## Previous milestone: Social-platform safe-zone previews
 
 Complete:
 

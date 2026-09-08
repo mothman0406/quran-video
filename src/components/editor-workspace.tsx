@@ -11,6 +11,7 @@ import type { CaptionObject, CaptionResizeEdge } from "@/components/caption-prev
 import type { QuranContentResponse } from "@/lib/quran/content";
 import type { RightInspectorMode } from "@/lib/editor/selection";
 import type { CaptionGenerationProgress } from "@/lib/editor/caption-generation-progress";
+import { PLAYBACK_RATES, playbackRateLabel, type PlaybackRate } from "@/lib/editor/playback-rate";
 import { hafsSurahs } from "@/lib/recognition/core";
 import { arabicCaptionDisplay, captionSegmentLabel, getActiveCaptionSegment, translationDisplayText } from "@/lib/editor/captions";
 import CaptionPreview from "@/components/caption-preview";
@@ -61,6 +62,7 @@ type EditorWorkspaceProps = {
   projectFormat: ProjectFormat;
   positioning: CaptionPositioning;
   transitionSettings: TransitionSettings;
+  playbackRate: PlaybackRate;
   showVerseNumber: boolean;
   showSafeArea: boolean;
   platformPreview: SocialPlatformId;
@@ -162,6 +164,7 @@ type EditorWorkspaceProps = {
   onTypographyChange: <K extends keyof Typography>(key: K, value: Typography[K]) => void;
   onBackgroundChange: <K extends keyof CaptionBackground>(key: K, value: CaptionBackground[K]) => void;
   onTransitionChange: (patch: Partial<TransitionSettings>) => void;
+  onPlaybackRateChange: (rate: PlaybackRate) => void;
   onSetShowVerseNumber: (value: boolean) => void;
   onSetShowSafeArea: (value: boolean) => void;
   onSetPlatformPreview: (value: SocialPlatformId) => void;
@@ -220,7 +223,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     videoFile, videoUrl, videoMetadata, mediaSource, projectAssets, activeMediaAssetId, mediaTrim, videoRef, previewRef, timelineRef, stage, progress, support,
     alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
     selectedObject, rightInspectorMode, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
-    transitionSettings, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, canUndo, canRedo, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
+    transitionSettings, playbackRate, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, canUndo, canRedo, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage, timingWarning,
     showCorrection, surah, startAyah, endAyah, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, entitlements, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
     onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
@@ -228,7 +231,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
     onCorrectDetection, onToggleCorrection, onSurahChange, onStartAyahChange, onEndAyahChange, onClearVideo, onSaveProject, onUndo, onRedo, onHistoryTransactionStart, onHistoryTransactionCommit, onSaveToAccount, onOpenProjects,
     onOpenCloudProjects, onSessionChange, onPlanChange, onDiscard, onNewProject, onExportOpen, onExport, onCancelExport, onDownloadExport,
-    onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange,
+    onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange, onPlaybackRateChange,
     onSetShowVerseNumber, onSetShowSafeArea, onSetPlatformPreview, onMoveToSafeArea, onCaptionBoundsChange, onApplyStyle, onSaveCurrentStyle, onSetLocalStyleName,
     onResetSelectedObjectStyle, onSetStyleScope, onAlignTranslation, onSetSplitBoundary, onSplit, onMergePrevious,
     onMergeNext, onTranslationFragmentChange, onResetTranslationFragment, onResetTiming, onResetAllTiming, onTimelinePinchZoom,
@@ -348,6 +351,11 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           <label className="editor-toggle"><input checked={showSafeArea} type="checkbox" onChange={(event) => onSetShowSafeArea(event.target.checked)} /><span />Safe area guides</label>
           <label className="editor-toggle"><input checked={showVerseNumber} type="checkbox" onChange={(event) => onSetShowVerseNumber(event.target.checked)} /><span />Verse number</label>
           <label className="editor-toggle"><input checked={typography.translationVisible} type="checkbox" onChange={(event) => onTypographyChange("translationVisible", event.target.checked)} /><span />Show translation</label>
+          <label className="editor-field-label">Playback speed
+            <select aria-label="Playback speed" className="editor-select" value={playbackRate} onChange={(event) => onPlaybackRateChange(Number(event.currentTarget.value) as PlaybackRate)}>
+              {PLAYBACK_RATES.map((rate) => <option key={rate} value={rate}>{playbackRateLabel(rate)}</option>)}
+            </select>
+          </label>
 
           <div className="editor-divider" />
           <SectionLabel>Style library</SectionLabel>
@@ -403,6 +411,11 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           {rightInspectorMode === "settings" ? <div className="editor-settings-inspector">
             <SectionLabel>Canvas settings</SectionLabel>
             <p className="editor-muted">{selectedFormatDefinition.label} · {selectedFormatDefinition.width} × {selectedFormatDefinition.height}</p>
+            <label className="editor-field-label">Playback speed
+              <select aria-label="Project playback speed" className="editor-select" value={playbackRate} onChange={(event) => onPlaybackRateChange(Number(event.currentTarget.value) as PlaybackRate)}>
+                {PLAYBACK_RATES.map((rate) => <option key={rate} value={rate}>{playbackRateLabel(rate)}</option>)}
+              </select>
+            </label>
             <label className="editor-toggle"><input checked={showSafeArea} type="checkbox" onChange={(event) => onSetShowSafeArea(event.target.checked)} /><span />Safe area guides</label>
             <div className="editor-platform-preview"><SectionLabel>Platform Preview</SectionLabel><Segmented value={platformPreview} options={[["none", "None"], ["tiktok", "TikTok"], ["instagram-reels", "Instagram Reels"], ["youtube-shorts", "YouTube Shorts"]]} onChange={(value) => onSetPlatformPreview(value as SocialPlatformId)} />
               {platformPreview !== "none" && projectFormat.preset !== "vertical" && <p className="editor-muted">Platform safe-zone guides are optimized for 9:16 video.</p>}
@@ -449,6 +462,6 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
       </aside>
     </div>
 
-    {exportOpen && <div className="editor-modal-backdrop" role="dialog" aria-modal="true" aria-label="Export video"><div className="editor-modal"><div className="editor-modal-heading"><div><SectionLabel>Export</SectionLabel><h2>Render your video</h2></div><button type="button" onClick={() => onSetExportOpen(false)}>×</button></div><div className="editor-export-grid"><label>Quality<select className="editor-select" value={exportQuality} disabled={Boolean(exportState && typeof exportState === "object")} onChange={(event) => onSetExportQuality(event.target.value as ExportQuality)}><option value="draft">Draft</option><option value="standard">Standard</option><option value="high">High</option></select></label><div><SectionLabel>Resolution</SectionLabel><strong>{selectedFormatDefinition.width} × {selectedFormatDefinition.height}</strong><small>{entitlements.watermarkRequired ? "Small watermark included" : "No watermark"}</small></div><div><SectionLabel>Output</SectionLabel><strong>{outputPlan?.profile?.container.toUpperCase() ?? "MP4 preferred"}</strong><small>Processed locally</small></div></div><div className="editor-modal-actions"><button className="editor-button editor-button-accent" type="button" disabled={Boolean(exportState && typeof exportState === "object")} onClick={onExport}>Export video</button>{exportResult && exportState === "complete" && <button className="editor-button editor-button-primary" type="button" onClick={onDownloadExport}>Download {exportResult.fileName}</button>}{exportState && typeof exportState === "object" && <button className="editor-button editor-button-quiet" type="button" onClick={onCancelExport}>Cancel</button>}</div>{exportError && <p className="editor-alert">{exportError}</p>}{exportDiagnostics && <details className="editor-diagnostics"><summary>Export diagnostics</summary><p>{exportDiagnostics.outputContainer} · {exportDiagnostics.renderedFrameCount} frames · {exportDiagnostics.effectiveRenderingFps.toFixed(1)} fps</p></details>}</div></div>}
+    {exportOpen && <div className="editor-modal-backdrop" role="dialog" aria-modal="true" aria-label="Export video"><div className="editor-modal"><div className="editor-modal-heading"><div><SectionLabel>Export</SectionLabel><h2>Render your video</h2></div><button type="button" onClick={() => onSetExportOpen(false)}>×</button></div><div className="editor-export-grid"><label>Quality<select className="editor-select" value={exportQuality} disabled={Boolean(exportState && typeof exportState === "object")} onChange={(event) => onSetExportQuality(event.target.value as ExportQuality)}><option value="draft">Draft</option><option value="standard">Standard</option><option value="high">High</option></select></label><div><SectionLabel>Resolution</SectionLabel><strong>{selectedFormatDefinition.width} × {selectedFormatDefinition.height}</strong><small>{playbackRateLabel(playbackRate)} · {entitlements.watermarkRequired ? "Small watermark included" : "No watermark"}</small></div><div><SectionLabel>Output</SectionLabel><strong>{outputPlan?.profile?.container.toUpperCase() ?? "MP4 preferred"}</strong><small>Processed locally</small></div></div><div className="editor-modal-actions"><button className="editor-button editor-button-accent" type="button" disabled={Boolean(exportState && typeof exportState === "object")} onClick={onExport}>Export video</button>{exportResult && exportState === "complete" && <button className="editor-button editor-button-primary" type="button" onClick={onDownloadExport}>Download {exportResult.fileName}</button>}{exportState && typeof exportState === "object" && <button className="editor-button editor-button-quiet" type="button" onClick={onCancelExport}>Cancel</button>}</div>{exportError && <p className="editor-alert">{exportError}</p>}{exportDiagnostics && <details className="editor-diagnostics"><summary>Export diagnostics</summary><p>{exportDiagnostics.outputContainer} · {exportDiagnostics.renderedFrameCount} frames · {exportDiagnostics.effectiveRenderingFps.toFixed(1)} fps · {playbackRateLabel(playbackRate)}</p></details>}</div></div>}
   </div>;
 }
