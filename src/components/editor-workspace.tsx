@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent, type SyntheticEvent } from "react";
 import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "@/lib/editor/captions";
 import type { ProjectAsset, ProjectFormat, ProjectFormatPreset } from "@/lib/schemas/project";
@@ -384,7 +385,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
 
   return <div className={`editor-shell ${layoutResizing ? "is-resizing-layout" : ""}`} style={{ "--timeline-height": `${timelineCollapsed ? 38 : timelineHeight}px`, "--left-panel-width": `${leftPanelWidth}px`, "--right-panel-width": `${rightPanelWidth}px` } as CSSProperties}>
     <header className="editor-topbar">
-      <div className="editor-brand"><span className="editor-brand-mark">۝</span><div><p>Quran Video</p><span>Recitation editor</span></div></div>
+      <Link className="editor-brand" href="/" aria-label="Quran Video home"><span className="editor-brand-mark">۝</span><div><p>Quran Video</p><span>Recitation editor</span></div></Link>
       <div className="editor-project-title"><input aria-label="Project name" value={projectName} onChange={(event) => onProjectNameChange(event.target.value)} /><span>{videoFile?.name ?? "No local source"}</span></div>
       <div className="editor-top-actions">
         <div className="editor-format-switcher" aria-label="Project format">{(Object.keys(PROJECT_FORMATS) as ProjectFormatPreset[]).map((preset) => <button key={preset} type="button" className={projectFormat.preset === preset ? "is-active" : ""} onClick={() => onChangeFormat(preset)}>{preset === "vertical" ? "9:16" : preset === "landscape" ? "16:9" : "1:1"}</button>)}</div>

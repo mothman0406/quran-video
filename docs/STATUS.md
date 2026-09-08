@@ -1,5 +1,15 @@
 # Status
 
+## Current milestone: Public Quran Video landing page
+
+Complete:
+
+- `/` is now a lightweight public marketing page; the editor implementation is preserved at `/editor`, which remains directly accessible without authentication. Landing CTAs route straight to a clean editor ready for local media or YouTube import.
+- Added a dark, responsive creator-tool landing experience with canonical Quran-caption product mockups, a four-step workflow, before/after presentation, editor workspace illustration, focused feature set, fair generic-vs-Quran-aware comparison, showcase treatments, export-quality messaging, and final CTA.
+- Every Arabic marketing demo resolves at render time from the same local canonical Quran corpus used by the editor. No external media, competing product assets, unsupported accuracy claims, fake testimonials, pricing, or authentication gate were added.
+- Landing claims remain limited to shipped functionality: Quran-aware detection, canonical text, word synchronization/highlighting, translation, visual editing, local-first recognition, local/YouTube import, and 720p/1080p/4K export. Production auth, pricing, billing enforcement, cloud storage, and social posting remain intentionally deferred.
+- Added route/model-isolation and canonical-marketing-text regressions. The public route does not import the editor, FastConformer, or recognition pipeline; those remain isolated to `/editor`.
+
 ## Current milestone: Resizable center-only editor workspace
 
 Complete:
