@@ -39,3 +39,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Development-only Quran timing benchmark downloads. Recitation audio must
+# remain local: it is neither a production asset nor redistributed by Git.
+/tools/timing-benchmark/.cache/

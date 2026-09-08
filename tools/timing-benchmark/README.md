@@ -18,6 +18,28 @@ It writes `/tmp/quran-timing-report.json` and `.md`. A structural failure
 returns exit code 2. This is intentional: a lower timing error cannot excuse a
 broken canonical sequence.
 
+## Real quran-align sample
+
+Run the fixed real-audio benchmark with:
+
+```sh
+npm run timing:benchmark:real -- --output tools/timing-benchmark/results/<date>-quran-align-real
+```
+
+If a host limits one local ONNX Runtime process, run deterministic contiguous
+batches (`--start 0 --limit 15`, then the next ranges) and merge their
+metrics-only JSON files with `npm run timing:benchmark:merge`. The fixed
+manifest contains 45 ayah recordings across Alafasy 128 kbps, Hani Rifai 192
+kbps, and Husary Muallim 128 kbps. Each fixture verifies the quran-align
+reciter/bitrate filename, EveryAyah-style ayah filename, canonical Tanzil word
+count, decoded audio duration, and `reference end <= audio duration`. A failed
+mapping is excluded, never shifted. Downloads live only under ignored
+`tools/timing-benchmark/.cache/`.
+
+`release-2016-11-24` contains a malformed
+`Abdurrahmaan_As-Sudais_192kbps.json` asset (an alignment crash log instead of
+JSON), so it is explicitly excluded rather than silently repaired.
+
 `fixtures/manual-boundaries.json` preserves the supplied 6:74–77, 69:19–32,
 93:1–5, and 3:33–35 history. Its reviewed data are ayah starts, stored in
 `boundaries`, not fabricated word labels. Reports show them separately as

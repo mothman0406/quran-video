@@ -28,6 +28,12 @@ export type ReferenceBoundary = {
 export type TimingFixture = {
   fixtureId: string;
   source: string;
+  /** Identifies a concrete recording family when this is a real-audio fixture. */
+  reciter?: string;
+  /** Exact EveryAyah-style source URL, retained as provenance rather than bundled audio. */
+  audioUrl?: string;
+  /** Audio file duration observed during the benchmark fetch/decode. */
+  audioDurationMs?: number;
   surah: number;
   ayahRange: { start: number; end: number };
   /** Word-level labels only. Empty means that this fixture cannot score word timing yet. */

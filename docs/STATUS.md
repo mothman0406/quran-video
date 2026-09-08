@@ -4,6 +4,35 @@
 
 Complete:
 
+- Ran the real fixed quran-align benchmark using the `release-2016-11-24`
+  CC BY 4.0 timing release (Collin Fair / quran-align; external
+  machine-generated reference data, not human ground truth) against 45
+  locally cached, filename-and-bitrate-matched EveryAyah recordings across
+  Alafasy, Hani Rifai, and Husary Muallim. Each fixture checks the canonical
+  Tanzil word count, reciter/audio filename contract, decoded duration, and
+  timing-end duration bound; no recitation audio is committed. The malformed
+  published Sudais JSON (an alignment crash log, not a JSON array) was
+  excluded rather than guessed at.
+- Saved the metrics-only report at
+  `tools/timing-benchmark/results/20260907-quran-align-real.{json,md}`. The
+  unchanged production `fastconformer-current` achieved 100% canonical word
+  coverage (242/242), 79 ms median word-start AE, 275 ms p90, and +79.45 ms
+  mean start bias. Its word ends are materially early (300 ms median AE,
+  -386.56 ms bias), especially for Husary Muallim; this is reported separately
+  and no artificial global offset was applied.
+- The raw blank-to-lexical CTC interpretation is numerically identical to the
+  current first-aligned-token start in this Viterbi path. The constrained
+  +/-80 ms local RMS-rise refinement regressed starts (89 ms median, 299 ms
+  p90) and regressed Husary Muallim, so neither candidate was promoted. The
+  production timing architecture remains one FastConformer canonical forced
+  CTC alignment with the existing frame-exact word boundary extraction.
+- Added real-run/batch-merge commands, per-reciter scoring, duration and
+  mapping validation, structural promotion gates, and a trivial-noise
+  non-promotion regression. The original continuous-audio reviewed fixtures
+  (6:74-77, 69:19-32, 93:1-5, 3:33-35) are retained but not falsely rerun
+  against unrelated individual EveryAyah ayah clips; the previously supplied
+  6:77 ~44.8 s continuous-clip behavior is therefore unchanged.
+
 - Added a development-only `tools/timing-benchmark/` harness with deterministic
   references, normalized timing-engine contracts, JSON/Markdown reports,
   structural validity gates, word-start/end metrics, ayah-boundary metrics,
@@ -20,8 +49,8 @@ Complete:
   alignment and cannot affect passage identity or display segmentation.
 - Documented the actual current CTC endpoint policy, frame conversion audit,
   external `cpfair/quran-align` source/data licensing boundary, and the
-  phoneme-DP/MFA research feasibility. No external timing/audio was vendored:
-  matching reciter/audio licensing still requires fixture-level verification.
+  phoneme-DP/MFA research feasibility. No external timing/audio was vendored;
+  the real fixture-level recording checks are now automated in the benchmark.
 
 Verification: `npx tsc --noEmit`, targeted `npm test --
 tests/timing-benchmark.test.ts` (6 passing), full `npm test` (192 passing),

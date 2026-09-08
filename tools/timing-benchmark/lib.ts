@@ -61,6 +61,16 @@ export type TimingBenchmarkReport = {
   engineId: string;
   fixtures: FixtureBenchmark[];
   aggregate: Omit<FixtureBenchmark, "fixtureId" | "engineId" | "runtime">;
+  /** Real fixtures are separated so one reciter cannot hide another's error. */
+  perReciter: Record<string, Omit<FixtureBenchmark, "fixtureId" | "engineId" | "runtime">>;
+};
+
+export type CandidatePromotionDecision = {
+  candidate: string;
+  promote: boolean;
+  medianStartImprovementMs: number | null;
+  p90StartDifferenceMs: number | null;
+  reasons: string[];
 };
 
 const thresholds = [50, 100, 150, 200, 300, 500] as const;
@@ -217,6 +227,29 @@ export function evaluateTimingBenchmark(items: readonly { fixture: TimingFixture
   const endReferenceCount = items.reduce((sum, item) => sum + item.fixture.words.filter((word) => word.expectedEndMs !== undefined).length, 0);
   const boundaryReferenceCount = items.reduce((sum, item) => sum + item.fixture.boundaries.length, 0);
   const worstBoundaries = detail.flatMap((fixture) => fixture.worstBoundaries).sort((left, right) => right.absoluteErrorMs - left.absoluteErrorMs).slice(0, 20);
+  const perReciter = Object.fromEntries([...new Set(items.map((item) => item.fixture.reciter ?? "unattributed"))].map((reciter) => {
+    const group = items.filter((item) => (item.fixture.reciter ?? "unattributed") === reciter);
+    const groupFixtures = group.map(({ fixture, canonicalWords, result }) => evaluateTimingFixture(fixture, canonicalWords, result));
+    const groupStartErrors = group.flatMap(({ fixture, result }) => fixture.words.flatMap((reference) => {
+      const word = result.words.find((item) => wordKey(item) === wordKey(reference));
+      return word ? [word.startMs - reference.expectedStartMs] : [];
+    }));
+    const groupEndErrors = group.flatMap(({ fixture, result }) => fixture.words.flatMap((reference) => {
+      const word = result.words.find((item) => wordKey(item) === wordKey(reference));
+      return word && word.endMs !== undefined && reference.expectedEndMs !== undefined ? [word.endMs - reference.expectedEndMs] : [];
+    }));
+    const groupAyahErrors = group.flatMap(({ fixture, result }) => fixture.boundaries.flatMap((reference) => {
+      const word = result.words.find((item) => item.verseKey === reference.verseKey && item.canonicalWordIndex === 1);
+      return word ? [word.startMs - reference.expectedStartMs] : [];
+    }));
+    return [reciter, {
+      structural: aggregateStructural(groupFixtures.map((fixture) => fixture.structural)),
+      wordStarts: metric(groupStartErrors, group.reduce((sum, item) => sum + item.fixture.words.length, 0)),
+      wordEnds: metric(groupEndErrors, group.reduce((sum, item) => sum + item.fixture.words.filter((word) => word.expectedEndMs !== undefined).length, 0)),
+      ayahBoundaryStarts: metric(groupAyahErrors, group.reduce((sum, item) => sum + item.fixture.boundaries.length, 0)),
+      worstBoundaries: groupFixtures.flatMap((fixture) => fixture.worstBoundaries).sort((left, right) => right.absoluteErrorMs - left.absoluteErrorMs).slice(0, 20),
+    }];
+  })) as TimingBenchmarkReport["perReciter"];
   return {
     schemaVersion: 1,
     engineId,
@@ -228,6 +261,32 @@ export function evaluateTimingBenchmark(items: readonly { fixture: TimingFixture
       ayahBoundaryStarts: metric(ayahErrors, boundaryReferenceCount),
       worstBoundaries,
     },
+    perReciter,
+  };
+}
+
+/** Product-promotion gate: a tiny aggregate wobble can never replace timing. */
+export function decideTimingPromotion(current: TimingBenchmarkReport, candidate: TimingBenchmarkReport): CandidatePromotionDecision {
+  const baseline = current.aggregate.wordStarts;
+  const contender = candidate.aggregate.wordStarts;
+  const medianImprovement = (baseline.medianAbsoluteErrorMs ?? Infinity) - (contender.medianAbsoluteErrorMs ?? Infinity);
+  const p90Difference = (contender.p90AbsoluteErrorMs ?? Infinity) - (baseline.p90AbsoluteErrorMs ?? Infinity);
+  const reasons: string[] = [];
+  if (!candidate.aggregate.structural.valid) reasons.push("candidate structural validity failed");
+  if (candidate.aggregate.structural.wordCoveragePercent < current.aggregate.structural.wordCoveragePercent) reasons.push("canonical coverage regressed");
+  if (medianImprovement < 25) reasons.push("median word-start improvement is not material (minimum 25 ms)");
+  if (p90Difference > 10) reasons.push("p90 word-start error regressed by more than 10 ms");
+  if ((candidate.aggregate.wordStarts.withinPercent[500] ?? 0) + 1 < (current.aggregate.wordStarts.withinPercent[500] ?? 0)) reasons.push("catastrophic >500 ms boundary rate regressed");
+  for (const [reciter, before] of Object.entries(current.perReciter)) {
+    const after = candidate.perReciter[reciter];
+    if (!after || (after.wordStarts.medianAbsoluteErrorMs ?? Infinity) > (before.wordStarts.medianAbsoluteErrorMs ?? Infinity) + 25) reasons.push(`word-start median regressed materially for ${reciter}`);
+  }
+  return {
+    candidate: candidate.engineId,
+    promote: !reasons.length,
+    medianStartImprovementMs: Number.isFinite(medianImprovement) ? medianImprovement : null,
+    p90StartDifferenceMs: Number.isFinite(p90Difference) ? p90Difference : null,
+    reasons: reasons.length ? reasons : ["material start improvement with equivalent structural coverage and no per-reciter or catastrophic regression"],
   };
 }
 

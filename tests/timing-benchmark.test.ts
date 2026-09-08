@@ -3,7 +3,7 @@ import test from "node:test";
 import { canonicalCtcWords, type CtcCanonicalWord, type CtcTargetToken } from "../src/lib/recognition/ctc-forced-alignment.ts";
 import { extractCtcBoundaryCandidates, ctcWordDiagnostics, refineBoundaryWithLocalEnergy } from "../tools/timing-benchmark/ctc-boundaries.ts";
 import { importCpFairReference } from "../tools/timing-benchmark/cpfair.ts";
-import { evaluateTimingBenchmark, evaluateTimingFixture, timingBenchmarkMarkdown, validateStructuralTiming } from "../tools/timing-benchmark/lib.ts";
+import { decideTimingPromotion, evaluateTimingBenchmark, evaluateTimingFixture, timingBenchmarkMarkdown, validateStructuralTiming } from "../tools/timing-benchmark/lib.ts";
 import type { BenchmarkWordTiming, TimingFixture, WordTimingResult } from "../tools/timing-benchmark/types.ts";
 import { createBenchmarkAudioVariant, transformTimestampForPlaybackSpeed } from "../tools/timing-benchmark/variants.ts";
 
@@ -44,6 +44,15 @@ test("word-timing benchmark reports starts, ends, ayah boundaries, and worst dia
   const aggregate = evaluateTimingBenchmark([{ fixture, canonicalWords: canonical, result }]);
   assert.match(timingBenchmarkMarkdown(aggregate), /Ayah-boundary starts \(not word labels\)/);
   assert.equal(aggregate.aggregate.worstBoundaries[0]?.absoluteErrorMs, 10);
+  assert.equal(aggregate.perReciter.unattributed?.wordStarts.count, 2);
+});
+
+test("promotion gate rejects trivial timing noise even with complete canonical coverage", () => {
+  const current = evaluateTimingBenchmark([{ fixture, canonicalWords: canonical, result }]);
+  const nearTie = evaluateTimingBenchmark([{ fixture, canonicalWords: canonical, result: { ...result, engineId: "candidate", words: result.words.map((word) => ({ ...word, startMs: word.startMs - 1 })) } }]);
+  const decision = decideTimingPromotion(current, nearTie);
+  assert.equal(decision.promote, false);
+  assert.ok(decision.reasons.some((reason) => reason.includes("not material")));
 });
 
 test("word-timing benchmark rejects omissions, duplicates, reordered words, backwards timestamps, and non-positive ends", () => {
