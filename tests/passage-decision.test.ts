@@ -5,7 +5,7 @@ import { decideFastConformerPassage } from "../src/lib/recognition/passage-decis
 import type { FastConformerIdentificationResult, IdentificationWindowResult, QuranPassageCandidate } from "../src/lib/recognition/fastconformer-identification.ts";
 
 function candidate(surah = 74, ayah = 1): QuranPassageCandidate {
-  return { start: { surah, ayah, canonicalWordIndex: 1, globalWordIndex: 1 }, end: { surah, ayah: ayah + 1, canonicalWordIndex: 1, globalWordIndex: 3 }, startPosition: 0, endPosition: 2, retrievalScore: 1, ctcScore: -2, normalizedCtcScore: -0.23, confidence: 0.8, marginFromSecond: 0.18, ctcTokenCount: 2, optionalPrelude: { available: false, selected: "absent", lexicalText: "", canonicalFirstWordStart: { surah, ayah, canonicalWordIndex: 1, globalWordIndex: 1 }, canonicalOnlyScore: -2, optionalBasmalahPlusCanonicalScore: null } };
+  return { start: { surah, ayah, canonicalWordIndex: 1, globalWordIndex: 1 }, end: { surah, ayah: ayah + 1, canonicalWordIndex: 1, globalWordIndex: 3 }, startPosition: 0, endPosition: 2, retrievalScore: 1, lexicalUniqueness: 0.8, lexicalCoverage: 1, targetCoverage: 1, ctcScore: -2, normalizedCtcScore: -0.23, confidence: 0.8, marginFromSecond: 0.18, ctcTokenCount: 2, optionalPrelude: { available: false, selected: "absent", lexicalText: "", canonicalFirstWordStart: { surah, ayah, canonicalWordIndex: 1, globalWordIndex: 1 }, canonicalOnlyScore: -2, optionalBasmalahPlusCanonicalScore: null } };
 }
 
 function window(index: number, value = candidate()): IdentificationWindowResult {
@@ -15,7 +15,7 @@ function window(index: number, value = candidate()): IdentificationWindowResult 
 function identification(overrides: Partial<FastConformerIdentificationResult> = {}): FastConformerIdentificationResult {
   const windows = [window(0), window(1), window(2), window(3)];
   const span = { start: { surah: 74, ayah: 1, canonicalWordIndex: 1, globalWordIndex: 1 }, end: { surah: 74, ayah: 9, canonicalWordIndex: 1, globalWordIndex: 20 } };
-  return { status: "complete", span, canonicalSpan: span, wordLevelSpan: span, selectedSurah: 74, optionalPrelude: null, surahConsensus: { selectedSurah: 74, strongWindowCount: 4, agreeingStrongWindows: 4 }, windowResults: windows, retrievalCandidates: windows.map((item) => item.selectedCandidate!), normalizedCtcScore: -0.233966, margin: 0.183743, continuityScore: 1, confidence: { composite: 0.993, normalizedBestCtcScore: -0.233966, bestVsSecondMargin: 0.183743, agreeingWindows: 4, voicedAudioExplained: 1 }, performance: { inferenceMs: 1, retrievalMs: 1, rerankingMs: 1, candidatesReranked: 4, totalMs: 4 }, CROSS_SURAH_CANDIDATES_REJECTED: 0, ...overrides };
+  return { status: "complete", span, canonicalSpan: span, wordLevelSpan: span, selectedSurah: 74, optionalPrelude: null, surahConsensus: { selectedSurah: 74, strongWindowCount: 4, agreeingStrongWindows: 4 }, windowResults: windows, retrievalCandidates: windows.map((item) => item.selectedCandidate!), normalizedCtcScore: -0.233966, margin: 0.183743, continuityScore: 1, globalHypotheses: [], confidence: { composite: 0.993, normalizedBestCtcScore: -0.233966, bestVsSecondMargin: 0.183743, agreeingWindows: 4, voicedAudioExplained: 1 }, performance: { inferenceMs: 1, retrievalMs: 1, rerankingMs: 1, candidatesReranked: 4, totalMs: 4 }, CROSS_SURAH_CANDIDATES_REJECTED: 0, ...overrides };
 }
 
 function decision(value: FastConformerIdentificationResult | null) {
@@ -32,6 +32,26 @@ test("production gate supports a genuinely strong short clip but rejects weak an
   assert.equal(decision(one).accepted, true);
   assert.equal(decision({ ...one, normalizedCtcScore: -0.5 }).accepted, false);
   assert.equal(decision({ ...one, margin: 0.01 }).state, "ambiguous");
+});
+
+test("a short shared Quran phrase is ambiguous instead of falsely certain", () => {
+  const short = identification({
+    windowResults: [window(0)],
+    surahConsensus: { selectedSurah: 74, strongWindowCount: 1, agreeingStrongWindows: 1 },
+    globalHypotheses: [{
+      surah: 74,
+      span: identification().canonicalSpan,
+      path: [{ windowIndex: 0, candidate: candidate() }],
+      acousticScore: -0.2,
+      lexicalUniqueness: 0.02,
+      localSharedPhraseScore: 0.98,
+      continuityScore: -0.2,
+      voicedCoverage: 1,
+      finalScore: -0.2,
+      agreeingWindows: 1,
+    }],
+  });
+  assert.deepEqual({ accepted: decision(short).accepted, state: decision(short).state }, { accepted: false, state: "ambiguous" });
 });
 
 test("one noisy window is tolerated, while contradictory surahs and invalid structure are rejected", () => {

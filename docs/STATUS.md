@@ -1,5 +1,31 @@
 # Status
 
+## Current milestone: Quran passage-identification disambiguation
+
+Complete:
+
+- Reworked FastConformer Quran-wide passage identification so Quran-wide
+  lexical frequency/uniqueness, competing coherent surah paths, CTC target
+  coverage, and coherent voiced-audio coverage are evaluated before the
+  production evidence gate accepts a passage. Shared Quran language remains
+  retrievable but cannot override stronger distinctive opening and continuity
+  evidence.
+- Added deterministic regressions for the Surah Al-Ma'arij opening versus the
+  misleading shared Surah As-Sajdah 32:5 phrase, a genuine 32:5 sequence, and
+  the existing noisy Surah 74 recovery. The implementation is general and
+  contains no Surah 70 or 32:5 production special case.
+- **USER-VALIDATED REAL BROWSER behavior:** the same recording that previously
+  identified the beginning of Surah Al-Ma'arij as 32:5 now identifies as Surah
+  70 through the normal development flow. Exact ayah-end and timing details
+  were not asserted beyond the user-provided validation.
+- Added concise development identification diagnostics with global hypotheses,
+  per-window greedy decode/candidates, lexical uniqueness, CTC score/margin,
+  target coverage, continuity, and coherent voiced coverage. Identification
+  remains browser-local and deterministic with $0 per-video API cost.
+- Timing behavior from `1ceea5d` remains unchanged: FastConformer word starts,
+  transition-derived word ends, forced alignment, caption segments, and
+  long-ayah splitting were not modified.
+
 ## Current milestone: Local Quran phonetics/DP audit and FastConformer transition-end promotion
 
 Complete:

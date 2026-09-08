@@ -770,6 +770,7 @@ function unavailableIdentification(reason: string, totalMs: number): FastConform
     normalizedCtcScore: null,
     margin: null,
     continuityScore: 0,
+    globalHypotheses: [],
     confidence: { composite: null, normalizedBestCtcScore: null, bestVsSecondMargin: null, agreeingWindows: 0, voicedAudioExplained: 0 },
     performance: { inferenceMs: 0, retrievalMs: 0, rerankingMs: 0, candidatesReranked: 0, totalMs },
     CROSS_SURAH_CANDIDATES_REJECTED: 0,

@@ -12,6 +12,8 @@ import {
   type IdentificationWindowResult,
   type QuranPassageCandidate,
 } from "../src/lib/recognition/fastconformer-identification.ts";
+import { canonicalCtcWords } from "../src/lib/recognition/ctc-forced-alignment.ts";
+import { hafsVerses, normalizeArabic } from "../src/lib/recognition/core.ts";
 
 const words = [
   [6, 74, 1, "واذ", 1], [6, 74, 2, "قال", 2], [6, 75, 1, "وكذلك", 3], [6, 75, 2, "نري", 4],
@@ -90,6 +92,20 @@ test("clean known passages remain retrievable without a cross-surah extension", 
   }
 });
 
+test("Quran-wide rarity downweights the shared 32:5 language while retaining the distinctive 70 opening", () => {
+  const quran = buildQuranWideLexicalIndex(canonicalCtcWords(hafsVerses).map((word) => {
+    const [surah, ayah] = word.verseKey.split(":").map(Number);
+    return { surah: surah!, ayah: ayah!, canonicalWordIndex: word.canonicalWordIndex, globalWordIndex: word.globalWordIndex, canonicalArabic: word.canonicalArabic, lexicalText: normalizeArabic(word.alignmentText), ctcTokenIds: [word.globalWordIndex] };
+  }));
+  const opening = retrieveQuranCandidates(quran, ["سال", "سائل", "بعذاب", "واقع", "للكفرين", "ليس", "له", "دافع", "من", "الله", "ذي", "المعارج"]);
+  const shared = retrieveQuranCandidates(quran, ["اليه", "في", "يوم", "كان", "مقداره", "الف", "سنة"]);
+  const maArij = opening.find((candidate) => candidate.start.surah === 70)!;
+  const sajdah = shared.find((candidate) => candidate.start.surah === 32)!;
+  assert.ok(maArij, "the distinctive Al-Ma'arij opening remains retrievable");
+  assert.ok(sajdah, "the genuine As-Sajdah shared phrase remains retrievable");
+  assert.ok(maArij.lexicalUniqueness > sajdah.lexicalUniqueness, "rare opening evidence carries more location authority than the shared phrase");
+});
+
 test("greedy CTC collapse removes repeats and blank without creating canonical text", () => {
   const decode = greedyDecodeCtc({ values: new Float32Array([
     0, 8, 0, 0,
@@ -160,7 +176,7 @@ function candidate(startPosition: number, endPosition: number, surah: number, st
   return {
     start: { surah, ayah: startAyah, canonicalWordIndex: 1, globalWordIndex: startPosition + 1 },
     end: { surah, ayah: endAyah, canonicalWordIndex: 2, globalWordIndex: endPosition + 1 },
-    startPosition, endPosition, retrievalScore: 1, ctcScore: score * 10, normalizedCtcScore: score, confidence: 0.8, marginFromSecond: 0.1, ctcTokenCount: 2,
+    startPosition, endPosition, retrievalScore: 1, lexicalUniqueness: 0.8, lexicalCoverage: 1, targetCoverage: 1, ctcScore: score * 10, normalizedCtcScore: score, confidence: 0.8, marginFromSecond: 0.1, ctcTokenCount: 2,
     optionalPrelude: { available: false, selected: "absent", lexicalText: "", canonicalFirstWordStart: { surah, ayah: startAyah, canonicalWordIndex: 1, globalWordIndex: startPosition + 1 }, canonicalOnlyScore: score * 10, optionalBasmalahPlusCanonicalScore: null },
   };
 }
@@ -168,6 +184,54 @@ function candidate(startPosition: number, endPosition: number, surah: number, st
 function window(index: number, candidates: QuranPassageCandidate[]): IdentificationWindowResult {
   return { index, startMs: index * 6_000, endMs: index * 6_000 + 12_000, voicedMs: 8_000, greedy: { tokenIds: [], lexicalText: "", lexicalTokens: [] }, candidates, selectedCandidate: candidates[0] ?? null, state: candidates.length ? "strong-candidate" : "no-usable-evidence", elapsedMs: 0, performance: { retrievalMs: 0, rerankingMs: 0, candidatesReranked: candidates.length }, crossSurahCandidatesRejected: 0 };
 }
+
+function withEvidence(value: QuranPassageCandidate, evidence: Partial<Pick<QuranPassageCandidate, "lexicalUniqueness" | "lexicalCoverage" | "targetCoverage" | "normalizedCtcScore">>) {
+  return { ...value, ...evidence, ctcScore: (evidence.normalizedCtcScore ?? value.normalizedCtcScore ?? -1) * 10 };
+}
+
+test("whole-recording hypotheses keep an Al-Ma'arij opening over a locally stronger shared 32:5 window", () => {
+  const maArij0 = withEvidence(candidate(700, 706, 70, 1, 2, -0.22), { lexicalUniqueness: 0.9 });
+  const maArij1 = withEvidence(candidate(704, 711, 70, 2, 4, -0.24), { lexicalUniqueness: 0.7 });
+  const maArijShared = withEvidence(candidate(709, 716, 70, 4, 5, -0.35), { lexicalUniqueness: 0.06 });
+  const maArij3 = withEvidence(candidate(714, 721, 70, 5, 6, -0.24), { lexicalUniqueness: 0.55 });
+  const sajdahShared = withEvidence(candidate(320, 326, 32, 5, 5, -0.08), { lexicalUniqueness: 0.04 });
+  const solution = solveQuranContinuity([
+    window(0, [maArij0]),
+    window(1, [maArij1]),
+    window(2, [sajdahShared, maArijShared]),
+    window(3, [maArij3]),
+  ]);
+  assert.equal(solution.selectedSurah, 70);
+  assert.equal(solution.hypotheses[0]?.surah, 70);
+  assert.equal(solution.path[2]?.candidate?.start.surah, 70, "the common phrase stays on the coherent Al-Ma'arij path");
+  assert.ok(solution.hypotheses.some((hypothesis) => hypothesis.surah === 32), "the competing 32:5 hypothesis remains visible to the final decision");
+});
+
+test("a genuine coherent 32:5 sequence remains selectable", () => {
+  const solution = solveQuranContinuity([
+    window(0, [withEvidence(candidate(320, 326, 32, 5, 5, -0.19), { lexicalUniqueness: 0.18 })]),
+    window(1, [withEvidence(candidate(324, 331, 32, 5, 5, -0.21), { lexicalUniqueness: 0.18 })]),
+    window(2, [withEvidence(candidate(329, 337, 32, 5, 5, -0.2), { lexicalUniqueness: 0.18 })]),
+  ]);
+  assert.equal(solution.selectedSurah, 32);
+  assert.equal(solution.span?.start.ayah, 5);
+});
+
+test("voiced coverage counts one coherent path, not unrelated per-window candidates", () => {
+  const summary = summarizeFastConformerIdentification([
+    window(0, [withEvidence(candidate(700, 706, 70, 1, 2, -0.2), { lexicalUniqueness: 0.9 })]),
+    window(1, [withEvidence(candidate(320, 326, 32, 5, 5, -0.2), { lexicalUniqueness: 0.1 })]),
+  ], 1);
+  assert.equal(summary.confidence.voicedAudioExplained, 0.5);
+  assert.notEqual(summary.confidence.voicedAudioExplained, 1);
+});
+
+test("short targets lose to similarly acoustic spans that explain the CTC lexical capacity", () => {
+  const short = withEvidence(candidate(700, 701, 70, 1, 1, -0.1), { targetCoverage: 0.05, lexicalUniqueness: 0.1 });
+  const complete = withEvidence(candidate(700, 708, 70, 1, 3, -0.16), { targetCoverage: 1, lexicalUniqueness: 0.1 });
+  const solution = solveQuranContinuity([window(0, [short, complete])]);
+  assert.equal(solution.path[0]?.candidate?.endPosition, complete.endPosition);
+});
 
 test("continuity Viterbi tolerates an unusable window and rejects backward or unrelated surah jumps", () => {
   const solution = solveQuranContinuity([
@@ -205,7 +269,7 @@ test("Surah 74 consensus prevents one anomalous 73 window from widening the solv
 test("FastConformer-vs-Whisper comparison is diagnostic and reports word-level agreement separately", () => {
   const shadow = {
     status: "complete" as const, span: { start: { surah: 6, ayah: 74, canonicalWordIndex: 2, globalWordIndex: 2 }, end: { surah: 6, ayah: 75, canonicalWordIndex: 2, globalWordIndex: 4 } }, canonicalSpan: { start: { surah: 6, ayah: 74, canonicalWordIndex: 2, globalWordIndex: 2 }, end: { surah: 6, ayah: 75, canonicalWordIndex: 2, globalWordIndex: 4 } }, wordLevelSpan: null, selectedSurah: 6, optionalPrelude: null, surahConsensus: { selectedSurah: 6, strongWindowCount: 2, agreeingStrongWindows: 2 },
-    windowResults: [], retrievalCandidates: [], normalizedCtcScore: -0.2, margin: 0.1, continuityScore: 1, confidence: { composite: 0.8, normalizedBestCtcScore: -0.2, bestVsSecondMargin: 0.1, agreeingWindows: 2, voicedAudioExplained: 1 }, performance: { inferenceMs: 1, retrievalMs: 1, rerankingMs: 1, candidatesReranked: 2, totalMs: 3 }, CROSS_SURAH_CANDIDATES_REJECTED: 0,
+    windowResults: [], retrievalCandidates: [], normalizedCtcScore: -0.2, margin: 0.1, continuityScore: 1, globalHypotheses: [], confidence: { composite: 0.8, normalizedBestCtcScore: -0.2, bestVsSecondMargin: 0.1, agreeingWindows: 2, voicedAudioExplained: 1 }, performance: { inferenceMs: 1, retrievalMs: 1, rerankingMs: 1, candidatesReranked: 2, totalMs: 3 }, CROSS_SURAH_CANDIDATES_REJECTED: 0,
   };
   const comparison = comparePassageIdentification({ engine: "whisper-quran-matcher", span: { firstVerseKey: "6:74", lastVerseKey: "6:75", firstWordIndex: 2, lastWordIndex: 2 }, confidence: 0.7 }, shadow);
   assert.deepEqual(comparison.agreement, { sameSurah: true, overlappingAyat: true, exactSpan: true });

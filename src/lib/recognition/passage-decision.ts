@@ -31,6 +31,8 @@ export type FastConformerPassageEvidence = {
   bestVsSecondMargin: number | null;
   voicedAudioExplained: number;
   continuityScore: number;
+  lexicalUniqueness: number;
+  sharedPhraseReliance: number;
   selectedSurah: number | null;
   structuralReasons: readonly string[];
 };
@@ -51,9 +53,16 @@ export function decideFastConformerPassage(
   identification: FastConformerIdentificationResult | null,
   canonicalSpan: CanonicalSpan | null,
 ): FastConformerPassageDecision {
-  const strong = identification?.windowResults.filter((window) => window.state === "strong-candidate" && window.selectedCandidate) ?? [];
+  const winningHypothesis = identification?.globalHypotheses[0] ?? null;
+  // The production gate follows the winning coherent path, not the independent
+  // local winners. A shared phrase may locally prefer another surah even when
+  // the complete sequence strongly supports this path.
+  const coherentCandidates = winningHypothesis?.path.flatMap((entry) => entry.candidate ? [entry.candidate] : []) ?? [];
+  const strong = coherentCandidates.length
+    ? coherentCandidates
+    : identification?.windowResults.filter((window) => window.state === "strong-candidate" && window.selectedCandidate).map((window) => window.selectedCandidate!) ?? [];
   const selectedSurah = identification?.selectedSurah ?? null;
-  const contradictoryStrongWindows = strong.filter((window) => window.selectedCandidate!.start.surah !== selectedSurah || window.selectedCandidate!.end.surah !== selectedSurah).length;
+  const contradictoryStrongWindows = strong.filter((candidate) => candidate.start.surah !== selectedSurah || candidate.end.surah !== selectedSurah).length;
   const structuralReasons: string[] = [];
   const span = identification?.canonicalSpan;
   if (!identification || identification.status !== "complete") structuralReasons.push("FastConformer did not complete Quran-wide identification.");
@@ -72,6 +81,8 @@ export function decideFastConformerPassage(
     bestVsSecondMargin: identification?.margin ?? null,
     voicedAudioExplained: identification?.confidence.voicedAudioExplained ?? 0,
     continuityScore: identification?.continuityScore ?? 0,
+    lexicalUniqueness: winningHypothesis?.lexicalUniqueness ?? 0,
+    sharedPhraseReliance: winningHypothesis?.localSharedPhraseScore ?? 1,
     selectedSurah,
     structuralReasons,
   };
@@ -86,5 +97,6 @@ export function decideFastConformerPassage(
   if ((identification!.margin ?? Number.NEGATIVE_INFINITY) < marginMinimum) return { accepted: false, state: "ambiguous", reason: "FastConformer best-path margin is too small.", evidence };
   if (identification!.confidence.voicedAudioExplained < voicedMinimum) return { accepted: false, state: "insufficient-evidence", reason: "Too little VAD-qualified audio is explained by the FastConformer path.", evidence };
   if (!singleWindow && identification!.surahConsensus.agreeingStrongWindows < 2) return { accepted: false, state: "ambiguous", reason: "Multiple useful windows did not form a coherent Quran path.", evidence };
+  if (singleWindow && winningHypothesis && winningHypothesis.lexicalUniqueness < 0.08) return { accepted: false, state: "ambiguous", reason: "A short clip contains only common Quran language without disambiguating context.", evidence };
   return { accepted: true, state: "accepted", reason: singleWindow ? "Strong short-clip FastConformer evidence passed." : "Coherent multi-window FastConformer evidence passed.", evidence };
 }

@@ -48,6 +48,14 @@ export type QuranPassageCandidate = {
   startPosition: number;
   endPosition: number;
   retrievalScore: number;
+  /** Quran-wide rarity of the lexical evidence that retrieved this span.
+   * One is unique, while values near zero are shared Quran language. */
+  lexicalUniqueness: number;
+  /** Amount of the greedy lexical evidence represented by this span. */
+  lexicalCoverage: number;
+  /** Prevent a short target from winning merely because CTC can emit blanks
+   * for the unexplained portion of a voiced window. */
+  targetCoverage: number;
   ctcScore: number | null;
   /** Forward CTC log likelihood / acoustic frame. It compares span lengths
    * without rewarding a candidate merely for having more frames. */
@@ -97,6 +105,23 @@ export type QuranContinuitySolution = {
   agreeingWindows: number;
   selectedSurah: number | null;
   surahConsensus: { selectedSurah: number | null; strongWindowCount: number; agreeingStrongWindows: number };
+  /** Competing coherent whole-recording paths, ordered by final score. */
+  hypotheses: readonly QuranGlobalHypothesis[];
+  globalMargin: number | null;
+};
+
+export type QuranGlobalHypothesis = {
+  surah: number;
+  span: { start: QuranPassageCandidate["start"]; end: QuranPassageCandidate["end"] } | null;
+  path: Array<{ windowIndex: number; candidate: QuranPassageCandidate | null }>;
+  acousticScore: number;
+  lexicalUniqueness: number;
+  continuityScore: number;
+  voicedCoverage: number;
+  /** The portion driven by repeated/common lexical evidence. */
+  localSharedPhraseScore: number;
+  finalScore: number;
+  agreeingWindows: number;
 };
 
 export type FastConformerIdentificationResult = {
@@ -114,6 +139,7 @@ export type FastConformerIdentificationResult = {
   normalizedCtcScore: number | null;
   margin: number | null;
   continuityScore: number;
+  globalHypotheses: readonly QuranGlobalHypothesis[];
   confidence: {
     /** Heuristic only; components remain available for manual inspection. */
     composite: number | null;
@@ -227,6 +253,9 @@ function candidateFromPositions(index: QuranWideLexicalIndex, startPosition: num
     startPosition,
     endPosition,
     retrievalScore,
+    lexicalUniqueness: 0,
+    lexicalCoverage: 0,
+    targetCoverage: 0,
     ctcScore: null,
     normalizedCtcScore: null,
     confidence: 0,
@@ -240,6 +269,32 @@ function candidateFromPositions(index: QuranWideLexicalIndex, startPosition: num
       canonicalOnlyScore: null,
       optionalBasmalahPlusCanonicalScore: null,
     },
+  };
+}
+
+function lexicalEvidenceForCandidate(index: QuranWideLexicalIndex, candidate: QuranPassageCandidate, decodedTokens: readonly string[]) {
+  const evidence = locationTokens(decodedTokens);
+  if (!evidence.length) return { score: 0, uniqueness: 0, coverage: 0 };
+  let score = 0;
+  let uniqueness = 0;
+  let matched = 0;
+  for (let size = Math.min(3, evidence.length); size >= 1; size -= 1) {
+    for (let offset = 0; offset + size <= evidence.length; offset += 1) {
+      const positions = index.ngramPositions.get(ngramKey(evidence.slice(offset, offset + size))) ?? [];
+      const contained = positions.some((position) => position >= candidate.startPosition && position + size - 1 <= candidate.endPosition);
+      if (!contained) continue;
+      const frequency = positions.length;
+      const rarity = 1 / Math.max(1, frequency);
+      score += size * size * rarity;
+      uniqueness += rarity;
+      matched += size;
+    }
+  }
+  const opportunities = evidence.reduce((sum, _token, offset) => sum + Math.min(3, evidence.length - offset), 0);
+  return {
+    score: Number(score.toFixed(6)),
+    uniqueness: Number((uniqueness / Math.max(1, matched)).toFixed(6)),
+    coverage: Number(Math.min(1, matched / Math.max(1, opportunities)).toFixed(6)),
   };
 }
 
@@ -289,6 +344,10 @@ function retrieveQuranCandidatesWithDiagnostics(index: QuranWideLexicalIndex, de
         const end = Math.max(start, Math.min(bounds.end, requestedEnd));
         const candidate = candidateFromPositions(index, start, end, score / Math.max(1, locationEvidence.length));
         if (!candidate) continue;
+        const lexicalEvidence = lexicalEvidenceForCandidate(index, candidate, locationEvidence);
+        candidate.retrievalScore = lexicalEvidence.score;
+        candidate.lexicalUniqueness = lexicalEvidence.uniqueness;
+        candidate.lexicalCoverage = lexicalEvidence.coverage;
         const key = `${start}:${end}`;
         if (!candidates.has(key) || candidates.get(key)!.retrievalScore < candidate.retrievalScore) candidates.set(key, candidate);
       }
@@ -374,6 +433,7 @@ export function rerankQuranCandidates(index: QuranWideLexicalIndex, candidates: 
       ? "present" as const
       : "absent" as const;
     const ctcScore = selected === "present" ? optionalBasmalahPlusCanonicalScore : canonicalOnlyScore;
+    const targetCoverage = Math.min(1, sequences.canonical.length / Math.max(1, greedyTokenCapacity(logits, blankTokenId)));
     return {
       ...candidate,
       ctcScore,
@@ -384,6 +444,7 @@ export function rerankQuranCandidates(index: QuranWideLexicalIndex, candidates: 
         canonicalOnlyScore,
         optionalBasmalahPlusCanonicalScore,
       },
+      targetCoverage: Number(targetCoverage.toFixed(6)),
     };
   }).filter((candidate) => candidate.normalizedCtcScore !== null);
   scored.sort((left, right) => right.normalizedCtcScore! - left.normalizedCtcScore! || right.retrievalScore - left.retrievalScore || left.startPosition - right.startPosition);
@@ -395,6 +456,26 @@ export function rerankQuranCandidates(index: QuranWideLexicalIndex, candidates: 
     const confidence = Number(Math.max(0, Math.min(1, ((candidate.normalizedCtcScore ?? -20) + 20) / 20)).toFixed(4));
     return { ...candidate, confidence, marginFromSecond: margin };
   });
+}
+
+/** The maximum useful lexical capacity of a CTC window. This is intentionally
+ * conservative: it penalizes only targets so short that most voiced frames
+ * would otherwise be treated as blank/unexplained audio. */
+function greedyTokenCapacity(logits: CtcFrameLogits, blankTokenId: number) {
+  let previous = -1;
+  let count = 0;
+  for (let frame = 0; frame < logits.frames; frame += 1) {
+    const offset = frame * logits.vocabularySize;
+    let bestId = 0;
+    let best = Number.NEGATIVE_INFINITY;
+    for (let tokenId = 0; tokenId < logits.vocabularySize; tokenId += 1) {
+      const value = logits.values[offset + tokenId] ?? Number.NEGATIVE_INFINITY;
+      if (value > best) { best = value; bestId = tokenId; }
+    }
+    if (bestId !== previous && bestId !== blankTokenId) count += 1;
+    previous = bestId;
+  }
+  return count;
 }
 
 export function identifyQuranWindow(index: QuranWideLexicalIndex, input: IdentificationWindowInput): IdentificationWindowResult {
@@ -416,8 +497,15 @@ export function identifyQuranWindow(index: QuranWideLexicalIndex, input: Identif
   return { index: input.index, startMs: input.startMs, endMs: input.endMs, voicedMs: input.voicedMs, greedy, candidates, selectedCandidate: best, state, elapsedMs: Math.round(performance.now() - startedAt), performance: { retrievalMs, rerankingMs, candidatesReranked: Math.min(coarse.length, FASTCONFORMER_IDENTIFICATION_DEFAULTS.rerankCandidateLimit) }, crossSurahCandidatesRejected: retrieval.crossSurahCandidatesRejected };
 }
 
-function localScore(candidate: QuranPassageCandidate | null) {
-  return candidate ? (candidate.normalizedCtcScore ?? -20) + Math.min(0.25, candidate.retrievalScore * 0.04) : -2.25;
+function localScore(candidate: QuranPassageCandidate | null, windowIndex: number, windowCount: number) {
+  if (!candidate) return -2.25;
+  const shortTargetPenalty = Math.max(0, 0.42 - candidate.targetCoverage) * 1.4;
+  // High-information opening evidence receives a modest deterministic boost;
+  // it can never compensate for poor acoustics, but a later shared phrase
+  // cannot erase it by simple window majority.
+  const earlyWeight = 1 + 0.30 * (1 - windowIndex / Math.max(1, windowCount - 1));
+  const lexical = (candidate.lexicalUniqueness * 0.45 + Math.min(0.18, candidate.retrievalScore * 0.05)) * earlyWeight;
+  return (candidate.normalizedCtcScore ?? -20) + lexical - shortTargetPenalty;
 }
 
 function transitionScore(previous: QuranPassageCandidate | null, current: QuranPassageCandidate | null, previousWindow: IdentificationWindowResult, currentWindow: IdentificationWindowResult) {
@@ -436,19 +524,15 @@ function transitionScore(previous: QuranPassageCandidate | null, current: QuranP
 /** Global deterministic Viterbi chain. An explicit null state lets one bad
  * window be ignored instead of vetoing a coherent Quran progression. */
 export function solveQuranContinuity(windows: readonly IdentificationWindowResult[]): QuranContinuitySolution {
-  if (!windows.length) return { path: [], span: null, continuityScore: 0, agreeingWindows: 0, selectedSurah: null, surahConsensus: { selectedSurah: null, strongWindowCount: 0, agreeingStrongWindows: 0 } };
-  const strong = windows.flatMap((window) => window.state === "strong-candidate" && window.selectedCandidate ? [window.selectedCandidate] : []);
-  const bySurah = new Map<number, number>();
-  for (const candidate of strong) bySurah.set(candidate.start.surah, (bySurah.get(candidate.start.surah) ?? 0) + 1);
-  const [consensusSurah, consensusCount] = [...bySurah].sort((left, right) => right[1] - left[1] || left[0] - right[0])[0] ?? [null, 0];
-  // Two independently strong windows are enough to establish a single-surah
-  // shadow hypothesis. A contrary window can still be represented by null.
-  const selectedSurah = consensusSurah !== null && consensusCount >= 2 ? consensusSurah : null;
+  if (!windows.length) return { path: [], span: null, continuityScore: 0, agreeingWindows: 0, selectedSurah: null, surahConsensus: { selectedSurah: null, strongWindowCount: 0, agreeingStrongWindows: 0 }, hypotheses: [], globalMargin: null };
+  const surahs = [...new Set(windows.flatMap((window) => window.candidates.map((candidate) => candidate.start.surah)))];
+  const solveForSurah = (surah: number): QuranGlobalHypothesis | null => {
   const states = windows.map((window) => [
-    ...window.candidates.filter((candidate) => selectedSurah === null || candidate.start.surah === selectedSurah).slice(0, 5),
+    ...window.candidates.filter((candidate) => candidate.start.surah === surah).slice(0, 5),
     null,
   ]);
-  let scores = states[0]!.map(localScore);
+  if (states.every((state) => state.length === 1)) return null;
+  let scores = states[0]!.map((candidate) => localScore(candidate, 0, windows.length));
   // A skipped/no-evidence state retains the last acoustic hypothesis so the
   // next good window cannot use the skip as permission for a backward jump.
   let lastKnownCandidates = states[0]!.map((candidate) => candidate);
@@ -464,7 +548,7 @@ export function solveQuranContinuity(windows: readonly IdentificationWindowResul
         const reference = previous ?? lastKnownCandidates[previousIndex] ?? null;
         const referenceWindowIndex = previous ? index - 1 : lastKnownWindowIndexes[previousIndex]!;
         const referenceWindow = referenceWindowIndex >= 0 ? windows[referenceWindowIndex]! : windows[index - 1]!;
-        const score = scores[previousIndex]! + localScore(current) + transitionScore(reference, current, referenceWindow, windows[index]!);
+        const score = scores[previousIndex]! + localScore(current, index, windows.length) + transitionScore(reference, current, referenceWindow, windows[index]!);
         if (score > currentScores[currentIndex]!) {
           currentScores[currentIndex] = score;
           backtrace[currentIndex] = previousIndex;
@@ -485,18 +569,29 @@ export function solveQuranContinuity(windows: readonly IdentificationWindowResul
     if (index > 0) cursor = backtraces[index - 1]![cursor]!;
   }
   const selected = path.flatMap((item) => item.candidate ? [item.candidate] : []);
-  const solvedSurah = selectedSurah ?? [...selected.reduce((counts, candidate) => counts.set(candidate.start.surah, (counts.get(candidate.start.surah) ?? 0) + 1), new Map<number, number>())]
-    .sort((left, right) => right[1] - left[1] || left[0] - right[0])[0]?.[0] ?? null;
-  const selectedInsideSurah = solvedSurah === null ? [] : selected.filter((candidate) => candidate.start.surah === solvedSurah && candidate.end.surah === solvedSurah);
-  const first = selectedInsideSurah.reduce<QuranPassageCandidate | null>((best, candidate) => !best || candidate.startPosition < best.startPosition ? candidate : best, null);
-  const last = selectedInsideSurah.reduce<QuranPassageCandidate | null>((best, candidate) => !best || candidate.endPosition > best.endPosition ? candidate : best, null);
+  const first = selected.reduce<QuranPassageCandidate | null>((best, candidate) => !best || candidate.startPosition < best.startPosition ? candidate : best, null);
+  const last = selected.reduce<QuranPassageCandidate | null>((best, candidate) => !best || candidate.endPosition > best.endPosition ? candidate : best, null);
+  const voicedTotal = windows.reduce((sum, window) => sum + window.voicedMs, 0);
+  const explained = path.reduce((sum, entry) => sum + (entry.candidate ? windows.find((window) => window.index === entry.windowIndex)?.voicedMs ?? 0 : 0), 0);
+  const acousticScore = selected.length ? selected.reduce((sum, candidate) => sum + (candidate.normalizedCtcScore ?? -20), 0) / selected.length : Number.NEGATIVE_INFINITY;
+  const uniqueness = selected.length ? selected.reduce((sum, candidate) => sum + candidate.lexicalUniqueness, 0) / selected.length : 0;
+  const finalScore = scores.reduce((best, score) => Math.max(best, score), Number.NEGATIVE_INFINITY);
+  return { surah, span: first && last ? { start: first.start, end: last.end } : null, path, acousticScore: Number(acousticScore.toFixed(6)), lexicalUniqueness: Number(uniqueness.toFixed(6)), continuityScore: Number(finalScore.toFixed(4)), voicedCoverage: Number((explained / Math.max(1, voicedTotal)).toFixed(4)), localSharedPhraseScore: Number((1 - uniqueness).toFixed(6)), finalScore: Number(finalScore.toFixed(4)), agreeingWindows: selected.length };
+  };
+  const hypotheses = surahs.map(solveForSurah).filter((value): value is QuranGlobalHypothesis => value !== null)
+    .sort((left, right) => right.finalScore - left.finalScore || right.voicedCoverage - left.voicedCoverage || left.surah - right.surah);
+  const winner = hypotheses[0] ?? null;
+  const runnerUp = hypotheses[1] ?? null;
+  const strong = winner?.path.flatMap((entry) => entry.candidate ? [entry.candidate] : []) ?? [];
   return {
-    path,
-    span: first && last ? { start: first.start, end: last.end } : null,
-    continuityScore: Number(scores.reduce((best, score) => Math.max(best, score), Number.NEGATIVE_INFINITY).toFixed(4)),
-    agreeingWindows: selectedInsideSurah.length,
-    selectedSurah: solvedSurah,
-    surahConsensus: { selectedSurah: solvedSurah, strongWindowCount: strong.length, agreeingStrongWindows: solvedSurah === null ? 0 : bySurah.get(solvedSurah) ?? 0 },
+    path: winner?.path ?? [],
+    span: winner?.span ?? null,
+    continuityScore: winner?.continuityScore ?? 0,
+    agreeingWindows: winner?.agreeingWindows ?? 0,
+    selectedSurah: winner?.surah ?? null,
+    surahConsensus: { selectedSurah: winner?.surah ?? null, strongWindowCount: strong.length, agreeingStrongWindows: winner?.agreeingWindows ?? 0 },
+    hypotheses,
+    globalMargin: winner && runnerUp ? Number((winner.finalScore - runnerUp.finalScore).toFixed(6)) : null,
   };
 }
 
@@ -509,12 +604,11 @@ export function summarizeFastConformerIdentification(windows: readonly Identific
   const optionalPrelude = selectedInsideSurah.find((candidate) => candidate.optionalPrelude.selected === "present")?.optionalPrelude
     ?? selectedInsideSurah.find((candidate) => candidate.optionalPrelude.available)?.optionalPrelude
     ?? null;
-  const voicedTotal = windows.reduce((sum, window) => sum + window.voicedMs, 0);
-  // Every selected candidate explains its own voiced window; retain a direct,
-  // deterministic proportion rather than claiming calibrated probability.
-  const explained = voicedTotal ? windows.filter((window) => solution.path.find((entry) => entry.windowIndex === window.index)?.candidate).reduce((sum, window) => sum + window.voicedMs, 0) / voicedTotal : 0;
-  const margin = best?.marginFromSecond ?? null;
-  const composite = best ? Number(Math.max(0, Math.min(1, best.confidence * 0.6 + Math.min(1, solution.agreeingWindows / Math.max(1, windows.length)) * 0.25 + Math.min(1, Math.max(0, margin ?? 0) / 0.1) * 0.15)).toFixed(4)) : null;
+  const margin = solution.globalMargin;
+  // Explained means selected by one continuous Quran path, not merely that a
+  // local candidate happened to exist for every window.
+  const explained = solution.hypotheses[0]?.voicedCoverage ?? 0;
+  const composite = best ? Number(Math.max(0, Math.min(1, best.confidence * 0.5 + Math.min(1, solution.agreeingWindows / Math.max(1, windows.length)) * 0.25 + Math.min(1, Math.max(0, margin ?? 0) / 1) * 0.15 + (solution.hypotheses[0]?.lexicalUniqueness ?? 0) * 0.1)).toFixed(4)) : null;
   return {
     status: solution.span ? "complete" : "unavailable",
     reason: solution.span ? undefined : "No FastConformer Quran-wide window produced usable CTC evidence.",
@@ -529,6 +623,7 @@ export function summarizeFastConformerIdentification(windows: readonly Identific
     normalizedCtcScore: best?.normalizedCtcScore ?? null,
     margin,
     continuityScore: solution.continuityScore,
+    globalHypotheses: solution.hypotheses,
     confidence: { composite, normalizedBestCtcScore: best?.normalizedCtcScore ?? null, bestVsSecondMargin: margin, agreeingWindows: solution.agreeingWindows, voicedAudioExplained: Number(explained.toFixed(4)) },
     performance: { inferenceMs, retrievalMs: windows.reduce((sum, window) => sum + window.performance.retrievalMs, 0), rerankingMs: windows.reduce((sum, window) => sum + window.performance.rerankingMs, 0), candidatesReranked: windows.reduce((sum, window) => sum + window.performance.candidatesReranked, 0), totalMs: Math.round(performance.now() - startedAt) },
     CROSS_SURAH_CANDIDATES_REJECTED: windows.reduce((sum, window) => sum + window.crossSurahCandidatesRejected, 0),
