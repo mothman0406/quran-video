@@ -5,6 +5,9 @@ import { getVerse } from "../quran/local.ts";
 import { quranDisplayText } from "../quran/content.ts";
 import type { Project, ProjectAsset } from "../schemas/project.ts";
 import { platformCaptionCollisions, rectanglesIntersect, type CaptionCanvasBounds, type SocialPlatformId } from "../editor/social-platform-guides.ts";
+import { validateExportConfiguration } from "./validation.ts";
+import type { LocalExportConfiguration } from "./types.ts";
+import type { ExportQuality } from "./quality.ts";
 
 export type ExportPreflightSeverity = "pass" | "warning" | "blocking";
 export type ExportPreflightStatus = "ready" | "warnings" | "blocked";
@@ -37,6 +40,9 @@ export type ExportPreflightRuntimeContext = {
   exporterSupport?: { supported: boolean; reason: string };
   outputProfileAvailable?: boolean | null;
   playbackRateExportSupported?: boolean;
+  /** The immutable target that the renderer will receive for this export. */
+  exportConfiguration?: LocalExportConfiguration;
+  exportQuality?: ExportQuality;
 };
 
 const LARGE_GAP_MS = 3_000;
@@ -212,6 +218,12 @@ export function runExportPreflight(project: Project, runtime: ExportPreflightRun
     addBlock(checks, "invalid-media-trim", "media", "Media trim is invalid", "The export trim must be inside a source with a positive duration.");
   }
   if (!isPlaybackRate(project.playbackRate)) addBlock(checks, "invalid-playback-rate", "timing", "Playback speed is invalid", "Choose a supported playback speed before export.");
+
+  if (runtime.exportConfiguration) {
+    for (const message of validateExportConfiguration(runtime.exportConfiguration, runtime.exportQuality)) {
+      addBlock(checks, message === "The selected project format is invalid." ? "invalid-project-format" : "invalid-export-configuration", "runtime", "This project format can't be exported", message);
+    }
+  }
 
   if (project.typography.translationVisible) {
     const translationSegments = project.captionSegments.filter((segment) => segment.contentKind === "ayah");

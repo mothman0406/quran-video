@@ -131,7 +131,7 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
   support: offlineWebCodecsSupport,
   async render(request): Promise<LocalExportResult> {
     const quality = exportQualityPreset(request.quality ?? "standard");
-    assertValidLocalExportInputs(request.source, request);
+    assertValidLocalExportInputs(request.source, request, request.quality);
     const support = offlineWebCodecsSupport();
     if (!support.supported) throw new Error(support.reason);
     ensureNotAborted(request.signal);

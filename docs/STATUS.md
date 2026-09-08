@@ -1,11 +1,12 @@
 # Status
 
-## Current milestone: Quran-aware export preflight
+## Current milestone: Export preflight UX and unified validation
 
 Complete:
 
-- Added one deterministic, browser-local `runExportPreflight(project, runtimeContext)` engine. It is read-only and separates persisted Quran/project validation from host-provided source, browser, measured-caption, and exporter facts; it makes no recognition, timing, translation, geometry, or history mutation and has $0 API cost.
-- Export now opens into preflight first. Ready projects show a concise confirmation, non-critical warnings allow **Export anyway**, and blocking findings remove the export action. Recheck refreshes local runtime inspection without adding Undo/Redo history; render progress remains separate once an export begins.
+- Added one deterministic, browser-local `runExportPreflight(project, runtimeContext)` engine. It is read-only and separates persisted Quran/project validation from host-provided source, browser, measured-caption, exporter facts, and the immutable render configuration; it makes no recognition, timing, translation, geometry, or history mutation and has $0 API cost.
+- Export silently preflights healthy projects and begins rendering immediately. Only warnings and blockers open the exception-focused preflight panel; warnings allow **Export anyway**, blockers do not. Unexpected renderer failures use a separate error state.
+- Renderer and preflight now share export configuration validation. This fixes the Free-plan 720×1280 / 1280×720 / 720×720 targets being incorrectly rejected by the old unscaled-canvas validator.
 - Blocking Quran safety checks cover an unresolved canonical passage, invalid verse keys/ranges, duplicate or incomplete automatic ownership, non-resolvable rendered Quran text, invalid basmalah/ornament state, invalid caption intervals, and malformed canonical word timings. Existing manual passage correction remains valid and no confidence is invented.
 - Translation review metadata is surfaced only for visible `needs-review` fragments; manual translation remains valid. The preflight also validates active source availability/relink status, media metadata/trim, supported playback rate, browser WebCodecs/output capability, and playback-rate export capability. Audio-only media is accepted.
 - Measured caption bounds can warn about canvas clipping, Arabic/translation overlap, and the currently selected social-platform safe zone only. Review selects the caption and opens Subtitles; safe-zone fixes reuse the existing move action; source relinking remains the existing Project Assets workflow.

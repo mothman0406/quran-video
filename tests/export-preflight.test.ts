@@ -5,6 +5,7 @@ import { DEFAULT_PROJECT_FORMAT } from "../src/lib/editor/formats.ts";
 import { getVerse } from "../src/lib/quran/local.ts";
 import { quranDisplayText } from "../src/lib/quran/content.ts";
 import { runExportPreflight, type ExportPreflightRuntimeContext } from "../src/lib/export/preflight.ts";
+import { createLocalExportConfiguration } from "../src/lib/export/config.ts";
 import type { Project } from "../src/lib/schemas/project.ts";
 
 const verse = getVerse("93:1")!;
@@ -63,6 +64,27 @@ test("valid Quran project is ready without mutating project state", () => {
   const before = JSON.stringify(value);
   assert.deepEqual(runExportPreflight(value, runtime), { status: "ready", checks: [] });
   assert.equal(JSON.stringify(value), before);
+});
+
+test("preflight and renderer share accepted export configuration rules", () => {
+  const value = project();
+  const configuration = createLocalExportConfiguration({
+    format: value.format,
+    segments: value.captionSegments as CaptionSegment[],
+    typography: value.typography,
+    captionBackground: value.captionBackground,
+    positioning: value.positioning,
+    transitionSettings: value.transitionSettings,
+    showVerseNumber: value.showVerseNumber,
+    mediaTrim: value.mediaTrim,
+    playbackRate: value.playbackRate,
+  });
+  assert.equal(configuration.format.width, 720, "Free exports scale the 9:16 canvas to 720p");
+  assert.equal(runExportPreflight(value, { ...runtime, exportConfiguration: configuration, exportQuality: "standard" }).status, "ready");
+  const invalid = { ...configuration, format: { ...configuration.format, width: 1 } };
+  const result = runExportPreflight(value, { ...runtime, exportConfiguration: invalid });
+  assert.equal(result.status, "blocked");
+  assert.ok(result.checks.some((check) => check.id === "invalid-project-format"));
 });
 
 test("unresolved passage, invalid verse ownership, caption timing, and word timing block export", () => {

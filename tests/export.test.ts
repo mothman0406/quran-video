@@ -9,7 +9,7 @@ import { containPlacement, durationMatches, frameTimeline, onceCleanup, resolveE
 import { DEFAULT_EXPORT_QUALITY, EXPORT_QUALITY_PRESETS, exportQualityPreset } from "../src/lib/export/quality.ts";
 import { generateExportFileName } from "../src/lib/export/filename.ts";
 import { ExportCoordinator } from "../src/lib/export/lifecycle.ts";
-import { validateLocalExportInputs } from "../src/lib/export/validation.ts";
+import { validateExportProjectFormat, validateLocalExportInputs } from "../src/lib/export/validation.ts";
 import { exportOutputDurationMs, exportOutputTimeToSourceTime, projectDurationMs } from "../src/lib/editor/media.ts";
 import { applyPlaybackRate } from "../src/lib/editor/playback-rate.ts";
 
@@ -140,6 +140,19 @@ test("duplicate export prevention and cancellation cleanup are explicit", () => 
 test("validation reports missing source, captions, and invalid format", () => {
   const errors = validateLocalExportInputs(null, config({ segments: [], format: { preset: "vertical", width: 1, height: 1 } }));
   assert.equal(errors.length, 3);
+});
+
+test("renderer validation accepts every current entitlement-scaled project format", () => {
+  for (const format of [
+    { preset: "vertical" as const, width: 720, height: 1280 },
+    { preset: "vertical" as const, width: 1080, height: 1920 },
+    { preset: "landscape" as const, width: 1280, height: 720 },
+    { preset: "landscape" as const, width: 1920, height: 1080 },
+    { preset: "square" as const, width: 720, height: 720 },
+    { preset: "square" as const, width: 1080, height: 1080 },
+  ]) assert.equal(validateExportProjectFormat(format), null);
+  assert.equal(validateExportProjectFormat({ preset: "vertical", width: 1, height: 1 }), "The selected project format is invalid.");
+  for (const quality of ["draft", "standard", "high"] as const) assert.equal(validateLocalExportInputs({ size: 1, type: "video/mp4" } as File, config(), quality).length, 0);
 });
 
 test("all supported aspect ratios retain their output dimensions", () => {

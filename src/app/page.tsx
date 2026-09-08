@@ -343,6 +343,7 @@ export default function Home() {
   const mediaTrimRef = useRef(mediaTrim);
   const waveformGeneration = useRef(0);
   const exportAbort = useRef<AbortController | null>(null);
+  const exportStarting = useRef(false);
   const youtubeImportAbort = useRef<AbortController | null>(null);
   const youtubeImportSession = useRef<string | null>(null);
   const assetFiles = useRef(new Map<string, { file: File; source: MediaSource }>());
@@ -2053,6 +2054,18 @@ export default function Home() {
     setSelectedSegmentId(null);
   }
   async function checkExportPreflight() {
+    const configuration = snapshotLocalExportConfiguration({
+      format: projectFormat,
+      segments,
+      typography,
+      captionBackground,
+      positioning,
+      transitionSettings,
+      showVerseNumber,
+      mediaTrim,
+      playbackRate,
+      plan,
+    });
     const capability = offlineWebCodecsSupport();
     let outputProfileAvailable: boolean | null = null;
     if (videoFile && capability.supported) {
@@ -2076,6 +2089,8 @@ export default function Home() {
         exporterSupport: capability,
         outputProfileAvailable,
         playbackRateExportSupported: typeof AudioBuffer !== "undefined",
+        exportConfiguration: configuration,
+        exportQuality,
       },
     );
     setExportPreflight(result);
@@ -2104,13 +2119,15 @@ export default function Home() {
       setErrorMessage("Relink the active source in Project assets before exporting.");
     }
   }
-  async function exportVideo() {
-    if (!exportPreflight || exportPreflight.status === "blocked") return;
+  async function exportVideo(preflight = exportPreflight) {
+    if (!preflight || preflight.status === "blocked") return;
     if (!videoFile || exportAbort.current || !exportCoordinator.current.start())
       return;
     const capability = offlineWebCodecsSupport();
     if (!capability.supported) {
       setExportError(capability.reason);
+      setExportState("error");
+      setExportOpen(true);
       exportCoordinator.current.finish();
       return;
     }
@@ -2126,9 +2143,11 @@ export default function Home() {
       playbackRate,
       plan,
     });
-    const validationErrors = validateLocalExportInputs(videoFile, snapshot);
+    const validationErrors = validateLocalExportInputs(videoFile, snapshot, exportQuality);
     if (validationErrors.length) {
       setExportError(validationErrors[0]);
+      setExportState("error");
+      setExportOpen(true);
       exportCoordinator.current.finish();
       return;
     }
@@ -2176,10 +2195,28 @@ export default function Home() {
             : "Local export failed. Your project was kept.",
         );
       setExportState("error");
+      setExportOpen(true);
     } finally {
       exportAbort.current = null;
       setExportActive(false);
       exportCoordinator.current.finish();
+    }
+  }
+  async function startExport() {
+    if (exportStarting.current || exportAbort.current || exportActive) return;
+    exportStarting.current = true;
+    setExportState({ phase: "preparing", fraction: 0, elapsedSeconds: 0 });
+    try {
+      const preflight = await checkExportPreflight();
+      if (preflight.status === "ready") {
+        setExportOpen(false);
+        await exportVideo(preflight);
+      } else {
+        setExportState(null);
+        setExportOpen(true);
+      }
+    } finally {
+      exportStarting.current = false;
     }
   }
   function cancelExport() {
@@ -2323,7 +2360,7 @@ export default function Home() {
         onPlanChange={setSubscriptionPlan}
         onDiscard={savedProject ? () => void openProject(savedProject) : newProject}
         onNewProject={newProject}
-        onExportOpen={() => { setExportOpen(true); void checkExportPreflight(); }}
+        onExportOpen={() => { void startExport(); }}
         onExport={() => void exportVideo()}
         onRecheckExport={() => { void checkExportPreflight(); }}
         onExportPreflightAction={handleExportPreflightAction}
