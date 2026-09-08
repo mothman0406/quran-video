@@ -79,7 +79,7 @@ test("preflight and renderer share accepted export configuration rules", () => {
     mediaTrim: value.mediaTrim,
     playbackRate: value.playbackRate,
   });
-  assert.equal(configuration.format.width, 720, "Free exports scale the 9:16 canvas to 720p");
+  assert.equal(configuration.format.width, 1080, "Standard is the default 9:16 export");
   assert.equal(runExportPreflight(value, { ...runtime, exportConfiguration: configuration, exportQuality: "standard" }).status, "ready");
   const invalid = { ...configuration, format: { ...configuration.format, width: 1 } };
   const result = runExportPreflight(value, { ...runtime, exportConfiguration: invalid });

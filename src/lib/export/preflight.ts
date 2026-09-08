@@ -220,7 +220,7 @@ export function runExportPreflight(project: Project, runtime: ExportPreflightRun
   if (!isPlaybackRate(project.playbackRate)) addBlock(checks, "invalid-playback-rate", "timing", "Playback speed is invalid", "Choose a supported playback speed before export.");
 
   if (runtime.exportConfiguration) {
-    for (const message of validateExportConfiguration(runtime.exportConfiguration, runtime.exportQuality)) {
+    for (const message of validateExportConfiguration(runtime.exportConfiguration)) {
       addBlock(checks, message === "The selected project format is invalid." ? "invalid-project-format" : "invalid-export-configuration", "runtime", "This project format can't be exported", message);
     }
   }

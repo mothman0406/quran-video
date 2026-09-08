@@ -27,6 +27,7 @@ export type LocalExportDiagnostics = {
 
 export type LocalExportConfiguration = {
   format: ProjectFormat;
+  quality: ExportQuality;
   segments: readonly CaptionSegment[];
   typography: Typography;
   captionBackground: CaptionBackground;
@@ -42,12 +43,22 @@ export type LocalExportConfiguration = {
 
 export type LocalExportRequest = LocalExportConfiguration & {
   source: File;
-  quality?: ExportQuality;
   signal?: AbortSignal;
   onProgress?: (progress: { phase: ExportPhase; fraction: number; elapsedSeconds: number; estimatedRemainingSeconds?: number }) => void;
 };
 
 export type LocalExportResult = { blob: Blob; fileName: string; mimeType: string; durationSeconds: number; fileSizeBytes: number; playbackRate: PlaybackRate; outputDurationSeconds: number; diagnostics: LocalExportDiagnostics };
+
+/** Browser-owned rendered bytes retained after a local export completes. */
+export type CompletedExport = LocalExportResult & {
+  objectUrl: string;
+  width: number;
+  height: number;
+  durationMs: number;
+  quality: ExportQuality;
+  completedAt: string;
+  projectFingerprint: string;
+};
 
 export type LocalExportSupport = { supported: boolean; path: string; reason: string; mimeType?: string };
 

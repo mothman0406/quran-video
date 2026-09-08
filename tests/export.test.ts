@@ -6,7 +6,7 @@ import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, SAFE_AREA_OVERLAY_METADATA, me
 import { audioOutputIsValid, selectOutputProfile, sourceAudioRequiresOutput } from "../src/lib/export/output.ts";
 import { DEFAULT_LOCAL_RENDERER_ID } from "../src/lib/export/offline-webcodecs.ts";
 import { containPlacement, durationMatches, frameTimeline, onceCleanup, resolveExportFrameRate } from "../src/lib/export/timeline.ts";
-import { DEFAULT_EXPORT_QUALITY, EXPORT_QUALITY_PRESETS, exportQualityPreset } from "../src/lib/export/quality.ts";
+import { DEFAULT_EXPORT_QUALITY, EXPORT_QUALITY_PRESETS, exportFormatForQuality, exportQualityPreset } from "../src/lib/export/quality.ts";
 import { generateExportFileName } from "../src/lib/export/filename.ts";
 import { ExportCoordinator } from "../src/lib/export/lifecycle.ts";
 import { validateExportProjectFormat, validateLocalExportInputs } from "../src/lib/export/validation.ts";
@@ -19,16 +19,17 @@ function config(overrides = {}) { return createLocalExportConfiguration({ format
 
 test("export mapping keeps project render state and excludes editor-only safe areas", () => {
   const value = config();
-  assert.deepEqual(value.format, { preset: "vertical", width: 720, height: 1280 });
+  assert.deepEqual(value.format, { preset: "vertical", width: 1080, height: 1920 });
   assert.equal("safeAreaGuides" in value, false);
-  assert.equal(value.watermarkRequired, true);
+  assert.equal(value.watermarkRequired, false);
   assert.deepEqual(SAFE_AREA_OVERLAY_METADATA, { editorOnly: true, exportable: false });
 });
 
-test("export entitlements cap Free at 720p and keep Creator at 1080p without watermark", () => {
-  assert.deepEqual(config({ plan: "Creator" }).format, { preset: "vertical", width: 1080, height: 1920 });
-  assert.equal(config({ plan: "Creator" }).watermarkRequired, false);
-  assert.equal(config({ plan: "Pro" }).watermarkRequired, false);
+test("quality, rather than commercial entitlements, controls dimensions and watermarking", () => {
+  assert.deepEqual(config({ quality: "basic" }).format, { preset: "vertical", width: 720, height: 1280 });
+  assert.equal(config({ quality: "basic" }).watermarkRequired, true);
+  assert.deepEqual(config({ quality: "ultra" }).format, { preset: "vertical", width: 2160, height: 3840 });
+  assert.equal(config({ quality: "ultra" }).watermarkRequired, false);
 });
 
 test("export mapping preserves manual timings, translation visibility, and verse-number presentation", () => {
@@ -109,14 +110,16 @@ test("output selection requires audio whenever the source has audio", () => {
 
 test("quality presets map to deterministic bitrate tiers and Standard is the default", () => {
   assert.equal(DEFAULT_EXPORT_QUALITY, "standard");
-  assert.ok(exportQualityPreset("draft").videoBitrate < exportQualityPreset("standard").videoBitrate);
-  assert.ok(exportQualityPreset("high").videoBitrate > exportQualityPreset("standard").videoBitrate);
-  assert.deepEqual(Object.keys(EXPORT_QUALITY_PRESETS), ["draft", "standard", "high"]);
+  assert.ok(exportQualityPreset("basic").videoBitrate < exportQualityPreset("standard").videoBitrate);
+  assert.ok(exportQualityPreset("ultra").videoBitrate > exportQualityPreset("standard").videoBitrate);
+  assert.deepEqual(Object.keys(EXPORT_QUALITY_PRESETS), ["basic", "standard", "ultra"]);
+  assert.deepEqual(exportFormatForQuality({ preset: "landscape" }, "basic"), { preset: "landscape", width: 1280, height: 720 });
+  assert.deepEqual(exportFormatForQuality({ preset: "square" }, "ultra"), { preset: "square", width: 2160, height: 2160 });
 });
 
 test("export filenames are safe and use the Quran passage range", () => {
-  assert.equal(generateExportFileName("my clip!!.mov", [{ verseKeys: ["93:1"] }, { verseKeys: ["93:2", "93:5"] }], { extension: ".mp4" }), "quran-video-93-1-93-5.mp4");
-  assert.equal(generateExportFileName("unsafe / title.mov", [], { extension: ".webm" }), "unsafe-title.webm");
+  assert.equal(generateExportFileName([{ verseKeys: ["18:57"] }, { verseKeys: ["18:58"] }], { extension: ".mp4" }, "standard"), "al-kahf-57-58-1080p.mp4");
+  assert.equal(generateExportFileName([], { extension: ".webm" }, "basic"), "quran-video.webm");
 });
 
 test("export snapshots are independent from subsequent editor mutations", () => {
@@ -138,21 +141,25 @@ test("duplicate export prevention and cancellation cleanup are explicit", () => 
 });
 
 test("validation reports missing source, captions, and invalid format", () => {
-  const errors = validateLocalExportInputs(null, config({ segments: [], format: { preset: "vertical", width: 1, height: 1 } }));
+  const valid = config({ segments: [] });
+  const errors = validateLocalExportInputs(null, { ...valid, format: { ...valid.format, width: 1 } });
   assert.equal(errors.length, 3);
 });
 
-test("renderer validation accepts every current entitlement-scaled project format", () => {
+test("renderer validation accepts every quality-ladder project format", () => {
   for (const format of [
     { preset: "vertical" as const, width: 720, height: 1280 },
     { preset: "vertical" as const, width: 1080, height: 1920 },
+    { preset: "vertical" as const, width: 2160, height: 3840 },
     { preset: "landscape" as const, width: 1280, height: 720 },
     { preset: "landscape" as const, width: 1920, height: 1080 },
+    { preset: "landscape" as const, width: 3840, height: 2160 },
     { preset: "square" as const, width: 720, height: 720 },
     { preset: "square" as const, width: 1080, height: 1080 },
+    { preset: "square" as const, width: 2160, height: 2160 },
   ]) assert.equal(validateExportProjectFormat(format), null);
   assert.equal(validateExportProjectFormat({ preset: "vertical", width: 1, height: 1 }), "The selected project format is invalid.");
-  for (const quality of ["draft", "standard", "high"] as const) assert.equal(validateLocalExportInputs({ size: 1, type: "video/mp4" } as File, config(), quality).length, 0);
+  for (const quality of ["basic", "standard", "ultra"] as const) assert.equal(validateLocalExportInputs({ size: 1, type: "video/mp4" } as File, config({ quality })).length, 0);
 });
 
 test("all supported aspect ratios retain their output dimensions", () => {

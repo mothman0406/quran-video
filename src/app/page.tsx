@@ -96,6 +96,7 @@ import {
 } from "@/lib/export/offline-webcodecs";
 import {
   DEFAULT_EXPORT_QUALITY,
+  exportFormatForQuality,
   type ExportQuality,
 } from "@/lib/export/quality";
 import { ExportCoordinator } from "@/lib/export/lifecycle";
@@ -103,8 +104,8 @@ import { validateLocalExportInputs } from "@/lib/export/validation";
 import { runExportPreflight, type ExportPreflightAction, type ExportPreflightResult } from "@/lib/export/preflight";
 import type {
   ExportPhase,
+  CompletedExport,
   LocalExportDiagnostics,
-  LocalExportResult,
 } from "@/lib/export/types";
 import type { OutputProfile } from "@/lib/export/output";
 import {
@@ -117,7 +118,7 @@ import {
 } from "@/lib/cloud-sync";
 import type { Session } from "@supabase/supabase-js";
 import { recordAuthenticatedUsage } from "@/lib/usage/client";
-import { getCloudProjectLimit, getCustomStyleLimit, getPlanEntitlements, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
+import { getCloudProjectLimit, getCustomStyleLimit, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
 import { clampMediaTrim, clampTimelineViewport, createMediaTrim, createTimelineViewport, mediaKindForFile, mediaSourceFromFile, panTimelineViewport, pinchTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, snapCaptionBoundaryToPlayhead, timelineContentPosition, viewportPositionToTime, zoomTimelineViewport, type MediaSource, type MediaTrim, type TimelineViewport } from "@/lib/editor/media";
 import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
@@ -292,7 +293,7 @@ export default function Home() {
     sourceHasAudio: boolean;
     profile: OutputProfile | null;
   } | null>(null);
-  const [exportResult, setExportResult] = useState<LocalExportResult | null>(
+  const [exportResult, setExportResult] = useState<CompletedExport | null>(
     null,
   );
   const [exportActive, setExportActive] = useState(false);
@@ -311,7 +312,6 @@ export default function Home() {
     useState<SavedProject | null>(null);
   const [dirty, setDirty] = useState(false);
   const plan = resolveClientPlan(Boolean(session), subscriptionPlan);
-  const entitlements = getPlanEntitlements(plan);
   const repository = useRef<ProjectRepository | null>(null);
   const savedSignature = useRef<string | null>(null);
   const cloudBaselineUpdatedAt = useRef<string | null>(null);
@@ -343,6 +343,7 @@ export default function Home() {
   const mediaTrimRef = useRef(mediaTrim);
   const waveformGeneration = useRef(0);
   const exportAbort = useRef<AbortController | null>(null);
+  const completedExport = useRef<CompletedExport | null>(null);
   const exportStarting = useRef(false);
   const youtubeImportAbort = useRef<AbortController | null>(null);
   const youtubeImportSession = useRef<string | null>(null);
@@ -363,6 +364,18 @@ export default function Home() {
     playbackRate,
     showVerseNumber,
   });
+  function clearCompletedExport() {
+    const previous = completedExport.current;
+    if (previous) URL.revokeObjectURL(previous.objectUrl);
+    completedExport.current = null;
+    setExportResult(null);
+  }
+  function replaceCompletedExport(next: CompletedExport) {
+    const previous = completedExport.current;
+    if (previous) URL.revokeObjectURL(previous.objectUrl);
+    completedExport.current = next;
+    setExportResult(next);
+  }
   projectHistoryStateRef.current = {
     segments,
     mediaTrim,
@@ -531,6 +544,8 @@ export default function Home() {
   useEffect(() => () => {
     exportAbort.current?.abort();
     youtubeImportAbort.current?.abort();
+    const previous = completedExport.current;
+    if (previous) URL.revokeObjectURL(previous.objectUrl);
     for (const sessionId of assetYouTubeSessions.current.values()) {
       void fetch(`/api/local-youtube-import?sessionId=${encodeURIComponent(sessionId)}`, { method: "DELETE" });
     }
@@ -560,6 +575,20 @@ export default function Home() {
     typography,
     transitionSettings,
     showVerseNumber,
+  });
+  const currentExportFingerprint = JSON.stringify({
+    source: videoFile ? { name: videoFile.name, size: videoFile.size, lastModified: videoFile.lastModified } : null,
+    activeMediaAssetId,
+    mediaTrim,
+    projectFormat,
+    segments,
+    typography,
+    captionBackground,
+    positioning,
+    transitionSettings,
+    showVerseNumber,
+    playbackRate,
+    exportQuality,
   });
   useEffect(() => {
     setDirty(
@@ -640,6 +669,7 @@ export default function Home() {
   }
   function loadSelectedSource(next: File, nextSource: MediaSource, options?: { preserveCaptions?: boolean }) {
     exportAbort.current?.abort();
+    clearCompletedExport();
     generation.current += 1;
     captionProgress.current.reset();
     const waveformJob = ++waveformGeneration.current;
@@ -671,6 +701,7 @@ export default function Home() {
   }
   function resetEditorState() {
     exportAbort.current?.abort();
+    clearCompletedExport();
     setProjectFormatExplicitlyChosen(false);
     generation.current += 1;
     captionProgress.current.reset();
@@ -1456,6 +1487,7 @@ export default function Home() {
   }
   function clearVideo() {
     exportAbort.current?.abort();
+    clearCompletedExport();
     generation.current += 1;
     captionProgress.current.reset();
     waveformGeneration.current += 1;
@@ -1953,6 +1985,7 @@ export default function Home() {
       : segment) }));
   }
   const selectedFormatDefinition = projectFormatDefinition(projectFormat);
+  const selectedExportFormat = exportFormatForQuality(projectFormat, exportQuality);
   const globalCaptionStyle = captionStyleFromState(typography, positioning, captionBackground, transitionSettings);
   const selectedLayer: CaptionLayer = selectedObject ?? "arabic";
   const inspectorStyle = selectedSegment
@@ -2064,13 +2097,13 @@ export default function Home() {
       showVerseNumber,
       mediaTrim,
       playbackRate,
-      plan,
+      quality: exportQuality,
     });
     const capability = offlineWebCodecsSupport();
     let outputProfileAvailable: boolean | null = null;
     if (videoFile && capability.supported) {
       try {
-        const nextOutputPlan = await inspectLocalExport(videoFile, projectFormat, exportQuality);
+        const nextOutputPlan = await inspectLocalExport(videoFile, configuration.format, exportQuality);
         setOutputPlan(nextOutputPlan);
         outputProfileAvailable = Boolean(nextOutputPlan.profile);
       } catch {
@@ -2141,9 +2174,9 @@ export default function Home() {
       showVerseNumber,
       mediaTrim,
       playbackRate,
-      plan,
+      quality: exportQuality,
     });
-    const validationErrors = validateLocalExportInputs(videoFile, snapshot, exportQuality);
+    const validationErrors = validateLocalExportInputs(videoFile, snapshot);
     if (validationErrors.length) {
       setExportError(validationErrors[0]);
       setExportState("error");
@@ -2155,8 +2188,21 @@ export default function Home() {
     exportAbort.current = controller;
     setExportActive(true);
     setExportError(null);
-    setExportResult(null);
     setExportState({ phase: "preparing", fraction: 0, elapsedSeconds: 0 });
+    const projectFingerprint = JSON.stringify({
+      source: { name: videoFile.name, size: videoFile.size, lastModified: videoFile.lastModified },
+      activeMediaAssetId,
+      mediaTrim,
+      projectFormat,
+      segments,
+      typography,
+      captionBackground,
+      positioning,
+      transitionSettings,
+      showVerseNumber,
+      playbackRate,
+      exportQuality,
+    });
     try {
       const plan = await inspectLocalExport(
         videoFile,
@@ -2175,12 +2221,20 @@ export default function Home() {
       const output = await offlineWebCodecsRenderer.render({
         source: videoFile,
         ...snapshot,
-        quality: exportQuality,
         signal: controller.signal,
         onProgress: setExportState,
       });
       void recordAuthenticatedUsage("export_completed", crypto.randomUUID()).catch(() => undefined);
-      setExportResult(output);
+      replaceCompletedExport({
+        ...output,
+        objectUrl: URL.createObjectURL(output.blob),
+        width: snapshot.format.width,
+        height: snapshot.format.height,
+        durationMs: Math.round(output.outputDurationSeconds * 1_000),
+        quality: snapshot.quality,
+        completedAt: new Date().toISOString(),
+        projectFingerprint,
+      });
       setExportDiagnostics(output.diagnostics);
       setExportState("complete");
     } catch (caught) {
@@ -2224,12 +2278,13 @@ export default function Home() {
   }
   function downloadExport() {
     if (!exportResult) return;
-    const url = URL.createObjectURL(exportResult.blob);
     const link = document.createElement("a");
-    link.href = url;
+    link.href = exportResult.objectUrl;
     link.download = exportResult.fileName;
+    link.style.display = "none";
+    document.body.appendChild(link);
     link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    link.remove();
   }
 
   return (
@@ -2283,8 +2338,10 @@ export default function Home() {
         exportOpen={exportOpen}
         exportPreflight={exportPreflight}
         exportQuality={exportQuality}
+        exportFormat={selectedExportFormat}
         outputPlan={outputPlan}
         exportResult={exportResult}
+        exportIsStale={Boolean(exportResult && exportResult.projectFingerprint !== currentExportFingerprint)}
         exportState={exportState}
         exportError={exportError}
         exportDiagnostics={exportDiagnostics}
@@ -2301,7 +2358,6 @@ export default function Home() {
         youtubeMode={youtubeMode}
         youtubeImportStatus={youtubeImportStatus}
         youtubeImportError={youtubeImportError}
-        entitlements={entitlements}
         selectedFormatDefinition={selectedFormatDefinition}
         onProjectNameChange={setProjectName}
         onVideoSelect={selectVideo}

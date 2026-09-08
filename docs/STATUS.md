@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Completed-export download handoff and 720p / 1080p / 4K quality ladder
+
+Complete:
+
+- Fixed the post-render handoff: the local renderer already returned the rendered Blob, but the prior download control lived only in a preflight modal that automatically closed for healthy exports. A completed export now retains that exact Blob, one browser object URL, its filename/mime/dimensions/duration/playback rate/quality/file size/completion time, and the snapshot fingerprint it represents.
+- The persistent completion card exposes **Download video** and **Export another version**, displays the real rendered output metadata, and supports repeated downloads without rerendering, preflight, or recognition. The object URL is retained until a successful replacement, source/new-project cleanup, or page cleanup; it is not revoked before the browser starts a download. Project edits preserve the existing file and mark it as older than the current project state.
+- Replaced entitlement-coupled export selection with a centralized technical quality ladder available to every user during development: Basic = 720p with the existing watermark, Standard = default 1080p without watermark, and Ultra = real 4K without watermark. Aspect-ratio targets are shared across editor UI, export snapshot, preflight, validation, capability inspection, and the WebCodecs/Mediabunny renderer: 9:16 (720×1280 / 1080×1920 / 2160×3840), 16:9 (1280×720 / 1920×1080 / 3840×2160), and square (720 / 1080 / 2160).
+- Ultra preflight now probes the actual 4K encoder configuration before rendering. The existing streaming frame/audio pipeline remains in place; it does not retain all 4K frames in memory. Future plan mapping remains documentation only: Free → Basic, Pro → Standard, Premium → Ultra.
+- Export filenames now derive from recognized Quran passage metadata when available (for example, `al-kahf-57-58-1080p.mp4`) and fall back safely to `quran-video.mp4`.
+
+Verification: `npx tsc --noEmit`, focused export tests, `npm test` (246 passing), `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the pre-existing non-fatal VAD ONNX Runtime dynamic-require warning. Real 4K browser rendering remains device-dependent and was not exercised here because this workspace has no browser automation or recognized-video fixture.
+
 ## Current milestone: Export preflight UX and unified validation
 
 Complete:

@@ -23,7 +23,7 @@ import { clampMediaTrim, exportOutputDurationMs, exportOutputTimeToSourceTime } 
 import { StreamingWsola } from "./audio-time-stretch.ts";
 import { audioOutputIsValid, selectOutputProfile } from "./output.ts";
 import { generateExportFileName } from "./filename.ts";
-import { exportQualityPreset } from "./quality.ts";
+import { DEFAULT_EXPORT_QUALITY, exportQualityPreset, type ExportQuality } from "./quality.ts";
 import { durationMatches, frameTimeline, onceCleanup, resolveExportFrameRate } from "./timeline.ts";
 import { assertValidLocalExportInputs } from "./validation.ts";
 import type { ExportPhase, LocalExportDiagnostics, LocalExportRequest, LocalExportResult, LocalExportSupport, LocalVideoRenderer } from "./types.ts";
@@ -56,11 +56,11 @@ async function capabilities(width: number, height: number, bitrate: { videoBitra
   return { canEncodeAvc, canEncodeAac, canEncodeVp9, canEncodeOpus };
 }
 
-export async function inspectLocalExport(source: File, format: LocalExportRequest["format"], quality: LocalExportRequest["quality"] = "standard") {
+export async function inspectLocalExport(source: File, format: LocalExportRequest["format"], quality: ExportQuality = DEFAULT_EXPORT_QUALITY) {
   const input = new Input({ source: new BlobSource(source), formats: ALL_FORMATS });
   try {
     const audioTrack = await input.getPrimaryAudioTrack();
-    const bitrate = exportQualityPreset(quality ?? "standard");
+    const bitrate = exportQualityPreset(quality);
     const profile = selectOutputProfile(await capabilities(format.width, format.height, bitrate), Boolean(audioTrack), bitrate);
     return { sourceHasAudio: Boolean(audioTrack), profile };
   } finally { input.dispose(); }
@@ -130,8 +130,8 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
   id: DEFAULT_LOCAL_RENDERER_ID,
   support: offlineWebCodecsSupport,
   async render(request): Promise<LocalExportResult> {
-    const quality = exportQualityPreset(request.quality ?? "standard");
-    assertValidLocalExportInputs(request.source, request, request.quality);
+    const quality = exportQualityPreset(request.quality);
+    assertValidLocalExportInputs(request.source, request);
     const support = offlineWebCodecsSupport();
     if (!support.supported) throw new Error(support.reason);
     ensureNotAborted(request.signal);
@@ -225,7 +225,7 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
           elapsedSeconds,
           effectiveRenderingFps: renderedFrameCount / Math.max(elapsedSeconds, 0.001),
         };
-        return { blob, fileName: generateExportFileName(request.source.name, request.segments, profile), mimeType: profile.mimeType, durationSeconds: outputDurationSeconds, outputDurationSeconds, playbackRate: request.playbackRate, fileSizeBytes: blob.size, diagnostics };
+        return { blob, fileName: generateExportFileName(request.segments, profile, request.quality), mimeType: profile.mimeType, durationSeconds: outputDurationSeconds, outputDurationSeconds, playbackRate: request.playbackRate, fileSizeBytes: blob.size, diagnostics };
       } finally { verification.dispose(); }
     } finally {
       request.signal?.removeEventListener("abort", abort);
