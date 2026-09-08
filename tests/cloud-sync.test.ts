@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY } from "../src/lib/editor/captions.ts";
-import { DEFAULT_PROJECT_FORMAT } from "../src/lib/editor/formats.ts";
-import { cloudProjectError, fromCloudProjectRow, hasProjectConflict, toCloudProjectPayload, type CloudProjectRow } from "../src/lib/cloud-sync.ts";
+import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, projectFormatDefinition } from "../src/lib/editor/formats.ts";
+import { CloudProjectError, cloudProjectError, fromCloudProjectRow, hasProjectConflict, hydrateCloudProjectState, serializeProjectStateForCloud, toCloudProjectPayload, type CloudProjectRow } from "../src/lib/cloud-sync.ts";
 import { cloudProjectName, FREE_CLOUD_PROJECT_LIMIT, projectMediaPath, quranProjectMetadata } from "../src/lib/cloud-projects.ts";
 import type { SavedProject } from "../src/lib/schemas/project.ts";
 
@@ -26,6 +26,28 @@ test("cloud rows restore the project schema and reject unsupported versions", ()
   const row: CloudProjectRow = { ...payload, user_id: "user-1", save_complete: true, source_media_path: null, source_media_type: null, source_media_name: null, source_media_size_bytes: null, thumbnail_path: null, thumbnail_size_bytes: null, last_export_quality: null, last_exported_at: null };
   assert.deepEqual(fromCloudProjectRow(row), saved);
   assert.throws(() => fromCloudProjectRow({ ...row, schema_version: 99 }), /schema version/);
+});
+
+test("current runtime format definitions serialize, persist, and hydrate as canonical formats", () => {
+  for (const definition of Object.values(PROJECT_FORMATS)) {
+    const runtime = project({ format: definition });
+    const serialized = serializeProjectStateForCloud(runtime);
+    assert.deepEqual(serialized.format, { preset: definition.preset, width: definition.width, height: definition.height });
+    assert.equal("label" in serialized.format, false);
+    assert.equal("aspectRatio" in serialized.format, false);
+    const payload = toCloudProjectPayload(runtime);
+    const row: CloudProjectRow = { ...payload, user_id: "user-1", save_complete: true, source_media_path: null, source_media_type: null, source_media_name: null, source_media_size_bytes: null, thumbnail_path: null, thumbnail_size_bytes: null, last_export_quality: null, last_exported_at: null };
+    const restored = fromCloudProjectRow(row);
+    assert.deepEqual(restored.format, serialized.format);
+    assert.deepEqual(projectFormatDefinition(hydrateCloudProjectState(payload.project_data).format), definition);
+  }
+});
+
+test("unknown runtime format state remains strict and is classified before database work", () => {
+  assert.throws(
+    () => toCloudProjectPayload(project({ format: { ...DEFAULT_PROJECT_FORMAT, unknown: true } as SavedProject["format"] })),
+    (error: unknown) => error instanceof CloudProjectError && error.stage === "project-state" && /validate the project state/.test(error.message),
+  );
 });
 
 test("conflict detection requires the same project identity and different timestamps", () => {

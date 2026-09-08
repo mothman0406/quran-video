@@ -101,6 +101,12 @@ test("playback rate defaults legacy projects to 1x and persists supported select
   assert.equal(loadSavedProject(serializeSavedProject(project({ playbackRate: 0.5 }))).playbackRate, 0.5);
 });
 
+test("legacy catalog-only format metadata loads locally while unknown format fields remain strict", () => {
+  const legacyRuntimeFormat = { ...DEFAULT_PROJECT_FORMAT, label: "9:16 vertical", aspectRatio: 9 / 16 };
+  assert.deepEqual(loadSavedProject({ ...project(), format: legacyRuntimeFormat } as SavedProject).format, DEFAULT_PROJECT_FORMAT);
+  assert.throws(() => loadSavedProject({ ...project(), format: { ...legacyRuntimeFormat, invalid: true } } as SavedProject), /unrecognized/i);
+});
+
 test("playback rate migration is presentation-only and never rewrites caption or word timing", () => {
   const caption = { id: "93:1#1", contentKind: "ayah" as const, verseKeys: ["93:1"], startMs: 1_000, endMs: 2_000, arabic: "وَالضُّحَى", translation: null, transliteration: null, wordStart: 0, wordEnd: 1, wordCount: 1, wordTimings: [{ canonicalWordIndex: 1, sourceWordStart: 0, sourceWordEnd: 1, startMs: 1_100, endMs: 1_900 }] };
   const slow = loadSavedProject(project({ playbackRate: 0.5, captionSegments: [caption] }));

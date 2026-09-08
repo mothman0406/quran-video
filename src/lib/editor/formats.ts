@@ -11,7 +11,13 @@ export const PROJECT_FORMATS: Record<ProjectFormatPreset, ProjectFormatDefinitio
   square: { preset: "square", width: 1080, height: 1080, label: "1:1 square", aspectRatio: 1 },
 };
 
-export const DEFAULT_PROJECT_FORMAT: ProjectFormat = { preset: "vertical", width: 1080, height: 1920 };
+/** Converts a UI format definition into the exact durable editor/project shape. */
+export function projectFormatForPreset(preset: ProjectFormatPreset): ProjectFormat {
+  const { width, height } = PROJECT_FORMATS[preset];
+  return { preset, width, height };
+}
+
+export const DEFAULT_PROJECT_FORMAT: ProjectFormat = projectFormatForPreset("vertical");
 
 export const SAFE_AREA_OVERLAY_METADATA = { editorOnly: true, exportable: false } as const;
 
@@ -41,9 +47,9 @@ export function mediabunnyVideoTransform(format: ProjectFormat) {
 export function projectFormatForSourceDimensions(width: number, height: number): ProjectFormat {
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return DEFAULT_PROJECT_FORMAT;
   const ratio = width / height;
-  if (ratio > 1.1) return PROJECT_FORMATS.landscape;
-  if (ratio < 1 / 1.1) return PROJECT_FORMATS.vertical;
-  return PROJECT_FORMATS.square;
+  if (ratio > 1.1) return projectFormatForPreset("landscape");
+  if (ratio < 1 / 1.1) return projectFormatForPreset("vertical");
+  return projectFormatForPreset("square");
 }
 
 export function projectFormatDefinition(format: ProjectFormat): ProjectFormatDefinition {

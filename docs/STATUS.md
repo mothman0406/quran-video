@@ -1,6 +1,18 @@
 # Status
 
-## Current milestone: Cloud-save schema repair and automatic Quran detection
+## Current milestone: Normalize cloud project format state
+
+Complete:
+
+- Diagnosed cloud-save validation failure as format-definition metadata leaking into runtime editor state: `projectFormatForSourceDimensions` returned a `PROJECT_FORMATS` catalog object containing `label` and `aspectRatio`, while the strict persisted schema correctly accepts only `preset`, `width`, and `height`.
+- Established the canonical durable format shape as `{ preset, width, height }`. `label` and `aspectRatio` remain derived UI catalog data, reconstructed through `projectFormatDefinition`, and are not serialized into IndexedDB or cloud project state.
+- Added an explicit cloud serialization/hydration boundary. Local and cloud persistence share the same legacy normalization: only historical `format.label` and `format.aspectRatio` are removed; any other unknown format property still fails strict validation.
+- Reclassified pre-request project-state validation failures as `project-state`, rather than incorrectly reporting them as database failures. Source-aware dimensions now return the canonical runtime format directly.
+- Preserved cloud save before detection and the c21732d automatic recognition/source-run behavior without modifying recognition, timing, export, or entitlement code.
+
+Verification: `npm test` (288 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes production invariant probes; its optional ignored local real-audio benchmark fails in this workspace and records that evidence in `docs/regression/results/20260908.md`. No recognition algorithm changed. The build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning.
+
+## Previous milestone: Cloud-save schema repair and automatic Quran detection
 
 Complete:
 

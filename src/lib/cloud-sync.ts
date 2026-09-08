@@ -20,7 +20,7 @@ export type CloudProjectRow = {
 export type CloudProjectPayload = Omit<CloudProjectRow, "user_id" | "created_at" | "updated_at" | "save_complete" | "source_media_path" | "source_media_type" | "source_media_name" | "source_media_size_bytes" | "thumbnail_path" | "thumbnail_size_bytes" | "last_export_quality" | "last_exported_at"> & { created_at: string; updated_at: string };
 export type CloudProjectRecord = { row: CloudProjectRow; project: SavedProject };
 export type CloudStorageSummary = { project_count: number; total_source_bytes: number; total_duration_ms: number };
-export type CloudSaveStage = "configuration" | "database" | "source-upload" | "thumbnail" | "finalize" | "cleanup";
+export type CloudSaveStage = "configuration" | "project-state" | "database" | "source-upload" | "thumbnail" | "finalize" | "cleanup";
 
 type SupabaseErrorLike = { code?: unknown; message?: unknown };
 
@@ -45,6 +45,8 @@ export function cloudProjectError(error: unknown, stage: CloudSaveStage): CloudP
   const missingProjectSchema = code === "42703" || code === "PGRST204" || /save_complete|column .*projects|schema cache/i.test(rawMessage);
   const message = stage === "configuration"
     ? "Cloud project database is not configured."
+    : stage === "project-state"
+      ? "Could not validate the project state for cloud saving."
     : missingProjectSchema
       ? "Cloud project database is missing the required migration. Apply 20260908000000_production_cloud_projects.sql."
       : stage === "source-upload" || stage === "thumbnail"
@@ -74,8 +76,22 @@ export function getSupabaseClient(): SupabaseClient | null {
 
 export function cloudSyncConfigured(): boolean { return getSupabaseClient() !== null; }
 
+/** Explicit cloud boundary: normalize and validate a runtime editor snapshot without mutating it. */
+export function serializeProjectStateForCloud(project: SavedProject): SavedProject {
+  try {
+    return loadSavedProject(serializeSavedProject(project));
+  } catch (error) {
+    throw cloudProjectError(error, "project-state");
+  }
+}
+
+/** Explicit cloud hydration boundary shared with local project persistence. */
+export function hydrateCloudProjectState(projectData: unknown): SavedProject {
+  return loadSavedProject(projectData);
+}
+
 export function toCloudProjectPayload(project: SavedProject): CloudProjectPayload {
-  const valid = loadSavedProject(serializeSavedProject(project));
+  const valid = serializeProjectStateForCloud(project);
   const metadata = quranProjectMetadata(valid);
   const source = valid.sourceMedia;
   return {
@@ -89,7 +105,7 @@ export function toCloudProjectPayload(project: SavedProject): CloudProjectPayloa
 
 export function fromCloudProjectRow(row: CloudProjectRow): SavedProject {
   if (row.schema_version > CLOUD_SCHEMA_VERSION || row.schema_version < 1) throw new Error(`Unsupported cloud project schema version: ${row.schema_version}`);
-  const project = loadSavedProject(row.project_data);
+  const project = hydrateCloudProjectState(row.project_data);
   if (project.id !== row.id) throw new Error("Cloud project identity does not match its metadata.");
   return { ...project, title: row.name, createdAt: row.created_at, updatedAt: row.updated_at };
 }

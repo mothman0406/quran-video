@@ -22,6 +22,17 @@ function assertMetadataOnly(value: unknown, path = "project"): void {
   else if (value && typeof value === "object") Object.entries(value).forEach(([key, item]) => assertMetadataOnly(item, `${path}.${key}`));
 }
 
+/**
+ * `label` and `aspectRatio` belong to the editor's format-definition catalog.
+ * They are recreated from `preset`, never persisted as duplicate project data.
+ * Other keys deliberately remain for the strict schema to reject.
+ */
+function normalizePersistedProjectFormat(value: unknown): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const { label: _label, aspectRatio: _aspectRatio, ...format } = value as Record<string, unknown>;
+  return format;
+}
+
 function migrateSavedProject(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const project = value as Record<string, unknown>;
@@ -72,6 +83,7 @@ function migrateSavedProject(value: unknown): unknown {
     : 0;
   return {
     ...withoutLegacySource,
+    ...("format" in project ? { format: normalizePersistedProjectFormat(project.format) } : {}),
     ...("sourceMedia" in project ? {} : { sourceMedia: sourceMedia ?? null }),
     ...("projectAssets" in project ? {} : { projectAssets: legacyAsset ? [legacyAsset] : [] }),
     ...("activeMediaAssetId" in project ? {} : { activeMediaAssetId: legacyAsset?.id ?? null }),
