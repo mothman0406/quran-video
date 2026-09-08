@@ -20,7 +20,13 @@ export type CloudProjectRow = {
 export type CloudProjectPayload = Omit<CloudProjectRow, "user_id" | "created_at" | "updated_at" | "save_complete" | "source_media_path" | "source_media_type" | "source_media_name" | "source_media_size_bytes" | "thumbnail_path" | "thumbnail_size_bytes" | "last_export_quality" | "last_exported_at"> & { created_at: string; updated_at: string };
 export type CloudProjectRecord = { row: CloudProjectRow; project: SavedProject };
 export type CloudStorageSummary = { project_count: number; total_source_bytes: number; total_duration_ms: number };
-export type CloudSaveStage = "configuration" | "project-state" | "database" | "source-upload" | "thumbnail" | "finalize" | "cleanup";
+export type CloudSaveStage = "configuration" | "project-state" | "database" | "source-upload" | "thumbnail" | "finalize" | "cleanup" | "source-restore";
+export type CloudSourceRestoreResult =
+  | { status: "ready"; file: File }
+  | { status: "no-saved-source" }
+  | { status: "missing"; code: string | null }
+  | { status: "access-denied"; code: string | null }
+  | { status: "fetch-failed"; code: string | null };
 
 type SupabaseErrorLike = { code?: unknown; message?: unknown };
 
@@ -55,6 +61,10 @@ export function cloudProjectError(error: unknown, stage: CloudSaveStage): CloudP
           : /permission|policy|not authorized|row-level/i.test(rawMessage)
             ? "Project media upload was blocked by Storage security policy."
             : "Project media could not be uploaded."
+        : stage === "cleanup"
+          ? "Your project was saved, but old media could not be cleaned up."
+        : stage === "source-restore"
+          ? "We couldn't load the saved source media. Try again."
         : /permission|policy|not authorized|row-level|42501/i.test(rawMessage)
           ? "Project creation was blocked by database security policy."
           : rawMessage || "Could not save the project to the cloud.";
@@ -146,10 +156,19 @@ export async function saveCloudProject(project: SavedProject): Promise<SavedProj
 
 /** Reserves a quota slot transactionally before the browser starts its direct upload. */
 export async function beginCloudProjectSave(project: SavedProject): Promise<CloudProjectRow> {
+  await cleanupAbandonedCloudProjectSaves();
   const payload = toCloudProjectPayload(project);
   const { data, error } = await requireClient().rpc("begin_cloud_project_save", { p_id: payload.id, p_name: payload.name, p_auto_title: payload.auto_title, p_surah_start: payload.surah_start, p_ayah_start: payload.ayah_start, p_surah_end: payload.surah_end, p_ayah_end: payload.ayah_end, p_duration_ms: payload.duration_ms, p_aspect_ratio: payload.aspect_ratio, p_project_data: payload.project_data, p_source_filename: payload.source_filename, p_source_metadata: payload.source_metadata, p_schema_version: payload.schema_version });
   if (error) throw cloudProjectError(error, "database");
   const row = rows(data)[0]; if (!row) throw new Error("Cloud save did not create a project reservation."); return row;
+}
+
+/** Reconciles expired incomplete saves through Storage API before their rows are removed. */
+export async function cleanupAbandonedCloudProjectSaves(): Promise<void> {
+  const cutoff = new Date(Date.now() - 60 * 60 * 1_000).toISOString();
+  const { data, error } = await requireClient().from("projects").select("id").eq("save_complete", false).lt("updated_at", cutoff);
+  if (error) throw cloudProjectError(error, "cleanup");
+  for (const row of (data ?? []) as Array<Pick<CloudProjectRow, "id">>) await cancelCloudProjectSave(row.id);
 }
 
 export async function completeCloudProjectSave(project: SavedProject, media: Pick<CloudProjectRow, "source_media_path" | "source_media_type" | "source_media_name" | "source_media_size_bytes" | "thumbnail_path" | "thumbnail_size_bytes">): Promise<CloudProjectRow> {
@@ -160,15 +179,78 @@ export async function completeCloudProjectSave(project: SavedProject, media: Pic
 }
 
 export async function renameCloudProject(id: string, name: string): Promise<CloudProjectRow> { const { data, error } = await requireClient().rpc("rename_cloud_project", { p_id: id, p_name: name.trim() }); if (error) throw error; const row = rows(data)[0]; if (!row) throw new Error("Cloud rename did not return the project."); return row; }
-export async function deleteCloudProject(id: string): Promise<void> { const { error } = await requireClient().rpc("delete_cloud_project", { p_id: id }); if (error) throw error; }
-export async function cleanupReplacedCloudMedia(id: string, sourcePath: string | null, thumbnailPath: string | null): Promise<void> { const { error } = await requireClient().rpc("cleanup_replaced_cloud_media", { p_id: id, p_source_path: sourcePath, p_thumbnail_path: thumbnailPath }); if (error) throw error; }
-export async function cancelCloudProjectSave(id: string): Promise<void> { const { error } = await requireClient().rpc("cancel_cloud_project_save", { p_id: id }); if (error) throw error; }
+export async function deleteCloudProject(id: string): Promise<void> {
+  const record = await getCloudProjectRecord(id);
+  if (!record) throw new Error("Cloud project not found.");
+  await removePrivateProjectObjects(id, await listPrivateProjectObjects(id, [record.row.source_media_path, record.row.thumbnail_path]));
+  const { error } = await requireClient().rpc("delete_cloud_project", { p_id: id });
+  if (error) throw cloudProjectError(error, "database");
+}
+/** Removes superseded objects only after their replacement state is durable. */
+export async function cleanupReplacedCloudMedia(projectId: string, oldPaths: Array<string | null>, currentPaths: Array<string | null>): Promise<void> {
+  const current = new Set(currentPaths.filter((path): path is string => Boolean(path)));
+  const stale = oldPaths.filter((path): path is string => path !== null).filter((path) => !current.has(path));
+  try {
+    await removePrivateProjectObjects(projectId, stale);
+  } catch (error) {
+    throw cloudProjectError(error, "cleanup");
+  }
+}
+export async function cancelCloudProjectSave(id: string): Promise<void> {
+  await removePrivateProjectObjects(id, await listPrivateProjectObjects(id));
+  const { error } = await requireClient().rpc("cancel_cloud_project_save", { p_id: id });
+  if (error) throw cloudProjectError(error, "database");
+}
 export async function getCloudStorageSummary(): Promise<CloudStorageSummary> { const { data, error } = await requireClient().rpc("cloud_project_storage_summary"); if (error) throw error; return ((Array.isArray(data) ? data[0] : data) as CloudStorageSummary | null) ?? { project_count: 0, total_source_bytes: 0, total_duration_ms: 0 }; }
 
 export async function uploadPrivateProjectObject(path: string, body: Blob, contentType: string, stage: Extract<CloudSaveStage, "source-upload" | "thumbnail"> = "source-upload"): Promise<void> { const { error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).upload(path, body, { contentType, upsert: false, cacheControl: "3600" }); if (error) throw cloudProjectError(error, stage); }
-export async function removePrivateProjectObjects(paths: string[]): Promise<void> { if (!paths.length) return; const { error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).remove(paths); if (error) throw error; }
+
+function ownedProjectMediaPath(userId: string, projectId: string, path: string): boolean {
+  const parts = path.split("/");
+  return parts.length === 3 && parts[0] === userId && parts[1] === projectId && /^(source|thumbnail)-[a-z0-9-]+\.[a-z0-9]{1,10}$/i.test(parts[2]);
+}
+async function ownedProjectMediaPaths(projectId: string, paths: Array<string | null>): Promise<string[]> {
+  const session = await getAuthSession();
+  if (!session) throw cloudProjectError(null, "configuration");
+  const unique = [...new Set(paths.filter((path): path is string => Boolean(path)))];
+  if (unique.some((path) => !ownedProjectMediaPath(session.user.id, projectId, path))) {
+    throw new CloudProjectError("cleanup", "Project media path is not owned by this project.");
+  }
+  return unique;
+}
+/** Lists only the active user's exact project prefix before any Storage API deletion. */
+export async function listPrivateProjectObjects(projectId: string, knownPaths: Array<string | null> = []): Promise<string[]> {
+  const session = await getAuthSession();
+  if (!session) throw cloudProjectError(null, "configuration");
+  const prefix = `${session.user.id}/${projectId}`;
+  const { data, error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).list(prefix, { limit: 1_000 });
+  if (error) throw cloudProjectError(error, "cleanup");
+  return ownedProjectMediaPaths(projectId, [...knownPaths, ...(data ?? []).map((object) => `${prefix}/${object.name}`)]);
+}
+/** Storage API is the only application path for deleting private project blobs. */
+export async function removePrivateProjectObjects(projectId: string, paths: Array<string | null>): Promise<void> {
+  const owned = await ownedProjectMediaPaths(projectId, paths);
+  if (!owned.length) return;
+  const { error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).remove(owned);
+  if (error) throw cloudProjectError(error, "cleanup");
+}
 export async function getPrivateThumbnailUrl(row: CloudProjectRow): Promise<string | null> { if (!row.thumbnail_path) return null; const { data, error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).createSignedUrl(row.thumbnail_path, 60 * 30); if (error) throw error; return data.signedUrl; }
-export async function downloadCloudProjectSource(row: CloudProjectRow): Promise<File | null> { if (!row.source_media_path || !row.source_media_name) return null; const { data, error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).download(row.source_media_path); if (error) throw error; return new File([data], row.source_media_name, { type: row.source_media_type ?? data.type ?? "application/octet-stream" }); }
+export function classifyCloudSourceRestoreError(error: unknown): Exclude<CloudSourceRestoreResult, { status: "ready" } | { status: "no-saved-source" }> {
+  const candidate = error && typeof error === "object" ? error as SupabaseErrorLike & { statusCode?: unknown } : null;
+  const code = typeof candidate?.code === "string" ? candidate.code : null;
+  const statusCode = typeof candidate?.statusCode === "string" || typeof candidate?.statusCode === "number" ? String(candidate.statusCode) : "";
+  const message = typeof candidate?.message === "string" ? candidate.message : "";
+  if (statusCode === "404" || /object.?not.?found|not found/i.test(`${code ?? ""} ${message}`)) return { status: "missing", code };
+  if (statusCode === "401" || statusCode === "403" || /permission|policy|not authorized|denied/i.test(`${code ?? ""} ${message}`)) return { status: "access-denied", code };
+  return { status: "fetch-failed", code };
+}
+/** Downloads a private object into the normal File contract; signed URLs are never persisted. */
+export async function downloadCloudProjectSource(row: CloudProjectRow): Promise<CloudSourceRestoreResult> {
+  if (!row.source_media_path || !row.source_media_name) return { status: "no-saved-source" };
+  const { data, error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).download(row.source_media_path);
+  if (error || !data) return classifyCloudSourceRestoreError(error);
+  return { status: "ready", file: new File([data], row.source_media_name, { type: row.source_media_type ?? data.type ?? "application/octet-stream" }) };
+}
 export function newCloudSourcePath(userId: string, projectId: string, file: File): string { return projectMediaPath(userId, projectId, "source", mediaExtension(file)); }
 export function newCloudThumbnailPath(userId: string, projectId: string): string { return projectMediaPath(userId, projectId, "thumbnail", "webp"); }
 

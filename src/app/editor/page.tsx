@@ -128,6 +128,7 @@ import {
   uploadPrivateProjectObject,
   cloudProjectError,
   type CloudSaveStage,
+  type CloudProjectRecord,
 } from "@/lib/cloud-sync";
 import { exportAuthIntent, rememberAuthContinuation, rememberAuthResumeProject, takeAuthContinuation, takeAuthResumeProject } from "@/lib/auth-flow";
 import type { Session } from "@supabase/supabase-js";
@@ -334,6 +335,7 @@ export default function Home() {
   const [subscriptionPlan, setSubscriptionPlan] = useState<"Free" | "Creator" | "Pro">("Free");
   const [pendingOpenProject, setPendingOpenProject] =
     useState<SavedProject | null>(null);
+  const [cloudSourceRestoreRetry, setCloudSourceRestoreRetry] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [automaticRecognitionRequest, setAutomaticRecognitionRequest] = useState<AutomaticRecognitionRequest | null>(null);
   const plan = resolveClientPlan(Boolean(session), subscriptionPlan);
@@ -342,6 +344,7 @@ export default function Home() {
   const cloudBaselineUpdatedAt = useRef<string | null>(null);
   const cloudMedia = useRef<{ sourcePath: string | null; thumbnailPath: string | null; thumbnailSize: number | null; sourceFingerprint: string | null }>({ sourcePath: null, thumbnailPath: null, thumbnailSize: null, sourceFingerprint: null });
   const cloudProjectLoadStarted = useRef(false);
+  const pendingCloudSourceRestore = useRef<CloudProjectRecord | null>(null);
   const localSafetyProjectId = useRef<string | null>(null);
   const generation = useRef(0);
   const automaticRecognition = useRef(new AutomaticRecognitionController());
@@ -605,12 +608,10 @@ export default function Home() {
         if (!(await openProject(record.project, true))) return;
         setCloudProjectId(record.row.id);
         cloudMedia.current = { sourcePath: record.row.source_media_path, thumbnailPath: record.row.thumbnail_path, thumbnailSize: record.row.thumbnail_size_bytes, sourceFingerprint: record.project.sourceMedia?.fingerprint ?? null };
-        const source = await downloadCloudProjectSource(record.row);
-        if (!source) { setErrorMessage("Source media needs to be relinked."); return; }
-        setPendingOpenProject(null);
-        loadSelectedSource(source, record.project.sourceMedia ?? mediaSourceFromFile(source, record.row.source_media_type?.startsWith("audio/") ? "audio" : "video"), { preserveCaptions: true, restoredCompletedRecognition: record.project.captionSegments.length > 0 });
+        pendingCloudSourceRestore.current = record;
+        await restoreCloudProjectSource(record);
       } catch (error) {
-        setErrorMessage(error instanceof Error ? `${error.message} Source media needs to be relinked.` : "Source media needs to be relinked.");
+        setErrorMessage(error instanceof Error ? error.message : "We couldn't load this cloud project.");
       }
     })();
   }, [authRestoreReady, session]);
@@ -801,6 +802,34 @@ export default function Home() {
       setExportDiagnostics(null);
     }
   }
+  function cloudSourceRestoreMessage(status: Exclude<Awaited<ReturnType<typeof downloadCloudProjectSource>>["status"], "ready">, code?: string | null): string {
+    const message = status === "no-saved-source"
+      ? "This project doesn't have a saved source file. Relink the original media to continue."
+      : status === "missing"
+        ? "This project's saved source file is no longer available. Relink the original media to continue."
+        : status === "access-denied"
+          ? "Saved source media could not be accessed."
+          : "We couldn't load the saved source media. Try again.";
+    return process.env.NODE_ENV !== "production" && status !== "no-saved-source"
+      ? `${message} [stage: source-restore${code ? `; code: ${code}` : ""}; path: ${status}]`
+      : message;
+  }
+  async function restoreCloudProjectSource(record: CloudProjectRecord) {
+    setCloudSourceRestoreRetry(false);
+    const restored = await downloadCloudProjectSource(record.row);
+    if (restored.status !== "ready") {
+      setCloudSourceRestoreRetry(restored.status === "access-denied" || restored.status === "fetch-failed");
+      setErrorMessage(cloudSourceRestoreMessage(restored.status, "code" in restored ? restored.code : null));
+      return;
+    }
+    setPendingOpenProject(null);
+    setErrorMessage(null);
+    loadSelectedSource(restored.file, record.project.sourceMedia ?? mediaSourceFromFile(restored.file, record.row.source_media_type?.startsWith("audio/") ? "audio" : "video"), { preserveCaptions: true, restoredCompletedRecognition: record.project.captionSegments.length > 0 });
+  }
+  function retryCloudSourceRestore() {
+    const record = pendingCloudSourceRestore.current;
+    if (record) void restoreCloudProjectSource(record);
+  }
   function resetEditorState() {
     exportAbort.current?.abort();
     clearCompletedExport();
@@ -851,6 +880,7 @@ export default function Home() {
     setSavedProject(null);
     setCloudProjectId(null);
     setPendingOpenProject(null);
+    setCloudSourceRestoreRetry(false);
     setProjectName("Untitled project");
     setAutomaticRecognitionRequest(null);
     automaticRecognition.current.reset();
@@ -1000,7 +1030,9 @@ export default function Home() {
       cloudSaveStage = "finalize";
       setCloudSaveStatus("Saving project state…");
       const row = await completeCloudProjectSave(snapshot, { source_media_path: sourcePath, source_media_type: sourceType, source_media_name: sourceName, source_media_size_bytes: sourceSize, thumbnail_path: thumbnailPath, thumbnail_size_bytes: thumbnailSize });
-      void cleanupReplacedCloudMedia(id, oldSourcePath, oldThumbnailPath).catch(() => undefined);
+      void cleanupReplacedCloudMedia(id, [oldSourcePath, oldThumbnailPath], [row.source_media_path, row.thumbnail_path]).catch((cleanupError: unknown) => {
+        console.warn("Cloud project media cleanup failed after save.", cleanupError);
+      });
       const saved = { ...snapshot, title: row.name, createdAt: row.created_at, updatedAt: row.updated_at };
       cloudBaselineUpdatedAt.current = row.updated_at;
       cloudMedia.current = { sourcePath: row.source_media_path, thumbnailPath: row.thumbnail_path, thumbnailSize: row.thumbnail_size_bytes, sourceFingerprint: snapshot.sourceMedia?.fingerprint ?? null };
@@ -1009,7 +1041,7 @@ export default function Home() {
       void recordAuthenticatedUsage("cloud_project_saved", `${saved.id}:${saved.updatedAt}`).catch(() => undefined);
       setCloudProjects(await listCloudProjects()); setErrorMessage(null);
     } catch (error) {
-      if (uploaded.length) void removePrivateProjectObjects(uploaded).catch(() => undefined);
+      if (uploaded.length) void removePrivateProjectObjects(id, uploaded).catch(() => undefined);
       if (reserved) void cancelCloudProjectSave(id).catch(() => undefined);
       const message = cloudProjectError(error, cloudSaveStage).message;
       setCloudSaveStatus(message); setErrorMessage(message);
@@ -2509,6 +2541,7 @@ export default function Home() {
         exportDiagnostics={exportDiagnostics}
         tiktokCaption={tiktokCaption}
         errorMessage={errorMessage}
+        onRetrySourceRestore={cloudSourceRestoreRetry ? retryCloudSourceRestore : null}
         timingWarning={timingWarning}
         timelineTooltip={timelineTooltip}
         timelineViewport={timelineViewport}

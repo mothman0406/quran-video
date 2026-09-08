@@ -6,8 +6,9 @@ The reported PostgREST 400 means the live `public.projects` table does not have 
 
 1. `supabase/migrations/20260828000000_create_projects.sql`
 2. `supabase/migrations/20260908000000_production_cloud_projects.sql`
+3. `supabase/migrations/20260908000001_storage_api_cloud_media_cleanup.sql`
 
-Do not create a second `projects` table and do not remove the `save_complete=eq.true` REST filter. If the first migration is already present, apply only the second migration; it is written with `if not exists` additions.
+Do not create a second `projects` table and do not remove the `save_complete=eq.true` REST filter. If the first two migrations are already present, apply the third migration; it replaces the affected RPC bodies without recreating tables or policies.
 
 The first migration creates `public.projects` with `id`, `user_id`, `name`, `created_at`, `updated_at`, `source_filename`, `source_metadata`, `project_data`, and `schema_version`.
 
@@ -34,6 +35,8 @@ The migration creates (or makes private) the exact Storage bucket `project-media
 - `Cloud project media owner insert`
 - `Cloud project media owner update`
 - `Cloud project media owner delete`
+
+The bucket remains private. The browser deletes only verified paths within the signed-in user's exact `<user-id>/<project-id>/` prefix through `supabase.storage.from("project-media").remove(...)`; project RPCs mutate only `public.projects`. Do not delete `storage.objects` rows manually.
 
 It enables RLS for `public.projects` and creates the exact table read policy `Cloud project owner can read` for `authenticated` users where `auth.uid() = user_id`. Direct `insert`, `update`, and `delete` privileges are revoked from `authenticated`; the owner-validating `SECURITY DEFINER` RPCs above are granted to `authenticated` instead. The migration also creates `projects_user_complete_updated_at_idx` and retains the owner/update index.
 
@@ -65,4 +68,4 @@ In development, cloud failures include a safe stage and PostgREST/Supabase code 
 5. Change the source and save; verify the new source remains available before old private objects are cleaned up.
 6. With two test users, verify neither can read the other's row or `project-media` objects.
 
-Source media and thumbnails are private user content. Completed exports remain local downloads and are never placed in this bucket. A stale incomplete reservation is reclaimed on the same user's next save after one hour; a production operator may additionally schedule compatible cleanup.
+Source media and thumbnails are private user content. Completed exports remain local downloads and are never placed in this bucket. A stale incomplete reservation is reconciled on the same user's next save after one hour: its exact Storage prefix is removed through Storage API before its incomplete row is deleted. A production operator may additionally schedule compatible Storage API cleanup.

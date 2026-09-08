@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY } from "../src/lib/editor/captions.ts";
 import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, projectFormatDefinition } from "../src/lib/editor/formats.ts";
-import { CloudProjectError, cloudProjectError, fromCloudProjectRow, hasProjectConflict, hydrateCloudProjectState, serializeProjectStateForCloud, toCloudProjectPayload, type CloudProjectRow } from "../src/lib/cloud-sync.ts";
+import { CloudProjectError, classifyCloudSourceRestoreError, cloudProjectError, fromCloudProjectRow, hasProjectConflict, hydrateCloudProjectState, serializeProjectStateForCloud, toCloudProjectPayload, type CloudProjectRow } from "../src/lib/cloud-sync.ts";
 import { cloudProjectName, FREE_CLOUD_PROJECT_LIMIT, projectMediaPath, quranProjectMetadata } from "../src/lib/cloud-projects.ts";
 import type { SavedProject } from "../src/lib/schemas/project.ts";
 
@@ -87,4 +87,10 @@ test("PostgREST schema drift receives a safe, stage-aware migration diagnostic",
 test("private media paths are scoped by user and project and Free is three projects", () => {
   assert.match(projectMediaPath("user-a", "project-a", "source", "mp4", "nonce"), /^user-a\/project-a\/source-nonce\.mp4$/);
   assert.equal(FREE_CLOUD_PROJECT_LIMIT, 3);
+});
+
+test("cloud source retrieval distinguishes missing media from access and transient failures", () => {
+  assert.deepEqual(classifyCloudSourceRestoreError({ statusCode: 404, code: "object_not_found" }), { status: "missing", code: "object_not_found" });
+  assert.deepEqual(classifyCloudSourceRestoreError({ statusCode: 403, code: "storage_unauthorized" }), { status: "access-denied", code: "storage_unauthorized" });
+  assert.deepEqual(classifyCloudSourceRestoreError({ code: "network_error" }), { status: "fetch-failed", code: "network_error" });
 });

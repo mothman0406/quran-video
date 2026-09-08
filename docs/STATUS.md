@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Cloud project media cleanup and source restore
+
+Complete:
+
+- Replaced production RPC implementations that wrote directly to `storage.objects` with row-only project mutations in additive migration `20260908000001_storage_api_cloud_media_cleanup.sql`. Authenticated Storage API deletion now verifies the caller's exact `<user-id>/<project-id>/` source/thumbnail path before removal; the private bucket and owner DELETE policy are unchanged.
+- Preserved update safety: replacement source and thumbnail upload first, project state commits second, and obsolete media cleanup is best-effort afterward. A cleanup failure is logged and classified as cleanup without reporting the durable save as lost. Expired incomplete reservations are reconciled through Storage API before their database row is removed.
+- Cloud source restore now downloads the private bucket-relative object into the editor's normal `File` contract. It distinguishes no stored source, a missing object, denied access, and transient retrieval failures; only retrieval failures expose Try again, which retries the download rather than recognition. Restored completed recognition remains intact; undetected restores still run the existing one-time detection path.
+- The observed historical relink message did not establish whether old media was absent or inaccessible: the previous loader appended “needs to be relinked” for every download error. The new classification makes that distinction visible without exposing signed URLs or tokens.
+
+Verification: `npm test` (291 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes production invariant probes but its optional local real-audio benchmark fails in this workspace; no recognition code changed. The build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning. Live Supabase/browser validation requires applying the new migration and an authenticated test account.
+
 ## Current milestone: Normalize cloud project format state
 
 Complete:

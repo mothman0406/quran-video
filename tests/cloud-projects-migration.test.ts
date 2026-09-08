@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const migration = readFileSync(new URL("../supabase/migrations/20260908000000_production_cloud_projects.sql", import.meta.url), "utf8");
+const storageCleanupMigration = readFileSync(new URL("../supabase/migrations/20260908000001_storage_api_cloud_media_cleanup.sql", import.meta.url), "utf8");
 const sync = readFileSync(new URL("../src/lib/cloud-sync.ts", import.meta.url), "utf8");
 
 test("cloud-project migration keeps project media private and owner-scoped", () => {
@@ -24,6 +25,16 @@ test("project deletion and replacement cleanup operate only in the owned project
   assert.match(migration, /cloud_project_path_is_owned/);
   assert.match(migration, /source_media_size_bytes/);
   assert.match(migration, /cloud_project_storage_summary/);
+});
+
+test("latest cloud-project RPC definitions never delete Storage internal rows", () => {
+  assert.doesNotMatch(storageCleanupMigration, /delete\s+from\s+storage\.objects/i);
+  assert.match(storageCleanupMigration, /create or replace function public\.cleanup_replaced_cloud_media/);
+  assert.match(storageCleanupMigration, /create or replace function public\.cancel_cloud_project_save/);
+  assert.match(storageCleanupMigration, /create or replace function public\.delete_cloud_project/);
+  assert.match(sync, /storage\.from\(PROJECT_MEDIA_BUCKET\)\.remove\(owned\)/);
+  assert.match(sync, /ownedProjectMediaPath/);
+  assert.match(sync, /cleanupAbandonedCloudProjectSaves/);
 });
 
 test("application cloud-row contract matches the production migration and keeps incomplete saves hidden", () => {
