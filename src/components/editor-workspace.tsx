@@ -9,6 +9,7 @@ import type { OutputProfile } from "@/lib/export/output";
 import type { CaptionStyle, CaptionLayer, LocalCaptionStyle } from "@/lib/editor/styles";
 import type { CaptionObject, CaptionResizeEdge } from "@/components/caption-preview";
 import type { QuranContentResponse } from "@/lib/quran/content";
+import type { RightInspectorMode } from "@/lib/editor/selection";
 import { arabicCaptionDisplay, captionSegmentLabel, getActiveCaptionSegment, translationDisplayText } from "@/lib/editor/captions";
 import CaptionPreview from "@/components/caption-preview";
 import SafeAreaOverlay from "@/components/safe-area-overlay";
@@ -46,6 +47,7 @@ type EditorWorkspaceProps = {
   selectedSegment: CaptionSegment | null;
   selectedIndex: number;
   selectedObject: CaptionObject | null;
+  rightInspectorMode: RightInspectorMode;
   styleScope: "all" | "segment";
   inspectorStyle: CaptionStyle;
   selectedHasStyleOverrides: boolean;
@@ -103,6 +105,8 @@ type EditorWorkspaceProps = {
   onMediaSeeking: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onVideoError: () => void;
   onSelectObject: (segment: CaptionSegment, kind: CaptionObject | null) => void;
+  onSetRightInspectorMode: (mode: RightInspectorMode) => void;
+  onSelectMedia: () => void;
   onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, segment: CaptionSegment, kind: CaptionObject) => void;
   onResizePointerDown: (event: PointerEvent<HTMLButtonElement>, kind: CaptionObject, edge: CaptionResizeEdge) => void;
   onObjectPointerMove: (event: PointerEvent<HTMLElement>) => void;
@@ -188,12 +192,12 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const {
     videoFile, videoUrl, videoMetadata, mediaSource, projectAssets, activeMediaAssetId, mediaTrim, videoRef, previewRef, timelineRef, stage, progress, support,
     alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
-    selectedObject, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
+    selectedObject, rightInspectorMode, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, showVerseNumber, showSafeArea, projectName, dirty, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage, timingWarning,
     showCorrection, surah, startAyah, endAyah, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, entitlements, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
     onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
-    onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown,
+    onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown, onSetRightInspectorMode, onSelectMedia,
     onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
     onCorrectDetection, onToggleCorrection, onClearVideo, onSaveProject, onSaveToAccount, onOpenProjects,
     onOpenCloudProjects, onSessionChange, onPlanChange, onDiscard, onNewProject, onExportOpen, onExport, onCancelExport, onDownloadExport,
@@ -328,7 +332,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
         <div className="editor-stage-header"><div><SectionLabel>Canvas</SectionLabel><h1>{videoFile ? "Caption composition" : "Begin with a recitation"}</h1></div><div className="editor-stage-info"><span>{selectedFormatDefinition.label}</span><span>{formatDuration(durationMs / 1000)}</span></div></div>
         <div className="editor-canvas-well">
           {videoUrl ? <div ref={previewRef} className={`project-preview-canvas editor-canvas ${mediaSource?.hasVideo ? "" : "editor-audio-canvas"}`} data-project-aspect-ratio={selectedFormatDefinition.aspectRatio} data-project-format={projectFormat.preset} style={{ aspectRatio: `${projectFormat.width} / ${projectFormat.height}` }} onPointerDown={onCanvasBackgroundPointerDown}>
-            {mediaSource?.hasVideo ? <video ref={videoRef} className="h-full w-full object-contain" controls playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={(node) => { (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node as unknown as HTMLVideoElement; }} className="editor-audio-element" controls preload="metadata" src={videoUrl} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support audio playback.</audio>}
+            {mediaSource?.hasVideo ? <video ref={videoRef} className="h-full w-full object-contain" controls playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onPointerDown={onSelectMedia} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={(node) => { (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node as unknown as HTMLVideoElement; }} className="editor-audio-element" controls preload="metadata" src={videoUrl} onPointerDown={onSelectMedia} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support audio playback.</audio>}
             {showSafeArea && <SafeAreaOverlay format={projectFormat} />}
             <CaptionPreview currentTimeMs={currentTimeMs} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedSegmentId={selectedSegmentId} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} />
           </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
@@ -356,6 +360,13 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
       <aside className="editor-sidebar editor-sidebar-right">
         <button className="editor-panel-collapse editor-panel-collapse-right" type="button" aria-label={rightCollapsed ? "Expand inspector" : "Collapse inspector"} onClick={() => setRightCollapsed((value) => !value)}>{rightCollapsed ? "‹" : "›"}</button>
         <div className="editor-sidebar-scroll">
+          <div className="editor-inspector-mode"><Segmented value={rightInspectorMode} options={[["settings", "Settings"], ["subtitles", "Subtitles"]]} onChange={(mode) => onSetRightInspectorMode(mode as RightInspectorMode)} /></div>
+          {rightInspectorMode === "settings" ? <div className="editor-settings-inspector">
+            <SectionLabel>Canvas settings</SectionLabel>
+            <p className="editor-muted">{selectedFormatDefinition.label} · {selectedFormatDefinition.width} × {selectedFormatDefinition.height}</p>
+            <label className="editor-toggle"><input checked={showSafeArea} type="checkbox" onChange={(event) => onSetShowSafeArea(event.target.checked)} /><span />Safe area guides</label>
+            {selectedSegment ? <div className="editor-inspector-context"><SectionLabel>Selected subtitle</SectionLabel><strong>{captionSegmentLabel(selectedSegment)} · {objectLabel}</strong><p className="editor-muted">Its caption controls remain available in Subtitles.</p></div> : <div className="editor-inspector-context"><SectionLabel>Selected object</SectionLabel><strong>{mediaSource?.hasVideo ? "Video" : mediaSource ? "Audio" : "Canvas"}</strong><p className="editor-muted">Select caption text or a timeline caption to edit subtitle styling and timing.</p></div>}
+          </div> : <>
           {selectedSegment ? <>
             <div className="editor-inspector-title"><div><SectionLabel>Selected object</SectionLabel><h2>{objectLabel}</h2></div><button className="editor-close-selection" type="button" onClick={() => onSelectObject(selectedSegment, null)}>×</button></div>
             <p className="editor-muted">Drag on canvas to move · handles change width</p>
@@ -383,9 +394,10 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
             <SectionLabel>Caption surface</SectionLabel><label className="editor-toggle"><input checked={inspectorBackground.enabled} type="checkbox" onChange={(event) => onBackgroundChange("enabled", event.target.checked)} /><span />Background</label>{inspectorBackground.enabled && <div className="editor-color-row"><label>Surface color</label><input type="color" value={inspectorBackground.color} onChange={(event) => onBackgroundChange("color", event.target.value)} /></div>}
             {selectedLayer === "translation" && !inspectorPositioning.translationPositionLinked && <button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onAlignTranslation}>Align below Arabic</button>}
             <button className="editor-text-button" type="button" onClick={onResetSelectedObjectStyle}>{styleScope === "segment" ? "Use global style" : `Reset ${objectLabel.toLowerCase()} style`}</button>
-          </> : <div className="editor-inspector-empty"><span className="editor-inspector-glyph">＋</span><h2>Select a caption</h2><p>Click Arabic or translation on the canvas to edit its style, position, and width.</p></div>}
+          </> : <div className="editor-inspector-empty"><span className="editor-inspector-glyph">＋</span><h2>Select a subtitle</h2><p>Click Quran or translation text on the canvas, or select a caption in the timeline.</p></div>}
 
           {selectedSegment && <div className="editor-segment-inspector"><div className="editor-divider" /><SectionLabel>Caption segment</SectionLabel><strong>{captionSegmentLabel(selectedSegment)}</strong><div className="editor-time-readout"><span>In <b>{(selectedSegment.startMs / 1000).toFixed(3)}s</b></span><span>Out <b>{(selectedSegment.endMs / 1000).toFixed(3)}s</b></span></div><p className="editor-muted">Drag the block or either edge to edit timing. Gaps and overlaps are allowed.</p><div className="editor-segment-actions"><select aria-label="Split Quran word boundary" className="editor-select" disabled={selectedSegment.contentKind !== "ayah"} value={splitBoundary} onChange={(event) => onSetSplitBoundary(Number(event.target.value))}>{Array.from({ length: Math.max(0, selectedSegment.arabic.trim().split(/\s+/).length - 1) }, (_, index) => <option key={index + 1} value={index + 1}>After word {index + 1}</option>)}</select><button className="editor-button editor-button-primary" type="button" disabled={selectedSegment.contentKind !== "ayah"} onClick={onSplit}>Split</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedSegment.contentKind !== "ayah" || selectedIndex < 1 || segments[selectedIndex - 1]?.contentKind !== "ayah"} onClick={onMergePrevious}>Merge ←</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedSegment.contentKind !== "ayah" || selectedIndex >= segments.length - 1 || segments[selectedIndex + 1]?.contentKind !== "ayah"} onClick={onMergeNext}>Merge →</button></div>{selectedSegment.contentKind === "ayah" && translationDisplayText(selectedSegment) && <div className="editor-translation-fragment"><SectionLabel>Translation segment</SectionLabel><textarea aria-label="Translation segment" className="editor-input" value={translationDisplayText(selectedSegment) ?? ""} onChange={(event) => onTranslationFragmentChange(event.target.value)} /><p className="editor-muted">{selectedSegment.translationSegment?.reviewStatus === "needs-review" ? "Uses the full translation until reviewed." : "Edits affect this display segment only."}</p><button className="editor-text-button" type="button" onClick={onResetTranslationFragment}>Reset translation segment</button></div>}<div className="editor-segment-reset-actions"><button className="editor-text-button" type="button" onClick={onResetTiming}>Reset this timing</button><button className="editor-text-button" type="button" onClick={onResetAllTiming}>Reset all timing</button></div></div>}
+          </>}
         </div>
         <div className="editor-sidebar-footer"><button className="editor-text-button" type="button" onClick={onSaveToAccount}>Save to account</button><button className="editor-text-button" type="button" onClick={onDiscard}>Discard changes</button></div>
       </aside>

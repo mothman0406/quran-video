@@ -1,6 +1,17 @@
 import type { CaptionSegment } from "./captions.ts";
 import type { CaptionLayer } from "./styles.ts";
 
+/** Session-only right-sidebar view; it deliberately never becomes project content. */
+export type RightInspectorMode = "settings" | "subtitles";
+
+/**
+ * The one context-to-inspector rule used by editor selection entry points.
+ * Playback, viewport, and panel-layout events intentionally never call this.
+ */
+export function rightInspectorModeForSelection(context: "caption" | "editor-object"): RightInspectorMode {
+  return context === "caption" ? "subtitles" : "settings";
+}
+
 export type CaptionSelection = {
   selectedCaptionSegmentId: string | null;
   selectedCaptionLayer: CaptionLayer | null;

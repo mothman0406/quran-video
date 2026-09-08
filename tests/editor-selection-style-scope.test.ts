@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, type CaptionSegment } from "../src/lib/editor/captions.ts";
 import { captionStyleFromState, clearCaptionLayerStyleOverrides, patchCaptionLayerStyleOverrides, resolveCaptionLayerStyle } from "../src/lib/editor/styles.ts";
-import { hasSelectedCaptionInspector, selectCaptionLayer, selectTimelineCaption } from "../src/lib/editor/selection.ts";
+import { hasSelectedCaptionInspector, rightInspectorModeForSelection, selectCaptionLayer, selectTimelineCaption } from "../src/lib/editor/selection.ts";
 import { CaptionStyleOverridesSchema } from "../src/lib/schemas/project.ts";
 
 const segment = (id: string, contentKind: "ayah" | "basmalah-prelude" = "ayah"): CaptionSegment => ({
@@ -29,6 +29,16 @@ test("timeline and canvas selection produce a complete inspector for the exact s
   assert.deepEqual(selectCaptionLayer(secondPiece, "arabic"), timeline);
   assert.deepEqual(selectCaptionLayer(firstPiece, "translation"), { selectedCaptionSegmentId: "74:5-piece-1", selectedCaptionLayer: "translation" });
   assert.equal(hasSelectedCaptionInspector(selectTimelineCaption(segment("basmalah", "basmalah-prelude")), [segment("basmalah", "basmalah-prelude")]), true);
+});
+
+test("editor selection context chooses an inspector mode without changing caption selection", () => {
+  const selected = selectCaptionLayer(segment("55:4"), "translation");
+  assert.equal(rightInspectorModeForSelection("caption"), "subtitles");
+  assert.equal(rightInspectorModeForSelection("editor-object"), "settings");
+  // Toggling is UI state only: selection remains the exact segment/layer.
+  assert.deepEqual(selected, { selectedCaptionSegmentId: "55:4", selectedCaptionLayer: "translation" });
+  assert.equal(rightInspectorModeForSelection("caption"), "subtitles");
+  assert.equal(rightInspectorModeForSelection("editor-object"), "settings");
 });
 
 test("layer overrides are property-level, inherit global changes, and reset safely", () => {

@@ -117,7 +117,7 @@ import { clampMediaTrim, clampTimelineViewport, createMediaTrim, createTimelineV
 import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 import { waveformPeaksFromPcm, type WaveformData } from "@/lib/editor/waveform";
 import { projectAssetFromMediaSource } from "@/lib/editor/project-assets";
-import { clearCaptionSelection, selectCaptionLayer, selectTimelineCaption } from "@/lib/editor/selection";
+import { clearCaptionSelection, rightInspectorModeForSelection, selectCaptionLayer, selectTimelineCaption, type CaptionSelection, type RightInspectorMode } from "@/lib/editor/selection";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -229,6 +229,7 @@ export default function Home() {
     null,
   );
   const [selectedObject, setSelectedObject] = useState<CaptionObject | null>(null);
+  const [rightInspectorMode, setRightInspectorMode] = useState<RightInspectorMode>("settings");
   const [styleScope, setStyleScope] = useState<"all" | "segment">("all");
   const [splitBoundary, setSplitBoundary] = useState(1);
   const [typography, setTypography] = useState<Typography>(DEFAULT_TYPOGRAPHY);
@@ -892,6 +893,7 @@ export default function Home() {
     const wouldDiscardCaptions = Boolean(segments.length && activeMediaAssetId !== assetId);
     if (wouldDiscardCaptions && !window.confirm("Switching source clears the current recognition and caption timing. Continue?")) return;
     setActiveMediaAssetId(assetId);
+    setRightInspectorMode(rightInspectorModeForSelection("editor-object"));
     loadSelectedSource(runtime.file, runtime.source, { preserveCaptions: !wouldDiscardCaptions });
   }
   function removeProjectAsset(assetId: string) {
@@ -1430,8 +1432,7 @@ export default function Home() {
   }
   function selectSegment(segment: CaptionSegment) {
     const selection = selectTimelineCaption(segment);
-    setSelectedSegmentId(selection.selectedCaptionSegmentId);
-    setSelectedObject(selection.selectedCaptionLayer);
+    applyCaptionSelection(selection);
     setStyleScope("all");
     setSplitBoundary(
       Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)),
@@ -1439,16 +1440,25 @@ export default function Home() {
   }
   function selectCaptionObject(segment: CaptionSegment, kind: CaptionObject | null) {
     const selection = kind ? selectCaptionLayer(segment, kind) : clearCaptionSelection();
-    setSelectedSegmentId(selection.selectedCaptionSegmentId);
-    setSelectedObject(selection.selectedCaptionLayer);
+    if (kind) applyCaptionSelection(selection);
+    else {
+      setSelectedSegmentId(selection.selectedCaptionSegmentId);
+      setSelectedObject(selection.selectedCaptionLayer);
+    }
     if (!kind || selectedSegmentId !== segment.id) setStyleScope("all");
     if (kind) setSplitBoundary(Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)));
+  }
+  function applyCaptionSelection(selection: CaptionSelection) {
+    setSelectedSegmentId(selection.selectedCaptionSegmentId);
+    setSelectedObject(selection.selectedCaptionLayer);
+    setRightInspectorMode(rightInspectorModeForSelection("caption"));
   }
   const handleObjectPointerDown = useCallback(
     (event: PointerEvent<HTMLDivElement>, segment: CaptionSegment, kind: CaptionObject) => {
       event.stopPropagation();
       setSelectedSegmentId(segment.id);
       setSelectedObject(kind);
+      setRightInspectorMode(rightInspectorModeForSelection("caption"));
       if (selectedSegmentId !== segment.id) setStyleScope("all");
       canvasInteraction.current = {
         kind,
@@ -1465,6 +1475,7 @@ export default function Home() {
     (event: PointerEvent<HTMLButtonElement>, kind: CaptionObject, edge: CaptionResizeEdge) => {
       event.stopPropagation();
       setSelectedObject(kind);
+      setRightInspectorMode(rightInspectorModeForSelection("caption"));
       canvasInteraction.current = {
         kind,
         mode: "resize",
@@ -1544,8 +1555,7 @@ export default function Home() {
     event.stopPropagation();
     const pointerStartMs = timelineTimeFromPointer(event);
     const selection = selectTimelineCaption(segment);
-    setSelectedSegmentId(selection.selectedCaptionSegmentId);
-    setSelectedObject(selection.selectedCaptionLayer);
+    applyCaptionSelection(selection);
     setStyleScope("all");
     setSplitBoundary(Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)));
     timelineInteraction.current = { id: segment.id, mode: "body", pointerStartMs, initialStartMs: segment.startMs, initialEndMs: segment.endMs };
@@ -1560,8 +1570,7 @@ export default function Home() {
     timelineInteraction.current = { id: segment.id, mode: edge, pointerStartMs: timelineTimeFromPointer(event), initialStartMs: segment.startMs, initialEndMs: segment.endMs };
     draggingEdge.current = edge;
     const selection = selectTimelineCaption(segment);
-    setSelectedSegmentId(selection.selectedCaptionSegmentId);
-    setSelectedObject(selection.selectedCaptionLayer);
+    applyCaptionSelection(selection);
     setStyleScope("all");
     setSplitBoundary(Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)));
     const video = videoRef.current;
@@ -1906,6 +1915,7 @@ export default function Home() {
         selectedSegment={selectedSegment}
         selectedIndex={selectedIndex}
         selectedObject={selectedObject}
+        rightInspectorMode={rightInspectorMode}
         styleScope={styleScope}
         inspectorStyle={inspectorStyle}
         selectedHasStyleOverrides={selectedSegment ? hasCaptionLayerStyleOverrides(selectedSegment.styleOverrides, selectedLayer) : false}
@@ -1967,7 +1977,9 @@ export default function Home() {
         onResizePointerDown={handleResizePointerDown}
         onObjectPointerMove={handleObjectPointerMove}
         onObjectPointerUp={handleObjectPointerUp}
-        onCanvasBackgroundPointerDown={() => { setSelectedObject(null); setSelectedSegmentId(null); setStyleScope("all"); }}
+        onCanvasBackgroundPointerDown={() => { setSelectedObject(null); setSelectedSegmentId(null); setStyleScope("all"); setRightInspectorMode(rightInspectorModeForSelection("editor-object")); }}
+        onSetRightInspectorMode={setRightInspectorMode}
+        onSelectMedia={() => setRightInspectorMode(rightInspectorModeForSelection("editor-object"))}
         onSelectSegment={selectSegment}
         onSegmentPointerDown={handleSegmentPointerDown}
         onTimelinePointerDown={seekTimeline}

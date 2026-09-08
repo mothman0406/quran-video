@@ -1,5 +1,26 @@
 # Status
 
+## Current milestone: Two-mode right inspector
+
+Complete:
+
+- Added session-only `Settings` / `Subtitles` inspector mode state, kept
+  entirely outside saved Quran project content and independent of panel layout.
+- Caption canvas clicks, caption timeline actions, and basmalah selections use
+  one centralized selection-to-mode rule and open Subtitles without seeking or
+  changing timing; media and canvas selection open Settings.
+- Moved the complete caption style, style-scope, translation-fragment, and
+  timing inspector into Subtitles. Settings now retains subtitle selection as
+  context and exposes canvas controls without clearing it. The compact toggle
+  remains sticky while inspector content scrolls and also updates while the
+  sidebar is collapsed.
+
+Verification: focused selection tests, `npm test` (215 passing), `npx tsc
+--noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check`
+pass. The build retains the pre-existing non-fatal VAD ONNX Runtime
+dynamic-require warning. Real browser validation remains pending because this
+workspace has no browser automation or recognized-video fixture.
+
 ## Current milestone: Segment-aware Quran translation display
 
 Complete:
