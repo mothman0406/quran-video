@@ -1,5 +1,13 @@
 # Status
 
+## Current milestone: Restore landing-page scrolling
+
+Complete:
+
+- Removed the editor-era global document scroll lock: `html` and `body` now use `min-height: 100%`, hide horizontal overflow, and allow normal vertical document scrolling. The landing page can therefore grow naturally through every section while keeping its sticky header.
+- Retained the editor's dedicated desktop viewport containment on `.editor-shell` (`height: 100dvh; overflow: hidden`), its contained editor body, and independent sidebar scroll regions. Timeline geometry and resize behavior are unchanged.
+- Added a focused route-layout regression that checks the scrollable global document contract, landing horizontal containment, editor viewport lock, independent sidebar scrolling, and center-only resizable timeline columns.
+
 ## Current milestone: Public Quran Video landing page
 
 Complete:

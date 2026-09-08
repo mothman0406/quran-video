@@ -31,3 +31,14 @@ test("editor home affordance routes back to the public landing page", () => {
   const workspace = readFileSync(fromRoot("src/components/editor-workspace.tsx"), "utf8");
   assert.match(workspace, /<Link className="editor-brand" href="\/" aria-label="Quran Video home"/);
 });
+
+test("global document scrolling is available to the landing page while the editor owns its viewport lock", () => {
+  const globals = readFileSync(fromRoot("src/app/globals.css"), "utf8");
+
+  assert.match(globals, /html,body \{ width:100%; min-width:0; min-height:100%; margin:0; overflow-x:hidden; overflow-y:auto; \}/);
+  assert.doesNotMatch(globals, /html,body \{[^}]*height:100%;[^}]*overflow:hidden/);
+  assert.match(globals, /\.landing-page \{[^}]*min-width:0; overflow:hidden;/);
+  assert.match(globals, /\.editor-shell \{ height:100dvh; min-height:0; overflow:hidden;/);
+  assert.match(globals, /\.editor-sidebar-scroll \{[^}]*overflow:auto;/);
+  assert.match(globals, /\.editor-body \{ grid-template-columns:var\(--left-panel-width,var\(--sidebar-left-width\)\) 10px minmax\(0,1fr\) 10px var\(--right-panel-width,var\(--sidebar-right-width\)\); \}/);
+});
