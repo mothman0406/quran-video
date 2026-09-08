@@ -65,8 +65,13 @@ import {
   captionStyleToState,
   loadLocalStyles,
   saveLocalStyle,
+  clearCaptionLayerStyleOverrides,
+  hasCaptionLayerStyleOverrides,
+  patchCaptionLayerStyleOverrides,
+  resolveCaptionLayerStyle,
   type BuiltInStyleName,
   type CaptionStyle,
+  type CaptionLayer,
   type LocalCaptionStyle,
 } from "@/lib/editor/styles";
 import { quranFontDefinitions } from "@/lib/quran/content";
@@ -109,6 +114,7 @@ import { clampMediaTrim, clampTimelineViewport, createMediaTrim, createTimelineV
 import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 import { waveformPeaksFromPcm, type WaveformData } from "@/lib/editor/waveform";
 import { projectAssetFromMediaSource } from "@/lib/editor/project-assets";
+import { clearCaptionSelection, selectCaptionLayer, selectTimelineCaption } from "@/lib/editor/selection";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -220,6 +226,7 @@ export default function Home() {
     null,
   );
   const [selectedObject, setSelectedObject] = useState<CaptionObject | null>(null);
+  const [styleScope, setStyleScope] = useState<"all" | "segment">("all");
   const [splitBoundary, setSplitBoundary] = useState(1);
   const [typography, setTypography] = useState<Typography>(DEFAULT_TYPOGRAPHY);
   const [captionBackground, setCaptionBackground] = useState<CaptionBackground>(
@@ -1419,27 +1426,37 @@ export default function Home() {
     setMediaTrim(next);
   }
   function selectSegment(segment: CaptionSegment) {
-    setSelectedSegmentId(segment.id);
-    setSelectedObject(null);
+    const selection = selectTimelineCaption(segment);
+    setSelectedSegmentId(selection.selectedCaptionSegmentId);
+    setSelectedObject(selection.selectedCaptionLayer);
+    setStyleScope("all");
     setSplitBoundary(
       Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)),
     );
-    seekTo(Math.min(segment.startMs + 250, Math.max(segment.startMs, segment.endMs - 1)));
+  }
+  function selectCaptionObject(segment: CaptionSegment, kind: CaptionObject | null) {
+    const selection = kind ? selectCaptionLayer(segment, kind) : clearCaptionSelection();
+    setSelectedSegmentId(selection.selectedCaptionSegmentId);
+    setSelectedObject(selection.selectedCaptionLayer);
+    if (!kind || selectedSegmentId !== segment.id) setStyleScope("all");
+    if (kind) setSplitBoundary(Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)));
   }
   const handleObjectPointerDown = useCallback(
-    (event: PointerEvent<HTMLDivElement>, kind: CaptionObject) => {
+    (event: PointerEvent<HTMLDivElement>, segment: CaptionSegment, kind: CaptionObject) => {
       event.stopPropagation();
+      setSelectedSegmentId(segment.id);
       setSelectedObject(kind);
+      if (selectedSegmentId !== segment.id) setStyleScope("all");
       canvasInteraction.current = {
         kind,
         mode: "drag",
         pointerX: event.clientX,
         pointerY: event.clientY,
-        positioning: { ...positioning, translationPositionLinked: false },
+        positioning: { ...(styleScope === "segment" && selectedSegmentId ? (() => { const segment = segments.find((item) => item.id === selectedSegmentId); return segment ? resolveCaptionLayerStyle(captionStyleFromState(typography, positioning, captionBackground, transitionSettings), segment.styleOverrides, kind).positioning : positioning; })() : positioning), translationPositionLinked: false },
       };
       event.currentTarget.setPointerCapture(event.pointerId);
     },
-    [positioning],
+    [captionBackground, positioning, selectedSegmentId, segments, styleScope, transitionSettings, typography],
   );
   const handleResizePointerDown = useCallback(
     (event: PointerEvent<HTMLButtonElement>, kind: CaptionObject, edge: CaptionResizeEdge) => {
@@ -1451,11 +1468,11 @@ export default function Home() {
         edge,
         pointerX: event.clientX,
         pointerY: event.clientY,
-        positioning: { ...positioning, translationPositionLinked: false },
+        positioning: { ...(styleScope === "segment" && selectedSegmentId ? (() => { const segment = segments.find((item) => item.id === selectedSegmentId); return segment ? resolveCaptionLayerStyle(captionStyleFromState(typography, positioning, captionBackground, transitionSettings), segment.styleOverrides, kind).positioning : positioning; })() : positioning), translationPositionLinked: false },
       };
       event.currentTarget.setPointerCapture(event.pointerId);
     },
-    [positioning],
+    [captionBackground, positioning, selectedSegmentId, segments, styleScope, transitionSettings, typography],
   );
   const handleObjectPointerMove = useCallback(
     (event: PointerEvent<HTMLElement>) => {
@@ -1464,17 +1481,32 @@ export default function Home() {
       if (!interaction || !rect) return;
       const dx = (event.clientX - interaction.pointerX) / rect.width;
       const dy = (event.clientY - interaction.pointerY) / rect.height;
+      const positioningKind = interaction.kind === "arabic" ? "arabic" : "translation";
+      const savePositioning = (previous: CaptionPositioning, next: CaptionPositioning) => {
+        if (styleScope !== "segment" || !selectedSegmentId) {
+          setPositioning(next);
+          return;
+        }
+        const changed = Object.fromEntries((Object.keys(next) as Array<keyof CaptionPositioning>)
+          .filter((key) => next[key] !== previous[key])
+          .map((key) => [key, next[key]])) as Partial<CaptionPositioning>;
+        if (!Object.keys(changed).length) return;
+        const layer: CaptionLayer = selectedObject ?? "arabic";
+        setSegments((current) => current.map((segment) => segment.id === selectedSegmentId
+          ? { ...segment, styleOverrides: patchCaptionLayerStyleOverrides(segment.styleOverrides, layer, { positioning: changed }) }
+          : segment));
+      };
       if (interaction.mode === "drag") {
         const start = interaction.positioning;
-        setPositioning(updateCaptionPosition(start, interaction.kind, interaction.kind === "arabic" ? start.x + dx : start.translationX + dx, interaction.kind === "arabic" ? start.y + dy : start.translationY + dy, projectFormat));
+        savePositioning(start, updateCaptionPosition(start, positioningKind, interaction.kind === "arabic" ? start.x + dx : start.translationX + dx, interaction.kind === "arabic" ? start.y + dy : start.translationY + dy, projectFormat));
       } else {
-        const startWidth = interaction.kind === "arabic" ? interaction.positioning.maxWidthPercent : (interaction.positioning.translationMaxWidthPercent ?? interaction.positioning.maxWidthPercent);
+        const startWidth = positioningKind === "arabic" ? interaction.positioning.maxWidthPercent : (interaction.positioning.translationMaxWidthPercent ?? interaction.positioning.maxWidthPercent);
         const direction = interaction.edge === "left" ? -1 : 1;
         const nextWidth = startWidth + direction * dx * 2;
-        setPositioning(resizeCaptionWidth(interaction.positioning, interaction.kind, nextWidth, projectFormat));
+        savePositioning(interaction.positioning, resizeCaptionWidth(interaction.positioning, positioningKind, nextWidth, projectFormat));
       }
     },
-    [projectFormat],
+    [projectFormat, selectedObject, selectedSegmentId, styleScope],
   );
   const handleObjectPointerUp = useCallback(() => {
     canvasInteraction.current = null;
@@ -1508,8 +1540,10 @@ export default function Home() {
   function handleSegmentPointerDown(event: PointerEvent<HTMLButtonElement>, segment: CaptionSegment) {
     event.stopPropagation();
     const pointerStartMs = timelineTimeFromPointer(event);
-    setSelectedSegmentId(segment.id);
-    setSelectedObject(null);
+    const selection = selectTimelineCaption(segment);
+    setSelectedSegmentId(selection.selectedCaptionSegmentId);
+    setSelectedObject(selection.selectedCaptionLayer);
+    setStyleScope("all");
     setSplitBoundary(Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)));
     timelineInteraction.current = { id: segment.id, mode: "body", pointerStartMs, initialStartMs: segment.startMs, initialEndMs: segment.endMs };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -1522,8 +1556,10 @@ export default function Home() {
     event.stopPropagation();
     timelineInteraction.current = { id: segment.id, mode: edge, pointerStartMs: timelineTimeFromPointer(event), initialStartMs: segment.startMs, initialEndMs: segment.endMs };
     draggingEdge.current = edge;
-    setSelectedSegmentId(segment.id);
-    setSelectedObject(null);
+    const selection = selectTimelineCaption(segment);
+    setSelectedSegmentId(selection.selectedCaptionSegmentId);
+    setSelectedObject(selection.selectedCaptionLayer);
+    setStyleScope("all");
     setSplitBoundary(Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)));
     const video = videoRef.current;
     if (video && !video.paused) video.pause();
@@ -1645,14 +1681,30 @@ export default function Home() {
   );
   const selectedSegment = selectedIndex >= 0 ? segments[selectedIndex] : null;
   const selectedFormatDefinition = projectFormatDefinition(projectFormat);
+  const globalCaptionStyle = captionStyleFromState(typography, positioning, captionBackground, transitionSettings);
+  const selectedLayer: CaptionLayer = selectedObject ?? "arabic";
+  const inspectorStyle = selectedSegment
+    ? resolveCaptionLayerStyle(globalCaptionStyle, selectedSegment.styleOverrides, selectedLayer)
+    : globalCaptionStyle;
+  function patchSelectedLayerStyle(patch: Parameters<typeof patchCaptionLayerStyleOverrides>[2]) {
+    if (!selectedSegment || styleScope !== "segment") return false;
+    setSegments((current) => current.map((segment) => segment.id === selectedSegment.id
+      ? { ...segment, styleOverrides: patchCaptionLayerStyleOverrides(segment.styleOverrides, selectedLayer, patch) }
+      : segment));
+    return true;
+  }
   const updateTypography = <K extends keyof Typography>(
     key: K,
     value: Typography[K],
-  ) => setTypography((current) => ({ ...current, [key]: value }));
+  ) => {
+    if (!patchSelectedLayerStyle({ typography: { [key]: value } })) setTypography((current) => ({ ...current, [key]: value }));
+  };
   const updateCaptionBackground = <K extends keyof CaptionBackground>(
     key: K,
     value: CaptionBackground[K],
-  ) => setCaptionBackground((current) => ({ ...current, [key]: value }));
+  ) => {
+    if (!patchSelectedLayerStyle({ captionBackground: { [key]: value } })) setCaptionBackground((current) => ({ ...current, [key]: value }));
+  };
   function applyStyle(style: CaptionStyle) {
     const next = captionStyleToState(style);
     setTypography(next.typography);
@@ -1679,6 +1731,12 @@ export default function Home() {
     );
   }
   function resetSelectedObjectStyle() {
+    if (selectedSegment && styleScope === "segment") {
+      setSegments((current) => current.map((segment) => segment.id === selectedSegment.id
+        ? { ...segment, styleOverrides: clearCaptionLayerStyleOverrides(segment.styleOverrides, selectedLayer) }
+        : segment));
+      return;
+    }
     const defaults = resetTypographyDefaults();
     if (selectedObject === "arabic") {
       setTypography((current) => ({ ...current, quranStyle: defaults.quranStyle, arabicFontFamily: defaults.arabicFontFamily, arabicFontSize: defaults.arabicFontSize, textColor: defaults.textColor, wordHighlightMode: defaults.wordHighlightMode, wordHighlightColor: defaults.wordHighlightColor, arabicOutlineEnabled: defaults.arabicOutlineEnabled, arabicOutlineWidth: defaults.arabicOutlineWidth, arabicOutlineColor: defaults.arabicOutlineColor, arabicShadowEnabled: defaults.arabicShadowEnabled, arabicShadowBlur: defaults.arabicShadowBlur, arabicShadowStrength: defaults.arabicShadowStrength, arabicOpacity: defaults.arabicOpacity, textAlign: defaults.textAlign, arabicLineSpacing: defaults.arabicLineSpacing }));
@@ -1687,7 +1745,8 @@ export default function Home() {
     }
   }
   function alignTranslationBelowArabic() {
-    setPositioning((current) => clampCaptionPositioning({ ...current, translationPositionLinked: true }, projectFormat));
+    const next = clampCaptionPositioning({ ...inspectorStyle.positioning, translationPositionLinked: true }, projectFormat);
+    if (!patchSelectedLayerStyle({ positioning: { translationPositionLinked: next.translationPositionLinked } })) setPositioning(next);
   }
   function changeFormat(preset: ProjectFormatPreset) {
     const definition = PROJECT_FORMATS[preset];
@@ -1844,6 +1903,9 @@ export default function Home() {
         selectedSegment={selectedSegment}
         selectedIndex={selectedIndex}
         selectedObject={selectedObject}
+        styleScope={styleScope}
+        inspectorStyle={inspectorStyle}
+        selectedHasStyleOverrides={selectedSegment ? hasCaptionLayerStyleOverrides(selectedSegment.styleOverrides, selectedLayer) : false}
         splitBoundary={splitBoundary}
         typography={typography}
         captionBackground={captionBackground}
@@ -1897,12 +1959,12 @@ export default function Home() {
         onMediaEnded={(event) => stopPlaybackClock(event, "ended")}
         onMediaSeeking={seekPlaybackClock}
         onVideoError={() => setErrorMessage("This video could not be previewed in your browser.")}
-        onSelectObject={setSelectedObject}
+        onSelectObject={selectCaptionObject}
         onObjectPointerDown={handleObjectPointerDown}
         onResizePointerDown={handleResizePointerDown}
         onObjectPointerMove={handleObjectPointerMove}
         onObjectPointerUp={handleObjectPointerUp}
-        onCanvasBackgroundPointerDown={() => setSelectedObject(null)}
+        onCanvasBackgroundPointerDown={() => { setSelectedObject(null); setSelectedSegmentId(null); setStyleScope("all"); }}
         onSelectSegment={selectSegment}
         onSegmentPointerDown={handleSegmentPointerDown}
         onTimelinePointerDown={seekTimeline}
@@ -1944,6 +2006,7 @@ export default function Home() {
         onSaveCurrentStyle={saveCurrentStyle}
         onSetLocalStyleName={setLocalStyleName}
         onResetSelectedObjectStyle={resetSelectedObjectStyle}
+        onSetStyleScope={setStyleScope}
         onAlignTranslation={alignTranslationBelowArabic}
         onSetSplitBoundary={setSplitBoundary}
         onSplit={splitSelected}

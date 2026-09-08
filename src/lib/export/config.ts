@@ -19,7 +19,7 @@ export function createLocalExportConfiguration(input: {
   // Safe-area guides and editor controls deliberately have no export representation.
   return {
     format: exportFormatForPlan(entitlements.plan, input.format),
-    segments: input.segments.map((segment) => ({ ...segment, verseKeys: [...segment.verseKeys], ...(segment.wordTimings ? { wordTimings: segment.wordTimings.map((timing) => ({ ...timing })) } : {}), timingEvidence: { ...segment.timingEvidence, start: { ...segment.timingEvidence.start }, end: { ...segment.timingEvidence.end } } })),
+    segments: input.segments.map((segment) => ({ ...segment, verseKeys: [...segment.verseKeys], ...(segment.wordTimings ? { wordTimings: segment.wordTimings.map((timing) => ({ ...timing })) } : {}), ...(segment.styleOverrides ? { styleOverrides: JSON.parse(JSON.stringify(segment.styleOverrides)) } : {}), timingEvidence: { ...segment.timingEvidence, start: { ...segment.timingEvidence.start }, end: { ...segment.timingEvidence.end } } })),
     typography: { ...input.typography },
     captionBackground: { ...input.captionBackground },
     positioning: { ...input.positioning },

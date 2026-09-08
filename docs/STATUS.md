@@ -1,5 +1,18 @@
 # Status
 
+## Current milestone: Unified caption inspector, style scope, and workspace panels
+
+Complete:
+
+- Timeline and canvas now share one selected `CaptionSegment` plus selected visual layer. Timeline blocks select their exact segment's Arabic layer without seeking; Arabic and translation canvas clicks select the owning segment and keep the same segment timing controls visible.
+- The inspector's empty state appears only when no valid caption selection exists. Quran/translation styling and Caption Segment timing, split, merge, and reset controls are available together, including independently selected split pieces and basmalah preludes.
+- **All captions** is the default style scope. **This segment** writes only property-level, layer-specific presentation overrides; resolving a segment merges those properties with the global style, and **Use global style** removes only local presentation overrides.
+- Preview and export share `resolveCaptionLayerStyle`, so Arabic and translation local overrides resolve equivalently in the editor and rendered output. Caption text, recognition evidence, canonical word ownership, and timing stay untouched by style changes.
+- Left assets sidebar, right inspector, and bottom timeline are independently collapsible. The timeline retains zoom/pan/playhead/selection and supports a clamped drag resize with double-click reset; panel layout is session UI state and does not change project media time or caption content.
+- The desktop shell remains `100dvh` with internal panel scrolling and fit/contain preview behavior.
+
+Verification: `npm test` (209 passing), `npx tsc --noEmit`, `npm run lint`, and `npm run build` pass. Lint retains four pre-existing unused legacy recognition-helper warnings; build retains the pre-existing non-fatal VAD ONNX Runtime dynamic-require warning. Real recognized-video browser validation remains pending because this workspace has no browser automation or recognized-video fixture.
+
 ## Current milestone: Canonical Quran word highlighting
 
 Complete:

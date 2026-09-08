@@ -4,13 +4,14 @@ import type { QuranVerseContent } from "../quran/content.ts";
 import type { VerseAlignment } from "./recognition.ts";
 import type { VerseBoundary } from "../recognition/core.ts";
 import type { z } from "zod";
-import type { CaptionBackgroundSchema, CaptionPositioningSchema, TransitionSettingsSchema, TypographySchema } from "../schemas/project.ts";
+import type { CaptionBackgroundSchema, CaptionPositioningSchema, CaptionStyleOverridesSchema, TransitionSettingsSchema, TypographySchema } from "../schemas/project.ts";
 import type { ProjectFormat } from "../schemas/project.ts";
 
 export type Typography = z.infer<typeof TypographySchema>;
 export type CaptionBackground = z.infer<typeof CaptionBackgroundSchema>;
 export type CaptionPositioning = z.infer<typeof CaptionPositioningSchema>;
 export type TransitionSettings = z.infer<typeof TransitionSettingsSchema>;
+export type CaptionStyleOverrides = z.infer<typeof CaptionStyleOverridesSchema>;
 export type CaptionPresentationSettings = { showVerseNumber: boolean };
 
 export const DEFAULT_CAPTION_PRESENTATION: CaptionPresentationSettings = {
@@ -493,6 +494,8 @@ export type CaptionSegment = CaptionSegmentBase & {
   verseKeys: string[];
   /** False on an intermediate split piece; legacy segments default to true. */
   showVerseNumberAtEnd?: boolean;
+  /** Presentation-only, property-level layer overrides. */
+  styleOverrides?: CaptionStyleOverrides;
 };
 
 export type OptionalPreludeTiming = {

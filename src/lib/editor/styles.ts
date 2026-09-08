@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CaptionStyleSchema } from "../schemas/project.ts";
+import { CaptionStyleOverridesSchema, CaptionStyleSchema } from "../schemas/project.ts";
 import {
   DEFAULT_CAPTION_BACKGROUND,
   DEFAULT_CAPTION_POSITIONING,
@@ -12,6 +12,8 @@ import {
 } from "./captions.ts";
 
 export type CaptionStyle = z.infer<typeof CaptionStyleSchema>;
+export type CaptionLayer = "arabic" | "translation" | "transliteration";
+export type CaptionStyleOverrides = z.infer<typeof CaptionStyleOverridesSchema>;
 export type BuiltInStyleName = "Minimal" | "Classic Mushaf" | "Cinematic" | "Social";
 
 export type LocalCaptionStyle = {
@@ -95,6 +97,59 @@ export const BUILT_IN_STYLES: Record<BuiltInStyleName, CaptionStyle> = {
 };
 
 export const DEFAULT_CAPTION_STYLE: CaptionStyle = style();
+
+/** Resolves one visual layer without freezing properties that still inherit. */
+export function resolveCaptionLayerStyle(
+  globalStyle: CaptionStyle,
+  overrides: CaptionStyleOverrides | undefined,
+  layer: CaptionLayer,
+): CaptionStyle {
+  const local = overrides?.[layer];
+  if (!local) return globalStyle;
+  return {
+    typography: { ...globalStyle.typography, ...local.typography },
+    positioning: { ...globalStyle.positioning, ...local.positioning },
+    captionBackground: { ...globalStyle.captionBackground, ...local.captionBackground },
+    transitionSettings: { ...globalStyle.transitionSettings, ...local.transitionSettings },
+  };
+}
+
+/** Adds only changed properties to one layer's existing local override. */
+export function patchCaptionLayerStyleOverrides(
+  overrides: CaptionStyleOverrides | undefined,
+  layer: CaptionLayer,
+  patch: NonNullable<CaptionStyleOverrides[CaptionLayer]>,
+): CaptionStyleOverrides {
+  const current = overrides?.[layer];
+  return {
+    ...overrides,
+    [layer]: {
+      ...current,
+      ...(patch.typography ? { typography: { ...current?.typography, ...patch.typography } } : {}),
+      ...(patch.positioning ? { positioning: { ...current?.positioning, ...patch.positioning } } : {}),
+      ...(patch.captionBackground ? { captionBackground: { ...current?.captionBackground, ...patch.captionBackground } } : {}),
+      ...(patch.transitionSettings ? { transitionSettings: { ...current?.transitionSettings, ...patch.transitionSettings } } : {}),
+    },
+  };
+}
+
+export function clearCaptionLayerStyleOverrides(
+  overrides: CaptionStyleOverrides | undefined,
+  layer: CaptionLayer,
+): CaptionStyleOverrides | undefined {
+  if (!overrides?.[layer]) return overrides;
+  const remaining = { ...overrides };
+  delete remaining[layer];
+  return Object.keys(remaining).length ? remaining : undefined;
+}
+
+export function hasCaptionLayerStyleOverrides(
+  overrides: CaptionStyleOverrides | undefined,
+  layer: CaptionLayer,
+): boolean {
+  const local = overrides?.[layer];
+  return Boolean(local && Object.values(local).some((value) => value && Object.keys(value).length));
+}
 
 function cloneStyle(value: CaptionStyle): CaptionStyle {
   return CaptionStyleSchema.parse(JSON.parse(JSON.stringify(value)));

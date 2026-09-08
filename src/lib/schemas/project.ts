@@ -95,6 +95,8 @@ export const CaptionSegmentSchema = z.strictObject({
    * legacy one-segment-per-ayah captions visible when the project toggle is on.
    */
   showVerseNumberAtEnd: z.boolean().optional(),
+  /** Presentation-only local overrides; omitted means fully inheriting global styles. */
+  styleOverrides: z.lazy(() => CaptionStyleOverridesSchema).optional(),
   timingEvidence: z.strictObject({
     start: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["fastconformer", "word-audio-refined", "word-timestamp", "merged-token-word1", "bounded-recovery", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown", "forced-alignment", "derived"]) }),
     end: z.strictObject({ timestampMs: PositiveNumber, source: z.enum(["fastconformer", "word-audio-refined", "word-timestamp", "merged-token-word1", "bounded-recovery", "token-interpolated", "chunk-interpolated", "low-confidence-fallback", "direct-asr-word", "chunk-text-alignment", "interpolation", "interpolated", "low-confidence", "micro-asr", "pcm-refined", "chunk-coarse", "unknown", "forced-alignment", "derived"]) }),
@@ -188,6 +190,37 @@ export const CaptionStyleSchema = z.strictObject({
   positioning: CaptionPositioningSchema,
   captionBackground: CaptionBackgroundSchema,
   transitionSettings: TransitionSettingsSchema,
+});
+
+/**
+ * A caption override deliberately stores only properties the editor changed.
+ * Keeping this nested and partial lets later global style changes continue to
+ * flow through every property a segment has not explicitly overridden.
+ */
+const CaptionStyleOverrideSchema = z.strictObject({
+  // Do not derive these from `.partial()` because field defaults would become
+  // accidental overrides when a saved project is parsed.
+  typography: z.strictObject({
+    quranStyle: z.enum(["madinah-qcf", "uthmani", "indopak", "kfgqpc"]).optional(), arabicFontFamily: z.string().min(1).optional(), translationFontFamily: z.string().min(1).optional(), transliterationFontFamily: z.string().min(1).optional(),
+    arabicFontSize: z.number().finite().positive().optional(), translationFontSize: z.number().finite().positive().optional(), transliterationFontSize: z.number().finite().positive().optional(), textColor: z.string().min(1).optional(), wordHighlightMode: z.enum(["off", "current-word", "read-so-far"]).optional(), wordHighlightColor: z.string().min(1).optional(),
+    arabicOutlineEnabled: z.boolean().optional(), arabicOutlineWidth: z.number().finite().nonnegative().optional(), arabicOutlineColor: z.string().min(1).optional(), arabicShadowEnabled: z.boolean().optional(), arabicShadowBlur: z.number().finite().nonnegative().optional(), arabicShadowStrength: z.number().finite().min(0).max(1).optional(), arabicOpacity: z.number().finite().min(0).max(1).optional(), textAlign: z.enum(["left", "center", "right"]).optional(), arabicLineSpacing: z.number().finite().positive().optional(),
+    translationVisible: z.boolean().optional(), translationTextColor: z.string().min(1).optional(), translationOutlineEnabled: z.boolean().optional(), translationOutlineWidth: z.number().finite().nonnegative().optional(), translationOutlineColor: z.string().min(1).optional(), translationShadowEnabled: z.boolean().optional(), translationShadowBlur: z.number().finite().nonnegative().optional(), translationShadowStrength: z.number().finite().min(0).max(1).optional(), translationOpacity: z.number().finite().min(0).max(1).optional(), translationSpacingBelowArabic: z.number().finite().nonnegative().optional(), translationTextAlign: z.enum(["left", "center", "right"]).optional(), transliterationVisible: z.boolean().optional(),
+  }).optional(),
+  positioning: z.strictObject({
+    anchor: z.enum(["top", "center", "bottom"]).optional(), x: z.number().finite().min(0).max(1).optional(), y: z.number().finite().min(0).max(1).optional(), translationX: z.number().finite().min(0).max(1).optional(), translationY: z.number().finite().min(0).max(1).optional(), translationPositionLinked: z.boolean().optional(), maxWidthPercent: z.number().finite().positive().max(1).optional(), translationMaxWidthPercent: z.number().finite().positive().max(1).optional(), translationGapPx: z.number().int().nonnegative().optional(),
+  }).optional(),
+  captionBackground: z.strictObject({
+    enabled: z.boolean().optional(), color: z.string().min(1).optional(), opacity: z.number().finite().min(0).max(1).optional(), cornerRadius: z.number().finite().nonnegative().optional(), horizontalPadding: z.number().finite().nonnegative().optional(), verticalPadding: z.number().finite().nonnegative().optional(),
+  }).optional(),
+  transitionSettings: z.strictObject({
+    type: z.enum(["none", "fade"]).optional(), fadeInMs: z.number().int().nonnegative().optional(), fadeOutMs: z.number().int().nonnegative().optional(), blurFadeEnabled: z.boolean().optional(), blurFadeMaxPx: z.number().finite().nonnegative().optional(),
+  }).optional(),
+});
+
+export const CaptionStyleOverridesSchema = z.strictObject({
+  arabic: CaptionStyleOverrideSchema.optional(),
+  translation: CaptionStyleOverrideSchema.optional(),
+  transliteration: CaptionStyleOverrideSchema.optional(),
 });
 
 export const ProjectSchema = z.strictObject({

@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ChangeEvent, type PointerEvent, type SyntheticEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent, type SyntheticEvent } from "react";
 import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "@/lib/editor/captions";
 import type { ProjectAsset, ProjectFormat, ProjectFormatPreset } from "@/lib/schemas/project";
 import type { ExportQuality } from "@/lib/export/quality";
 import type { ExportPhase, LocalExportDiagnostics, LocalExportResult } from "@/lib/export/types";
 import type { OutputProfile } from "@/lib/export/output";
-import type { LocalCaptionStyle } from "@/lib/editor/styles";
+import type { CaptionStyle, CaptionLayer, LocalCaptionStyle } from "@/lib/editor/styles";
 import type { CaptionObject, CaptionResizeEdge } from "@/components/caption-preview";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import { arabicCaptionDisplay, captionSegmentLabel, getActiveCaptionSegment } from "@/lib/editor/captions";
@@ -14,7 +14,7 @@ import CaptionPreview from "@/components/caption-preview";
 import SafeAreaOverlay from "@/components/safe-area-overlay";
 import AccountPanel from "@/components/account-panel";
 import { DEFAULT_SOURCE_VIDEO_FIT, PROJECT_FORMATS, projectFormatDefinition } from "@/lib/editor/formats";
-import { BUILT_IN_STYLES, type BuiltInStyleName, type CaptionStyle } from "@/lib/editor/styles";
+import { BUILT_IN_STYLES, type BuiltInStyleName } from "@/lib/editor/styles";
 import { quranFontDefinitions } from "@/lib/quran/content";
 import { formatTimelineClock, projectDurationMs, timeToViewportPosition, timelineItemGeometry, timelineRulerTicks, timelineTracks, type MediaSource, type MediaTrim, type TimelineItem, type TimelineViewport } from "@/lib/editor/media";
 import { waveformPeaksForViewport, type WaveformData } from "@/lib/editor/waveform";
@@ -46,6 +46,9 @@ type EditorWorkspaceProps = {
   selectedSegment: CaptionSegment | null;
   selectedIndex: number;
   selectedObject: CaptionObject | null;
+  styleScope: "all" | "segment";
+  inspectorStyle: CaptionStyle;
+  selectedHasStyleOverrides: boolean;
   splitBoundary: number;
   typography: Typography;
   captionBackground: CaptionBackground;
@@ -99,8 +102,8 @@ type EditorWorkspaceProps = {
   onMediaEnded: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onMediaSeeking: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onVideoError: () => void;
-  onSelectObject: (kind: CaptionObject | null) => void;
-  onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, kind: CaptionObject) => void;
+  onSelectObject: (segment: CaptionSegment, kind: CaptionObject | null) => void;
+  onObjectPointerDown: (event: PointerEvent<HTMLDivElement>, segment: CaptionSegment, kind: CaptionObject) => void;
   onResizePointerDown: (event: PointerEvent<HTMLButtonElement>, kind: CaptionObject, edge: CaptionResizeEdge) => void;
   onObjectPointerMove: (event: PointerEvent<HTMLElement>) => void;
   onObjectPointerUp: () => void;
@@ -146,6 +149,7 @@ type EditorWorkspaceProps = {
   onSaveCurrentStyle: () => void;
   onSetLocalStyleName: (value: string) => void;
   onResetSelectedObjectStyle: () => void;
+  onSetStyleScope: (scope: "all" | "segment") => void;
   onAlignTranslation: () => void;
   onSetSplitBoundary: (value: number) => void;
   onSplit: () => void;
@@ -174,10 +178,15 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const [assetsExpanded, setAssetsExpanded] = useState(false);
   const [youtubeChoicesOpen, setYoutubeChoicesOpen] = useState(false);
   const [timelineWidth, setTimelineWidth] = useState(600);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [timelineCollapsed, setTimelineCollapsed] = useState(false);
+  const [timelineHeight, setTimelineHeight] = useState(300);
+  const timelineResizeStart = useRef<{ y: number; height: number } | null>(null);
   const {
     videoFile, videoUrl, videoMetadata, mediaSource, projectAssets, activeMediaAssetId, mediaTrim, videoRef, previewRef, timelineRef, stage, progress, support,
     alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
-    selectedObject, splitBoundary, typography, captionBackground, projectFormat, positioning,
+    selectedObject, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, showVerseNumber, showSafeArea, projectName, dirty, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage, timingWarning,
     showCorrection, surah, startAyah, endAyah, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, entitlements, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
@@ -188,7 +197,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     onOpenCloudProjects, onSessionChange, onPlanChange, onDiscard, onNewProject, onExportOpen, onExport, onCancelExport, onDownloadExport,
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange,
     onSetShowVerseNumber, onSetShowSafeArea, onApplyStyle, onSaveCurrentStyle, onSetLocalStyleName,
-    onResetSelectedObjectStyle, onAlignTranslation, onSetSplitBoundary, onSplit, onMergePrevious,
+    onResetSelectedObjectStyle, onSetStyleScope, onAlignTranslation, onSetSplitBoundary, onSplit, onMergePrevious,
     onMergeNext, onResetTiming, onResetAllTiming, onTimelinePinchZoom,
   } = props;
   const durationMs = projectDurationMs(mediaSource);
@@ -202,6 +211,19 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     ...(typography.transliterationVisible ? [{ id: "project-text:transliteration", type: "text" as const, name: "Transliteration", sourceOrigin: "project-text" as const, createdAt: "", availability: "available" as const, segmentCount: segments.length }] : []),
   ], [projectAssets, segments.length, typography.translationVisible, typography.transliterationVisible]);
   const visibleDuration = Math.max(1, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs);
+  const clampTimelineHeight = (value: number) => Math.max(180, Math.min(Math.max(220, typeof window === "undefined" ? 620 : window.innerHeight - 190), Math.round(value)));
+  const toggleTimeline = () => setTimelineCollapsed((collapsed) => !collapsed);
+  const onTimelineResizeDown = (event: PointerEvent<HTMLButtonElement>) => {
+    if (timelineCollapsed) return;
+    timelineResizeStart.current = { y: event.clientY, height: timelineHeight };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const onTimelineResizeMove = (event: PointerEvent<HTMLButtonElement>) => {
+    const start = timelineResizeStart.current;
+    if (!start) return;
+    setTimelineHeight(clampTimelineHeight(start.height + start.y - event.clientY));
+  };
+  const onTimelineResizeUp = () => { timelineResizeStart.current = null; };
   useEffect(() => {
     const node = timelineRef.current;
     if (!node) return;
@@ -221,7 +243,11 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     node.addEventListener("wheel", onWheel, { passive: false });
     return () => node.removeEventListener("wheel", onWheel);
   }, [onTimelinePinchZoom, timelineRef, videoUrl]);
-  const objectLabel = selectedObject === "arabic" ? "Arabic" : selectedObject === "translation" ? "Translation" : null;
+  const selectedLayer: CaptionLayer = selectedObject ?? "arabic";
+  const objectLabel = selectedLayer === "arabic" ? "Arabic" : selectedLayer === "translation" ? "Translation" : "Transliteration";
+  const inspectorTypography = inspectorStyle.typography;
+  const inspectorBackground = inspectorStyle.captionBackground;
+  const inspectorPositioning = inspectorStyle.positioning;
   const updateObjectTypography = <K extends keyof Typography>(key: K, value: Typography[K]) => onTypographyChange(key, value);
   const renderTimelineItem = (item: TimelineItem) => {
     const geometry = timelineItemGeometry(item.startMs, item.endMs, timelineViewport);
@@ -234,7 +260,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     return <button key={item.id} type="button" aria-label={`Caption ${displayText}`} onPointerDown={(event) => onSegmentPointerDown(event, segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.stopPropagation(); onSelectSegment(segment); }} className={`editor-caption-block ${segment.id === selectedSegmentId ? "is-selected" : ""} ${getActiveCaptionSegment(segments, currentTimeMs)?.id === segment.id ? "is-active" : ""}`} style={style}><span className="editor-caption-block-label" dir="rtl">{item.label}</span><span className="editor-timing-handle editor-timing-handle-start" aria-label={`Resize ${captionSegmentLabel(segment)} start`} onPointerDown={(event) => onEdgeDown(event, "start", segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /><span className="editor-timing-handle editor-timing-handle-end" aria-label={`Resize ${captionSegmentLabel(segment)} end`} onPointerDown={(event) => onEdgeDown(event, "end", segment)} onPointerUp={onEdgeUp} onClick={(event) => { event.preventDefault(); event.stopPropagation(); }} /></button>;
   };
 
-  return <div className="editor-shell">
+  return <div className="editor-shell" style={{ "--timeline-height": `${timelineCollapsed ? 38 : timelineHeight}px` } as CSSProperties}>
     <header className="editor-topbar">
       <div className="editor-brand"><span className="editor-brand-mark">۝</span><div><p>Quran Video</p><span>Recitation editor</span></div></div>
       <div className="editor-project-title"><input aria-label="Project name" value={projectName} onChange={(event) => onProjectNameChange(event.target.value)} /><span>{videoFile?.name ?? "No local source"}</span></div>
@@ -247,8 +273,9 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
       </div>
     </header>
 
-    <div className="editor-body">
+    <div className={`editor-body ${leftCollapsed ? "is-left-collapsed" : ""} ${rightCollapsed ? "is-right-collapsed" : ""} ${timelineCollapsed ? "is-timeline-collapsed" : ""}`}>
       <aside className="editor-sidebar editor-sidebar-left">
+        <button className="editor-panel-collapse editor-panel-collapse-left" type="button" aria-label={leftCollapsed ? "Expand left sidebar" : "Collapse left sidebar"} onClick={() => setLeftCollapsed((value) => !value)}>{leftCollapsed ? "›" : "‹"}</button>
         <div className="editor-sidebar-scroll">
           <div className="editor-panel-heading"><div><SectionLabel>Media</SectionLabel><h2>{videoFile ? mediaSource?.kind === "audio" ? "Audio source" : "Video source" : "Import a source"}</h2></div><span className="editor-status-dot" /></div>
           <label className="editor-upload-mini"><span>↑</span><strong>Import</strong><small>Video or browser-supported audio</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>
@@ -301,11 +328,11 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           {videoUrl ? <div ref={previewRef} className={`project-preview-canvas editor-canvas ${mediaSource?.hasVideo ? "" : "editor-audio-canvas"}`} data-project-aspect-ratio={selectedFormatDefinition.aspectRatio} data-project-format={projectFormat.preset} style={{ aspectRatio: `${projectFormat.width} / ${projectFormat.height}` }} onPointerDown={onCanvasBackgroundPointerDown}>
             {mediaSource?.hasVideo ? <video ref={videoRef} className="h-full w-full object-contain" controls playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={(node) => { (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node as unknown as HTMLVideoElement; }} className="editor-audio-element" controls preload="metadata" src={videoUrl} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support audio playback.</audio>}
             {showSafeArea && <SafeAreaOverlay format={projectFormat} />}
-            <CaptionPreview currentTimeMs={currentTimeMs} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} />
+            <CaptionPreview currentTimeMs={currentTimeMs} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedSegmentId={selectedSegmentId} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} />
           </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
         </div>
         <div className="editor-playback-row"><span className="editor-playback-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(durationMs / 1000)}</span><span className="editor-playback-hint">Space to play · ← → to nudge</span></div>
-        {videoUrl && <div className="editor-timeline-panel"><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><div className="editor-timeline-controls"><button type="button" aria-label="Zoom out timeline" onClick={() => onTimelineZoom(timelineViewport.zoom / 2)}>−</button><input aria-label="Timeline zoom" type="range" min="1" max="128" step="1" value={timelineViewport.zoom} onChange={(event) => onTimelineZoom(Number(event.target.value))} /><button type="button" aria-label="Zoom in timeline" onClick={() => onTimelineZoom(timelineViewport.zoom * 2)}>+</button><button type="button" onClick={() => onTimelineZoom(1)}>Fit project</button><button type="button" onClick={onResetMediaTrim}>Reset trim</button></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
+        {videoUrl && <div className="editor-timeline-panel"><button className="editor-timeline-resize" type="button" aria-label="Resize timeline" onPointerDown={onTimelineResizeDown} onPointerMove={onTimelineResizeMove} onPointerUp={onTimelineResizeUp} onDoubleClick={() => setTimelineHeight(300)} /><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><div className="editor-timeline-controls"><button type="button" aria-label={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} onClick={toggleTimeline}>{timelineCollapsed ? "↑" : "↓"}</button><button type="button" aria-label="Zoom out timeline" onClick={() => onTimelineZoom(timelineViewport.zoom / 2)}>−</button><input aria-label="Timeline zoom" type="range" min="1" max="128" step="1" value={timelineViewport.zoom} onChange={(event) => onTimelineZoom(Number(event.target.value))} /><button type="button" aria-label="Zoom in timeline" onClick={() => onTimelineZoom(timelineViewport.zoom * 2)}>+</button><button type="button" onClick={() => onTimelineZoom(1)}>Fit project</button><button type="button" onClick={onResetMediaTrim}>Reset trim</button></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
           <div className="editor-timeline-labels">{tracks.map((track) => <span className="editor-track-label" key={track.kind}>{track.label}</span>)}</div>
           <div ref={timelineRef} className="editor-timeline-content" onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove}>
             <div className="editor-timeline-ruler">{rulerTicks.map((tick) => <span key={tick} style={{ left: `${timeToViewportPosition(tick, timelineViewport) * 100}%` }}>{formatTimelineClock(tick, visibleDuration < 2_000)}</span>)}</div>
@@ -325,32 +352,35 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
       </section>
 
       <aside className="editor-sidebar editor-sidebar-right">
+        <button className="editor-panel-collapse editor-panel-collapse-right" type="button" aria-label={rightCollapsed ? "Expand inspector" : "Collapse inspector"} onClick={() => setRightCollapsed((value) => !value)}>{rightCollapsed ? "‹" : "›"}</button>
         <div className="editor-sidebar-scroll">
-          {selectedObject ? <>
-            <div className="editor-inspector-title"><div><SectionLabel>Selected object</SectionLabel><h2>{objectLabel}</h2></div><button className="editor-close-selection" type="button" onClick={() => onSelectObject(null)}>×</button></div>
+          {selectedSegment ? <>
+            <div className="editor-inspector-title"><div><SectionLabel>Selected object</SectionLabel><h2>{objectLabel}</h2></div><button className="editor-close-selection" type="button" onClick={() => onSelectObject(selectedSegment, null)}>×</button></div>
             <p className="editor-muted">Drag on canvas to move · handles change width</p>
-            {selectedObject === "arabic" ? <>
-              <SectionLabel>Quran style</SectionLabel><select className="editor-select" value={typography.quranStyle} onChange={(event) => onTypographyChange("quranStyle", event.target.value as Typography["quranStyle"])}>{Object.entries(quranFontDefinitions).map(([value, font]) => <option key={value} value={value} disabled={!availableQuranStyles.includes(value)}>{font.label}</option>)}</select>
-              <div className="editor-control-row"><label>Size <input type="range" min="16" max="96" value={typography.arabicFontSize} onChange={(event) => updateObjectTypography("arabicFontSize", Number(event.target.value))} /></label><output>{typography.arabicFontSize}px</output></div>
-              <div className="editor-control-row"><label>Opacity <input type="range" min="0" max="1" step="0.01" value={typography.arabicOpacity} onChange={(event) => updateObjectTypography("arabicOpacity", Number(event.target.value))} /></label><output>{Math.round(typography.arabicOpacity * 100)}%</output></div>
-              <div className="editor-color-row"><label>Arabic text color</label><input aria-label="Arabic text color" type="color" value={typography.textColor} onChange={(event) => updateObjectTypography("textColor", event.target.value)} /></div>
-              <label className="editor-field-label">Word highlight<select aria-label="Word Highlight" className="editor-select" value={typography.wordHighlightMode} onChange={(event) => updateObjectTypography("wordHighlightMode", event.target.value as Typography["wordHighlightMode"])}><option value="off">Off</option><option value="current-word">Current word</option><option value="read-so-far">Read so far</option></select></label>
-              {typography.wordHighlightMode !== "off" && <div className="editor-color-row"><label>Highlight color</label><input aria-label="Highlight color" type="color" value={typography.wordHighlightColor} onChange={(event) => updateObjectTypography("wordHighlightColor", event.target.value)} /></div>}
-              <SectionLabel>Alignment</SectionLabel><Segmented value={typography.textAlign} options={[["left", "Left"], ["center", "Center"], ["right", "Right"]]} onChange={(value) => updateObjectTypography("textAlign", value as Typography["textAlign"])} />
-              <label className="editor-toggle"><input checked={typography.arabicOutlineEnabled} type="checkbox" onChange={(event) => updateObjectTypography("arabicOutlineEnabled", event.target.checked)} /><span />Outline</label>{typography.arabicOutlineEnabled && <div className="editor-color-row"><label>Outline color</label><input type="color" value={typography.arabicOutlineColor} onChange={(event) => updateObjectTypography("arabicOutlineColor", event.target.value)} /></div>}<label className="editor-toggle"><input checked={typography.arabicShadowEnabled} type="checkbox" onChange={(event) => updateObjectTypography("arabicShadowEnabled", event.target.checked)} /><span />Shadow</label>
-              <div className="editor-control-row"><label>Line spacing <input type="range" min="1" max="2" step="0.05" value={typography.arabicLineSpacing} onChange={(event) => updateObjectTypography("arabicLineSpacing", Number(event.target.value))} /></label><output>{typography.arabicLineSpacing}</output></div>
+            {selectedLayer === "arabic" ? <>
+              <SectionLabel>Quran style</SectionLabel><select className="editor-select" value={inspectorTypography.quranStyle} onChange={(event) => onTypographyChange("quranStyle", event.target.value as Typography["quranStyle"])}>{Object.entries(quranFontDefinitions).map(([value, font]) => <option key={value} value={value} disabled={!availableQuranStyles.includes(value)}>{font.label}</option>)}</select>
+              <div className="editor-control-row"><label>Size <input type="range" min="16" max="96" value={inspectorTypography.arabicFontSize} onChange={(event) => updateObjectTypography("arabicFontSize", Number(event.target.value))} /></label><output>{inspectorTypography.arabicFontSize}px</output></div>
+              <div className="editor-control-row"><label>Opacity <input type="range" min="0" max="1" step="0.01" value={inspectorTypography.arabicOpacity} onChange={(event) => updateObjectTypography("arabicOpacity", Number(event.target.value))} /></label><output>{Math.round(inspectorTypography.arabicOpacity * 100)}%</output></div>
+              <div className="editor-color-row"><label>Arabic text color</label><input aria-label="Arabic text color" type="color" value={inspectorTypography.textColor} onChange={(event) => updateObjectTypography("textColor", event.target.value)} /></div>
+              <label className="editor-field-label">Word highlight<select aria-label="Word Highlight" className="editor-select" value={inspectorTypography.wordHighlightMode} onChange={(event) => updateObjectTypography("wordHighlightMode", event.target.value as Typography["wordHighlightMode"])}><option value="off">Off</option><option value="current-word">Current word</option><option value="read-so-far">Read so far</option></select></label>
+              {inspectorTypography.wordHighlightMode !== "off" && <div className="editor-color-row"><label>Highlight color</label><input aria-label="Highlight color" type="color" value={inspectorTypography.wordHighlightColor} onChange={(event) => updateObjectTypography("wordHighlightColor", event.target.value)} /></div>}
+              <SectionLabel>Alignment</SectionLabel><Segmented value={inspectorTypography.textAlign} options={[["left", "Left"], ["center", "Center"], ["right", "Right"]]} onChange={(value) => updateObjectTypography("textAlign", value as Typography["textAlign"])} />
+              <label className="editor-toggle"><input checked={inspectorTypography.arabicOutlineEnabled} type="checkbox" onChange={(event) => updateObjectTypography("arabicOutlineEnabled", event.target.checked)} /><span />Outline</label>{inspectorTypography.arabicOutlineEnabled && <div className="editor-color-row"><label>Outline color</label><input type="color" value={inspectorTypography.arabicOutlineColor} onChange={(event) => updateObjectTypography("arabicOutlineColor", event.target.value)} /></div>}<label className="editor-toggle"><input checked={inspectorTypography.arabicShadowEnabled} type="checkbox" onChange={(event) => updateObjectTypography("arabicShadowEnabled", event.target.checked)} /><span />Shadow</label>
+              <div className="editor-control-row"><label>Line spacing <input type="range" min="1" max="2" step="0.05" value={inspectorTypography.arabicLineSpacing} onChange={(event) => updateObjectTypography("arabicLineSpacing", Number(event.target.value))} /></label><output>{inspectorTypography.arabicLineSpacing}</output></div>
             </> : <>
-              <SectionLabel>Translation</SectionLabel><select className="editor-select" value={typography.translationFontFamily} onChange={(event) => updateObjectTypography("translationFontFamily", event.target.value)}><option>Arial, Helvetica, sans-serif</option><option>Georgia, serif</option><option>Verdana, sans-serif</option></select>
-              <div className="editor-control-row"><label>Size <input type="range" min="10" max="48" value={typography.translationFontSize} onChange={(event) => updateObjectTypography("translationFontSize", Number(event.target.value))} /></label><output>{typography.translationFontSize}px</output></div>
-              <div className="editor-control-row"><label>Opacity <input type="range" min="0" max="1" step="0.01" value={typography.translationOpacity} onChange={(event) => updateObjectTypography("translationOpacity", Number(event.target.value))} /></label><output>{Math.round(typography.translationOpacity * 100)}%</output></div>
-              <div className="editor-color-row"><label>Text color</label><input type="color" value={typography.translationTextColor} onChange={(event) => updateObjectTypography("translationTextColor", event.target.value)} /></div>
-              <SectionLabel>Alignment</SectionLabel><Segmented value={typography.translationTextAlign} options={[["left", "Left"], ["center", "Center"], ["right", "Right"]]} onChange={(value) => updateObjectTypography("translationTextAlign", value as Typography["translationTextAlign"])} />
-              <label className="editor-toggle"><input checked={typography.translationOutlineEnabled} type="checkbox" onChange={(event) => updateObjectTypography("translationOutlineEnabled", event.target.checked)} /><span />Outline</label>{typography.translationOutlineEnabled && <div className="editor-color-row"><label>Outline color</label><input type="color" value={typography.translationOutlineColor} onChange={(event) => updateObjectTypography("translationOutlineColor", event.target.value)} /></div>}<label className="editor-toggle"><input checked={typography.translationShadowEnabled} type="checkbox" onChange={(event) => updateObjectTypography("translationShadowEnabled", event.target.checked)} /><span />Shadow</label>
-              <label className="editor-toggle"><input checked={typography.translationVisible} type="checkbox" onChange={(event) => updateObjectTypography("translationVisible", event.target.checked)} /><span />Visible</label>
+              <SectionLabel>Translation</SectionLabel><select className="editor-select" value={inspectorTypography.translationFontFamily} onChange={(event) => updateObjectTypography("translationFontFamily", event.target.value)}><option>Arial, Helvetica, sans-serif</option><option>Georgia, serif</option><option>Verdana, sans-serif</option></select>
+              <div className="editor-control-row"><label>Size <input type="range" min="10" max="48" value={inspectorTypography.translationFontSize} onChange={(event) => updateObjectTypography("translationFontSize", Number(event.target.value))} /></label><output>{inspectorTypography.translationFontSize}px</output></div>
+              <div className="editor-control-row"><label>Opacity <input type="range" min="0" max="1" step="0.01" value={inspectorTypography.translationOpacity} onChange={(event) => updateObjectTypography("translationOpacity", Number(event.target.value))} /></label><output>{Math.round(inspectorTypography.translationOpacity * 100)}%</output></div>
+              <div className="editor-color-row"><label>Text color</label><input type="color" value={inspectorTypography.translationTextColor} onChange={(event) => updateObjectTypography("translationTextColor", event.target.value)} /></div>
+              <SectionLabel>Alignment</SectionLabel><Segmented value={inspectorTypography.translationTextAlign} options={[["left", "Left"], ["center", "Center"], ["right", "Right"]]} onChange={(value) => updateObjectTypography("translationTextAlign", value as Typography["translationTextAlign"])} />
+              <label className="editor-toggle"><input checked={inspectorTypography.translationOutlineEnabled} type="checkbox" onChange={(event) => updateObjectTypography("translationOutlineEnabled", event.target.checked)} /><span />Outline</label>{inspectorTypography.translationOutlineEnabled && <div className="editor-color-row"><label>Outline color</label><input type="color" value={inspectorTypography.translationOutlineColor} onChange={(event) => updateObjectTypography("translationOutlineColor", event.target.value)} /></div>}<label className="editor-toggle"><input checked={inspectorTypography.translationShadowEnabled} type="checkbox" onChange={(event) => updateObjectTypography("translationShadowEnabled", event.target.checked)} /><span />Shadow</label>
+              <label className="editor-toggle"><input checked={inspectorTypography.translationVisible} type="checkbox" onChange={(event) => updateObjectTypography("translationVisible", event.target.checked)} /><span />Visible</label>
             </>}
-            <div className="editor-divider" /><SectionLabel>Caption surface</SectionLabel><label className="editor-toggle"><input checked={captionBackground.enabled} type="checkbox" onChange={(event) => onBackgroundChange("enabled", event.target.checked)} /><span />Background</label>{captionBackground.enabled && <div className="editor-color-row"><label>Surface color</label><input type="color" value={captionBackground.color} onChange={(event) => onBackgroundChange("color", event.target.value)} /></div>}
-            {selectedObject === "translation" && !positioning.translationPositionLinked && <button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onAlignTranslation}>Align below Arabic</button>}
-            <button className="editor-text-button" type="button" onClick={onResetSelectedObjectStyle}>Reset {(objectLabel ?? "object").toLowerCase()} style</button>
+            <div className="editor-divider" /><SectionLabel>Apply to</SectionLabel><Segmented value={styleScope} options={[["all", "All captions"], ["segment", "This segment"]]} onChange={(value) => onSetStyleScope(value as "all" | "segment")} />
+            {selectedHasStyleOverrides && <p className="editor-style-indicator">Custom segment style</p>}
+            <SectionLabel>Caption surface</SectionLabel><label className="editor-toggle"><input checked={inspectorBackground.enabled} type="checkbox" onChange={(event) => onBackgroundChange("enabled", event.target.checked)} /><span />Background</label>{inspectorBackground.enabled && <div className="editor-color-row"><label>Surface color</label><input type="color" value={inspectorBackground.color} onChange={(event) => onBackgroundChange("color", event.target.value)} /></div>}
+            {selectedLayer === "translation" && !inspectorPositioning.translationPositionLinked && <button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onAlignTranslation}>Align below Arabic</button>}
+            <button className="editor-text-button" type="button" onClick={onResetSelectedObjectStyle}>{styleScope === "segment" ? "Use global style" : `Reset ${objectLabel.toLowerCase()} style`}</button>
           </> : <div className="editor-inspector-empty"><span className="editor-inspector-glyph">＋</span><h2>Select a caption</h2><p>Click Arabic or translation on the canvas to edit its style, position, and width.</p></div>}
 
           {selectedSegment && <div className="editor-segment-inspector"><div className="editor-divider" /><SectionLabel>Caption segment</SectionLabel><strong>{captionSegmentLabel(selectedSegment)}</strong><div className="editor-time-readout"><span>In <b>{(selectedSegment.startMs / 1000).toFixed(3)}s</b></span><span>Out <b>{(selectedSegment.endMs / 1000).toFixed(3)}s</b></span></div><p className="editor-muted">Drag the block or either edge to edit timing. Gaps and overlaps are allowed.</p><div className="editor-segment-actions"><select aria-label="Split Quran word boundary" className="editor-select" disabled={selectedSegment.contentKind !== "ayah"} value={splitBoundary} onChange={(event) => onSetSplitBoundary(Number(event.target.value))}>{Array.from({ length: Math.max(0, selectedSegment.arabic.trim().split(/\s+/).length - 1) }, (_, index) => <option key={index + 1} value={index + 1}>After word {index + 1}</option>)}</select><button className="editor-button editor-button-primary" type="button" disabled={selectedSegment.contentKind !== "ayah"} onClick={onSplit}>Split</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedSegment.contentKind !== "ayah" || selectedIndex < 1 || segments[selectedIndex - 1]?.contentKind !== "ayah"} onClick={onMergePrevious}>Merge ←</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedSegment.contentKind !== "ayah" || selectedIndex >= segments.length - 1 || segments[selectedIndex + 1]?.contentKind !== "ayah"} onClick={onMergeNext}>Merge →</button></div><div className="editor-segment-reset-actions"><button className="editor-text-button" type="button" onClick={onResetTiming}>Reset this timing</button><button className="editor-text-button" type="button" onClick={onResetAllTiming}>Reset all timing</button></div></div>}
