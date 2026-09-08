@@ -1,7 +1,9 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { MarketingQuranDemo } from "@/lib/landing/marketing-demo";
+import { LANDING_SHOWCASE, type LandingShowcaseAsset } from "@/lib/landing/showcase-assets";
 
-type LandingPageProps = { demos: MarketingQuranDemo[] };
+type LandingPageProps = { demos: MarketingQuranDemo[]; showcaseAssets: LandingShowcaseAsset[] };
 
 const features = [
   ["Quran-aware detection", "Identify a recited passage before you begin editing."],
@@ -36,15 +38,29 @@ function QuranCaption({ arabic, highlighted = false }: { arabic: string; highlig
   return <p className="landing-arabic" dir="rtl" lang="ar">{words.map((word, index) => <span className={highlighted && index < Math.ceil(words.length * 0.55) ? "landing-word-highlight" : undefined} key={`${word}-${index}`}>{word} </span>)}</p>;
 }
 
-function ProductCard({ arabic, variant, label }: { arabic: string; variant: string; label: string }) {
-  return <article className={`landing-video-card landing-video-card-${variant}`}>
-    <div className="landing-card-topline"><span>RECITATION</span><i /><span>00:18</span></div>
-    <div className="landing-card-caption"><QuranCaption arabic={arabic} highlighted={variant === "highlight"} /><p className="landing-card-translation">A caption treatment made for Quran recitation.</p></div>
-    <div className="landing-card-label">{label}</div>
+function FinishedVideoFallback({ arabic, style }: { arabic: string; style: (typeof LANDING_SHOWCASE)[number]["id"] }) {
+  return <div className={`landing-finished-example landing-finished-example-${style}`}>
+    {style === "minimal" && <QuranCaption arabic={arabic} />}
+    {style === "translation" && <><QuranCaption arabic={arabic} /><p className="landing-finished-translation">Translation in a balanced bilingual layout.</p></>}
+    {style === "highlight" && <QuranCaption arabic={arabic} highlighted />}
+    {style === "cinematic" && <><span className="landing-verse-reference">112:1</span><QuranCaption arabic={arabic} /></>}
+  </div>;
+}
+
+function FinishedVideoExample({ example, arabic, asset }: { example: (typeof LANDING_SHOWCASE)[number]; arabic: string; asset?: LandingShowcaseAsset }) {
+  return <article className="landing-showcase-card">
+    <div className="landing-showcase-frame">
+      {asset ? <Image src={asset.src} alt={`${example.title} finished Quran video example`} width={1080} height={1920} sizes="(max-width: 600px) 78vw, (max-width: 850px) 42vw, 270px" /> : <FinishedVideoFallback arabic={arabic} style={example.id} />}
+    </div>
+    <div className="landing-showcase-copy"><h3>{example.title}</h3><p>{example.description}</p><span>{example.chip}</span></div>
   </article>;
 }
 
-export default function LandingPage({ demos }: LandingPageProps) {
+function EditorScreenshot({ priority = false, className = "" }: { priority?: boolean; className?: string }) {
+  return <Image className={className} src="/landing/editor-demo.png" alt="Quran Video Editor showing a vertical recitation video, synchronized Quran captions, timeline, waveform, and subtitle controls." width={1649} height={954} priority={priority} sizes="(max-width: 600px) 100vw, (max-width: 1180px) calc(100vw - 48px), 1180px" />;
+}
+
+export default function LandingPage({ demos, showcaseAssets }: LandingPageProps) {
   const [morning, night, unity, eternal] = demos;
   const year = new Date().getFullYear();
 
@@ -63,11 +79,7 @@ export default function LandingPage({ demos }: LandingPageProps) {
         <div className="landing-actions"><Link className="landing-primary-cta" href="/editor">Start creating free <span aria-hidden="true">→</span></Link><a className="landing-secondary-cta" href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a></div>
         <p className="landing-microcopy">No sign-up required to start.</p>
       </div>
-      <div className="landing-hero-stage" aria-label="Examples of Quran video captions">
-        <ProductCard arabic={morning.arabic} variant="minimal" label="Arabic focused" />
-        <ProductCard arabic={night.arabic} variant="translation" label="Arabic + translation" />
-        <ProductCard arabic={unity.arabic} variant="highlight" label="Read-so-far highlight" />
-      </div>
+      <div className="landing-hero-editor"><EditorScreenshot priority /></div>
     </section>
 
     <section className="landing-proof" aria-label="Product qualities"><p><b>Quran-first</b> captions</p><span /><p><b>Local-first</b> recognition</p><span /><p><b>Up to 4K</b> export</p></section>
@@ -87,11 +99,9 @@ export default function LandingPage({ demos }: LandingPageProps) {
     </section>
 
     <section className="landing-section landing-editor-showcase" aria-labelledby="editor-title">
-      <div className="landing-section-heading"><p className="landing-eyebrow">Edit with clarity</p><h2 id="editor-title">One focused workspace for the finishing work.</h2><p>Preview your video, refine Quran captions, and work directly with the timeline.</p></div>
-      <div className="landing-editor-mockup" aria-label="Illustration of the Quran Video editor">
-        <div className="landing-editor-mockup-top"><span className="landing-brand-mark-small">۝</span><b>Quran Video</b><span className="landing-editor-project">Untitled project</span><button type="button" tabIndex={-1}>Export</button></div>
-        <div className="landing-editor-mockup-body"><aside><span>MEDIA</span><b>↑ Import</b><small>Video or audio</small><hr /><span>PROJECT ASSETS</span><small>Local source</small></aside><div className="landing-editor-canvas"><div className="landing-editor-video"><QuranCaption arabic={night.arabic} highlighted /><p>And by the night when it covers.</p></div><div className="landing-editor-timeline"><i /><i /><i className="landing-timeline-active" /><i /></div></div><aside className="landing-editor-inspector"><span>SUBTITLES</span><b>Arabic</b><small>Typography</small><small>Translation</small><small>Timing</small></aside></div>
-      </div>
+      <div className="landing-section-heading"><p className="landing-eyebrow">Edit with clarity</p><h2 id="editor-title">Everything you need to finish the video.</h2><p>Preview your video, refine Quran captions, and work directly with the timeline.</p></div>
+      <div className="landing-editor-product-shot"><EditorScreenshot /></div>
+      <div className="landing-editor-detail-grid"><article><div className="landing-editor-detail-crop landing-editor-detail-preview"><EditorScreenshot /></div><h3>Word-level highlighting</h3><p>Guide viewers through the active words as the recitation progresses.</p></article><article><div className="landing-editor-detail-crop landing-editor-detail-timeline"><EditorScreenshot /></div><h3>Quran-aware timeline</h3><p>See caption blocks, video, and waveform together while you refine timing.</p></article><article><div className="landing-editor-detail-crop landing-editor-detail-inspector"><EditorScreenshot /></div><h3>Full subtitle control</h3><p>Adjust translation, typography, highlighting, and placement in context.</p></article></div>
     </section>
 
     <section className="landing-section landing-features" id="features" aria-labelledby="features-title">
@@ -106,8 +116,8 @@ export default function LandingPage({ demos }: LandingPageProps) {
     </section>
 
     <section className="landing-section landing-showcase" aria-labelledby="showcase-title">
-      <div className="landing-section-heading"><p className="landing-eyebrow">Make it yours</p><h2 id="showcase-title">A few directions, one Quran-aware foundation.</h2></div>
-      <div className="landing-showcase-grid"><ProductCard arabic={morning.arabic} variant="minimal" label="Minimal" /><ProductCard arabic={night.arabic} variant="translation" label="Translation" /><ProductCard arabic={unity.arabic} variant="highlight" label="Lime highlight" /><ProductCard arabic={eternal.arabic} variant="clean" label="Clean recitation" /></div>
+      <div className="landing-section-heading"><p className="landing-eyebrow">Make it yours</p><h2 id="showcase-title">One recitation. Make it yours.</h2><p>Choose how Quran text, translation, highlighting, and layout appear in the finished video.</p></div>
+      <div className="landing-showcase-grid">{LANDING_SHOWCASE.map((example, index) => <FinishedVideoExample key={example.id} example={example} arabic={[morning, night, unity, eternal][index].arabic} asset={showcaseAssets.find((asset) => asset.id === example.id)} />)}</div>
     </section>
 
     <section className="landing-final-cta" aria-labelledby="final-title"><p className="landing-eyebrow">Ready when you are</p><h2 id="final-title">Turn your recitation into a finished Quran video.</h2><p>No sign-up required to start.</p><Link className="landing-primary-cta" href="/editor">Start creating free <span aria-hidden="true">→</span></Link></section>

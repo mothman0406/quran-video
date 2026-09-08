@@ -1,5 +1,15 @@
 # Status
 
+## Current milestone: First-party landing product visuals
+
+Complete:
+
+- Replaced the synthetic editor illustration and hero mockup cards with a static, sanitized first-party Quran Video Editor capture. It shows the real vertical preview, canonical captions with visible read-so-far highlighting, translation, waveform/timeline, media workflow, and Subtitles inspector without importing editor code on `/`.
+- The supplied capture's source-media filename was changed to `Demo recitation.mp4` before it was added. It contains no account identity, email, filesystem path, project-specific name, or debugging control; the editor composition and Quran display remain visible.
+- Added responsive detail crops of that same image for word highlighting, timeline/waveform, and subtitle controls. Desktop/tablet retain the complete editor composition; mobile shows a readable center-focused crop instead of an illegibly shrunken desktop UI.
+- Reworked the showcase into distinct Minimal, Translation, Word Highlight, and Cinematic finished-video directions, each with its own composition, caption treatment, title, description, and concise feature chip. The canonical local Quran fallback remains intentionally temporary until first-party captures are supplied.
+- Added automatic recognition of optional `public/landing/showcase/{minimal,translation,highlight,cinematic}.{webp,png,jpg,jpeg,avif}` assets. When supplied, those real finished-video captures replace only their matching fallback without changing landing code.
+
 ## Current milestone: Restore landing-page scrolling
 
 Complete:

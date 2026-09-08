@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import LandingPage from "@/components/landing-page";
 import { getMarketingQuranDemo } from "@/lib/landing/marketing-demo";
+import { getLandingShowcaseAssets } from "@/lib/landing/showcase-assets";
 
 export const metadata: Metadata = {
   title: "Quran Video Editor | Automatic Quran Captions",
@@ -18,5 +19,5 @@ export const metadata: Metadata = {
 };
 
 export default function HomePage() {
-  return <LandingPage demos={getMarketingQuranDemo()} />;
+  return <LandingPage demos={getMarketingQuranDemo()} showcaseAssets={getLandingShowcaseAssets()} />;
 }
