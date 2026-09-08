@@ -9,7 +9,7 @@ import type { OutputProfile } from "@/lib/export/output";
 import type { CaptionStyle, CaptionLayer, LocalCaptionStyle } from "@/lib/editor/styles";
 import type { CaptionObject, CaptionResizeEdge } from "@/components/caption-preview";
 import type { QuranContentResponse } from "@/lib/quran/content";
-import { arabicCaptionDisplay, captionSegmentLabel, getActiveCaptionSegment } from "@/lib/editor/captions";
+import { arabicCaptionDisplay, captionSegmentLabel, getActiveCaptionSegment, translationDisplayText } from "@/lib/editor/captions";
 import CaptionPreview from "@/components/caption-preview";
 import SafeAreaOverlay from "@/components/safe-area-overlay";
 import AccountPanel from "@/components/account-panel";
@@ -155,6 +155,8 @@ type EditorWorkspaceProps = {
   onSplit: () => void;
   onMergePrevious: () => void;
   onMergeNext: () => void;
+  onTranslationFragmentChange: (text: string) => void;
+  onResetTranslationFragment: () => void;
   onResetTiming: () => void;
   onResetAllTiming: () => void;
 };
@@ -198,7 +200,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange,
     onSetShowVerseNumber, onSetShowSafeArea, onApplyStyle, onSaveCurrentStyle, onSetLocalStyleName,
     onResetSelectedObjectStyle, onSetStyleScope, onAlignTranslation, onSetSplitBoundary, onSplit, onMergePrevious,
-    onMergeNext, onResetTiming, onResetAllTiming, onTimelinePinchZoom,
+    onMergeNext, onTranslationFragmentChange, onResetTranslationFragment, onResetTiming, onResetAllTiming, onTimelinePinchZoom,
   } = props;
   const durationMs = projectDurationMs(mediaSource);
   const tracks = timelineTracks(mediaSource, segments, mediaTrim);
@@ -383,7 +385,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
             <button className="editor-text-button" type="button" onClick={onResetSelectedObjectStyle}>{styleScope === "segment" ? "Use global style" : `Reset ${objectLabel.toLowerCase()} style`}</button>
           </> : <div className="editor-inspector-empty"><span className="editor-inspector-glyph">＋</span><h2>Select a caption</h2><p>Click Arabic or translation on the canvas to edit its style, position, and width.</p></div>}
 
-          {selectedSegment && <div className="editor-segment-inspector"><div className="editor-divider" /><SectionLabel>Caption segment</SectionLabel><strong>{captionSegmentLabel(selectedSegment)}</strong><div className="editor-time-readout"><span>In <b>{(selectedSegment.startMs / 1000).toFixed(3)}s</b></span><span>Out <b>{(selectedSegment.endMs / 1000).toFixed(3)}s</b></span></div><p className="editor-muted">Drag the block or either edge to edit timing. Gaps and overlaps are allowed.</p><div className="editor-segment-actions"><select aria-label="Split Quran word boundary" className="editor-select" disabled={selectedSegment.contentKind !== "ayah"} value={splitBoundary} onChange={(event) => onSetSplitBoundary(Number(event.target.value))}>{Array.from({ length: Math.max(0, selectedSegment.arabic.trim().split(/\s+/).length - 1) }, (_, index) => <option key={index + 1} value={index + 1}>After word {index + 1}</option>)}</select><button className="editor-button editor-button-primary" type="button" disabled={selectedSegment.contentKind !== "ayah"} onClick={onSplit}>Split</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedSegment.contentKind !== "ayah" || selectedIndex < 1 || segments[selectedIndex - 1]?.contentKind !== "ayah"} onClick={onMergePrevious}>Merge ←</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedSegment.contentKind !== "ayah" || selectedIndex >= segments.length - 1 || segments[selectedIndex + 1]?.contentKind !== "ayah"} onClick={onMergeNext}>Merge →</button></div><div className="editor-segment-reset-actions"><button className="editor-text-button" type="button" onClick={onResetTiming}>Reset this timing</button><button className="editor-text-button" type="button" onClick={onResetAllTiming}>Reset all timing</button></div></div>}
+          {selectedSegment && <div className="editor-segment-inspector"><div className="editor-divider" /><SectionLabel>Caption segment</SectionLabel><strong>{captionSegmentLabel(selectedSegment)}</strong><div className="editor-time-readout"><span>In <b>{(selectedSegment.startMs / 1000).toFixed(3)}s</b></span><span>Out <b>{(selectedSegment.endMs / 1000).toFixed(3)}s</b></span></div><p className="editor-muted">Drag the block or either edge to edit timing. Gaps and overlaps are allowed.</p><div className="editor-segment-actions"><select aria-label="Split Quran word boundary" className="editor-select" disabled={selectedSegment.contentKind !== "ayah"} value={splitBoundary} onChange={(event) => onSetSplitBoundary(Number(event.target.value))}>{Array.from({ length: Math.max(0, selectedSegment.arabic.trim().split(/\s+/).length - 1) }, (_, index) => <option key={index + 1} value={index + 1}>After word {index + 1}</option>)}</select><button className="editor-button editor-button-primary" type="button" disabled={selectedSegment.contentKind !== "ayah"} onClick={onSplit}>Split</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedSegment.contentKind !== "ayah" || selectedIndex < 1 || segments[selectedIndex - 1]?.contentKind !== "ayah"} onClick={onMergePrevious}>Merge ←</button><button className="editor-button editor-button-quiet" type="button" disabled={selectedSegment.contentKind !== "ayah" || selectedIndex >= segments.length - 1 || segments[selectedIndex + 1]?.contentKind !== "ayah"} onClick={onMergeNext}>Merge →</button></div>{selectedSegment.contentKind === "ayah" && translationDisplayText(selectedSegment) && <div className="editor-translation-fragment"><SectionLabel>Translation segment</SectionLabel><textarea aria-label="Translation segment" className="editor-input" value={translationDisplayText(selectedSegment) ?? ""} onChange={(event) => onTranslationFragmentChange(event.target.value)} /><p className="editor-muted">{selectedSegment.translationSegment?.reviewStatus === "needs-review" ? "Uses the full translation until reviewed." : "Edits affect this display segment only."}</p><button className="editor-text-button" type="button" onClick={onResetTranslationFragment}>Reset translation segment</button></div>}<div className="editor-segment-reset-actions"><button className="editor-text-button" type="button" onClick={onResetTiming}>Reset this timing</button><button className="editor-text-button" type="button" onClick={onResetAllTiming}>Reset all timing</button></div></div>}
         </div>
         <div className="editor-sidebar-footer"><button className="editor-text-button" type="button" onClick={onSaveToAccount}>Save to account</button><button className="editor-text-button" type="button" onClick={onDiscard}>Discard changes</button></div>
       </aside>

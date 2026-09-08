@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
-import { arabicCaptionPresentationWords, captionBackgroundStyle, captionVisualStatesAtTime, getActiveCaptionSegment, linkedCaptionStackLayout, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
+import { arabicCaptionPresentationWords, captionBackgroundStyle, captionVisualStatesAtTime, getActiveCaptionSegment, linkedCaptionStackLayout, translationDisplayText, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import { quranFontDefinitions } from "@/lib/quran/content";
 import type { ProjectFormat } from "@/lib/schemas/project";
@@ -127,7 +127,7 @@ function CaptionPreview({
       const segmentBackground = arabicStyle.captionBackground;
       const item = content[segment.verseKeys[0]];
       if (segment.contentKind === "ayah" && item?.status !== "ready") return null;
-      const translation = segment.translation ?? (item?.status === "ready" ? item.verse.translation : null);
+      const translation = translationDisplayText(segment) ?? (item?.status === "ready" ? item.verse.translation : null);
       const hasTranslation = translationStyleState.typography.translationVisible && Boolean(translation);
       const arabicWords = arabicCaptionPresentationWords(segment, showVerseNumber, currentTimeMs, segmentTypography.wordHighlightMode);
       const background = captionBackgroundStyle(segmentBackground);

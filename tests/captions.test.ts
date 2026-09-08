@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { CANONICAL_BASMALAH_ARABIC, arabicCaptionDisplay, arabicIndicNumber, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, cleanQuranArabicForDisplay, composeArabicCaptionText, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetTransitionSettings, resetTypography, resizeCaptionWidth, splitCaptionSegment, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming } from "../src/lib/editor/captions.ts";
+import { CANONICAL_BASMALAH_ARABIC, arabicCaptionDisplay, arabicIndicNumber, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, cleanQuranArabicForDisplay, composeArabicCaptionText, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetCaptionTranslationSegment, resetTransitionSettings, resetTypography, resolveCaptionTranslationSegments, resizeCaptionWidth, splitCaptionSegment, translationDisplayText, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming, updateCaptionTranslationSegment, type CaptionSegment } from "../src/lib/editor/captions.ts";
+import { getVerse } from "../src/lib/quran/local.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
 const alignment = {
@@ -19,6 +20,32 @@ const alignment = {
 };
 
 const content = { "93:1": { arabic: { uthmani: "وَالضُّحَى وَاللَّيْلِ إِذَا سَجَى وَمَا وَدَّعَكَ رَبُّكَ" }, translation: "By the morning brightness", transliteration: null } } as unknown as Record<string, QuranVerseContent>;
+
+function translatedPieces(verseKey: string, translation: string, cuts: readonly number[]): CaptionSegment[] {
+  const verse = getVerse(verseKey);
+  assert.ok(verse, `local ${verseKey} must exist`);
+  const sourceWords = verse.arabic.uthmani.trim().split(/\s+/u);
+  const points = [0, ...cuts, sourceWords.length];
+  const pieces = points.slice(0, -1).map((start, index) => {
+    const end = points[index + 1]!;
+    return {
+      id: `${verseKey}#${index + 1}`,
+      contentKind: "ayah" as const,
+      verseKeys: [verseKey],
+      startMs: start * 100,
+      endMs: end * 100,
+      arabic: sourceWords.slice(start, end).join(" "),
+      translation,
+      transliteration: null,
+      wordStart: start,
+      wordEnd: end,
+      wordCount: end - start,
+      showVerseNumberAtEnd: end === sourceWords.length,
+      timingEvidence: { start: { timestampMs: start * 100, source: "derived" as const }, end: { timestampMs: end * 100, source: "derived" as const }, derived: true },
+    };
+  });
+  return resolveCaptionTranslationSegments(pieces);
+}
 
 test("automatically creates one whole-ayah display set regardless of preferred line length", () => {
   const segments = createCaptionSegments([alignment], content, 3);
@@ -211,6 +238,59 @@ test("translation visibility is independent from translation availability", () =
   assert.equal(DEFAULT_TYPOGRAPHY.translationVisible, true);
   assert.equal({ ...DEFAULT_TYPOGRAPHY, translationVisible: false }.translationVisible, false);
   assert.equal(content["93:1"].translation, "By the morning brightness");
+});
+
+test("18:57 uses reviewed Saheeh phrase fragments without changing source, Arabic, or timing", () => {
+  const source = "And who is more unjust than one who is reminded of the verses of his Lord but turns away from them and forgets what his hands have put forth? Indeed, We have placed over their hearts coverings, lest they understand it, and in their ears deafness. And if you invite them to guidance - they will never be guided, then - ever.";
+  const pieces = translatedPieces("18:57", source, [17]);
+  assert.deepEqual(pieces.map(translationDisplayText), [
+    "And who is more unjust than one who is reminded of the verses of his Lord but turns away from them and forgets what his hands have put forth?",
+    "Indeed, We have placed over their hearts coverings, lest they understand it, and in their ears deafness. And if you invite them to guidance - they will never be guided, then - ever.",
+  ]);
+  assert.equal(pieces.every((piece) => piece.translation === source && piece.translationSegment?.reviewStatus === "precomputed"), true);
+  assert.equal(pieces.map((piece) => piece.arabic).join(" "), getVerse("18:57")!.arabic.uthmani);
+  assert.deepEqual(pieces.map((piece) => [piece.startMs, piece.endMs]), [[0, 1700], [1700, 3200]]);
+});
+
+test("Ayatul Kursi supports four ordered reviewed fragments", () => {
+  const source = "Allah - there is no deity except Him, the Ever-Living, the Sustainer of [all] existence. Neither drowsiness overtakes Him nor sleep. To Him belongs whatever is in the heavens and whatever is on the earth. Who is it that can intercede with Him except by His permission? He knows what is [presently] before them and what will be after them, and they encompass not a thing of His knowledge except for what He wills. His Kursi extends over the heavens and the earth, and their preservation tires Him not. And He is the Most High, the Most Great.";
+  const pieces = translatedPieces("2:255", source, [14, 30, 46]);
+  assert.equal(pieces.every((piece) => piece.translationSegment?.reviewStatus === "precomputed"), true);
+  assert.equal(pieces.map(translationDisplayText).join(" "), source);
+  assert.deepEqual(pieces.map((piece) => piece.wordEnd), [14, 30, 46, 58]);
+});
+
+test("2:282 supports many reviewed phrase boundaries in source order", () => {
+  const source = "O you who have believed, when you contract a debt for a specified term, write it down. And let a scribe write [it] between you in justice. Let no scribe refuse to write as Allah has taught him. So let him write and let the one who has the obligation dictate. And let him fear Allah, his Lord, and not leave anything out of it. But if the one who has the obligation is of limited understanding or weak or unable to dictate himself, then let his guardian dictate in justice. And bring to witness two witnesses from among your men. And if there are not two men [available], then a man and two women from those whom you accept as witnesses - so that if one of the women errs, then the other can remind her. And let not the witnesses refuse when they are called upon. And do not be [too] weary to write it, whether it be small or large, for its [specified] term. That is more just in the sight of Allah and stronger as evidence and more likely to prevent doubt between you, except when it is an immediate transaction which you conduct among yourselves. For [then] there is no blame upon you if you do not write it. And take witnesses when you conclude a contract. Let no scribe be harmed or any witness. For if you do so, indeed, it is [grave] disobedience in you. And fear Allah. And Allah teaches you. And Allah is Knowing of all things.";
+  const pieces = translatedPieces("2:282", source, [14, 30, 48, 64, 78, 96, 111, 128]);
+  assert.equal(pieces.length, 9);
+  assert.equal(pieces.every((piece) => piece.translationSegment?.reviewStatus === "precomputed"), true);
+  assert.equal(pieces.map(translationDisplayText).join(" "), source);
+  assert.deepEqual(pieces.map((piece) => piece.wordEnd), [14, 30, 48, 64, 78, 96, 111, 128, 144]);
+});
+
+test("unreviewed splits never use character-percentage translation chopping", () => {
+  const source = "A deliberately long parent translation with clauses that must never be guessed from Arabic display length.";
+  const pieces = translatedPieces("93:1", source, [3]);
+  assert.deepEqual(pieces.map(translationDisplayText), [source, source]);
+  assert.equal(pieces.every((piece) => piece.translationSegment?.reviewStatus === "needs-review"), true);
+});
+
+test("manual translation fragments persist only for unchanged ownership and reset to the automatic fragment", () => {
+  const source = "And who is more unjust than one who is reminded of the verses of his Lord but turns away from them and forgets what his hands have put forth? Indeed, We have placed over their hearts coverings, lest they understand it, and in their ears deafness. And if you invite them to guidance - they will never be guided, then - ever.";
+  const pieces = translatedPieces("18:57", source, [17]);
+  const edited = updateCaptionTranslationSegment(pieces, pieces[0]!.id, "Reviewed first display phrase.");
+  const preserved = resolveCaptionTranslationSegments(edited);
+  assert.equal(translationDisplayText(preserved[0]!), "Reviewed first display phrase.");
+  assert.equal(preserved[0]?.translationSegment?.reviewStatus, "manual");
+  const changedOwnership = resolveCaptionTranslationSegments([
+    { ...preserved[0]!, wordEnd: 16, arabic: preserved[0]!.arabic.split(/\s+/u).slice(0, 16).join(" ") },
+    { ...preserved[1]!, wordStart: 16, arabic: `${preserved[0]!.arabic.split(/\s+/u).at(-1)} ${preserved[1]!.arabic}` },
+  ]);
+  assert.equal(changedOwnership[0]?.translationSegment?.reviewStatus, "needs-review");
+  const reset = resetCaptionTranslationSegment(pieces, pieces[0]!.id);
+  assert.equal(reset[0]?.translationSegment?.reviewStatus, "precomputed");
+  assert.equal(translationDisplayText(reset[0]!), translationDisplayText(pieces[0]!));
 });
 
 test("split and merge round-trip preserves canonical Arabic and source identity", () => {

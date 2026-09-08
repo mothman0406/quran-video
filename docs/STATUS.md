@@ -1,6 +1,34 @@
 # Status
 
-## Current milestone: Unified caption inspector, style scope, and workspace panels
+## Current milestone: Segment-aware Quran translation display
+
+Complete:
+
+- `CaptionSegment` now preserves its immutable full parent translation and may
+  carry separate, persisted `translationSegment` presentation metadata. Arabic
+  ownership, canonical word ranges, recognition, timing, and transitions are
+  unchanged.
+- A deterministic, local reviewed Saheeh phrase-boundary table resolves
+  18:57, 2:255, and 2:282 from owned Arabic word ranges to contiguous source
+  substrings. Unreviewed or source-version-mismatched splits safely repeat the
+  full source and report `needs-review`; there is no character/word/time ratio
+  splitting and no runtime API/model cost.
+- Translation edits are segment-local presentation text with manual review
+  status and a reset action. Ownership-changing split/merge operations rerun
+  resolution and never silently attach a manual fragment to different Arabic
+  words. Preview and canvas export share the same display-fragment accessor.
+- Reviewed licensing/data research is in `docs/TRANSLATION_SEGMENTATION.md`.
+  Tanzil translations and unverified external word-by-word alignment assets
+  were not bundled; only boundary markers are shipped.
+
+Verification: targeted caption tests (47 passing), `npm test` (214 passing),
+`npx tsc --noEmit`, `npm run lint`, `npm run build`, and `git diff --check`
+pass. Lint retains four pre-existing unused recognition-helper warnings; build
+retains the pre-existing non-fatal VAD ONNX Runtime dynamic-require warning.
+Real browser validation is pending because no recognized long-ayah browser
+fixture or browser automation is available in this workspace.
+
+## Previous milestone: Unified caption inspector, style scope, and workspace panels
 
 Complete:
 

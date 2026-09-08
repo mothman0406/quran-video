@@ -1,4 +1,4 @@
-import { arabicCaptionPresentationWords, composeArabicCaptionText, captionVisualStatesAtTime, linkedCaptionStackLayout, type ArabicPresentationWord } from "../editor/captions.ts";
+import { arabicCaptionPresentationWords, composeArabicCaptionText, captionVisualStatesAtTime, linkedCaptionStackLayout, translationDisplayText, type ArabicPresentationWord } from "../editor/captions.ts";
 import type { LocalExportRequest } from "./types.ts";
 import { captionStyleFromState, resolveCaptionLayerStyle } from "../editor/styles.ts";
 
@@ -45,7 +45,7 @@ export function drawExportCaptions(context: CanvasRenderingContext2D, request: L
     const arabicWords = arabicCaptionPresentationWords(segment, showVerseNumber, timeMs, resolvedTypography.wordHighlightMode);
     const useWordRenderer = resolvedTypography.wordHighlightMode !== "off" && arabicWords.length > 0;
     context.font = `${arabicSize}px "${arabicFont}", serif`; const arabicWordLines = useWordRenderer ? wrapArabicWords(context, arabicWords, maxWidth) : null; const arabicLines = useWordRenderer ? null : wrap(context, arabicDisplayText, maxWidth); const arabicHeight = (arabicWordLines?.length ?? arabicLines?.length ?? 0) * arabicSize * resolvedTypography.arabicLineSpacing;
-    const translation = translationTypography.translationVisible ? segment.translation : null; const transliteration = resolvedTypography.transliterationVisible ? segment.transliteration : null;
+    const translation = translationTypography.translationVisible ? translationDisplayText(segment) : null; const transliteration = resolvedTypography.transliterationVisible ? segment.transliteration : null;
     const translationMaxWidth = request.format.width * (translationPositioning.translationMaxWidthPercent ?? translationPositioning.maxWidthPercent);
     context.font = `${translationSize}px ${translationTypography.translationFontFamily}`; const translationLines = translation ? wrap(context, translation, resolvedPositioning.translationPositionLinked ? maxWidth : translationMaxWidth) : []; const translationHeight = translationLines.length * translationSize * 1.25;
     context.font = `${transliterationSize}px ${resolvedTypography.transliterationFontFamily}`; const transliterationLines = transliteration ? wrap(context, transliteration, maxWidth) : []; const transliterationHeight = transliterationLines.length * transliterationSize * 1.25;

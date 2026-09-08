@@ -6,6 +6,7 @@ import type { VerseBoundary } from "../recognition/core.ts";
 import type { z } from "zod";
 import type { CaptionBackgroundSchema, CaptionPositioningSchema, CaptionStyleOverridesSchema, TransitionSettingsSchema, TypographySchema } from "../schemas/project.ts";
 import type { ProjectFormat } from "../schemas/project.ts";
+import { SAHEEH_PHRASE_BOUNDARIES } from "./translation-segmentation.ts";
 
 export type Typography = z.infer<typeof TypographySchema>;
 export type CaptionBackground = z.infer<typeof CaptionBackgroundSchema>;
@@ -453,6 +454,8 @@ type CaptionSegmentBase = {
   endMs: number;
   arabic: string;
   translation: string | null;
+  /** Immutable full parent-ayah source remains in `translation`. */
+  translationSegment?: TranslationSegment;
   transliteration: string | null;
   wordStart: number;
   wordEnd: number;
@@ -468,6 +471,15 @@ type CaptionSegmentBase = {
     end: { timestampMs: number; source: CaptionTimingSource };
     derived: boolean;
   };
+};
+
+export type TranslationSegment = {
+  text: string;
+  /** The derived fragment always owns exactly this Arabic display range. */
+  wordStart: number;
+  wordEnd: number;
+  source: "full-ayah" | "saheeh-phrase-map" | "manual" | "fallback";
+  reviewStatus: "precomputed" | "manual" | "needs-review";
 };
 
 export type CaptionWordTiming = {
@@ -506,6 +518,89 @@ export type OptionalPreludeTiming = {
 };
 
 export type CaptionTimingPatch = { startMs?: number; endMs?: number };
+
+/** Single presentation accessor shared by editor preview and canvas export. */
+export function translationDisplayText(segment: Pick<CaptionSegment, "translation" | "translationSegment">): string | null {
+  return segment.translationSegment?.text ?? segment.translation;
+}
+
+function sameAyahOwner(left: CaptionSegment, right: CaptionSegment): boolean {
+  return left.contentKind === "ayah"
+    && right.contentKind === "ayah"
+    && left.verseKeys.length === 1
+    && left.verseKeys[0] === right.verseKeys[0];
+}
+
+function sourceRangeEndingAt(source: string, marker: string, after: number): number | null {
+  const index = source.indexOf(marker, after);
+  return index < 0 ? null : index + marker.length;
+}
+
+function automaticTranslationSegments(group: readonly CaptionSegment[]): CaptionSegment[] {
+  const source = group[0]?.translation;
+  if (!source || group.length === 1) {
+    return group.map((segment) => ({
+      ...segment,
+      ...(source ? { translationSegment: { text: source, wordStart: segment.wordStart, wordEnd: segment.wordEnd, source: "full-ayah" as const, reviewStatus: "precomputed" as const } } : {}),
+    }));
+  }
+  const verseKey = group[0]?.verseKeys[0];
+  const boundaries = verseKey ? SAHEEH_PHRASE_BOUNDARIES[verseKey] : undefined;
+  let sourceCursor = 0;
+  const fragments = boundaries ? group.map((segment) => {
+    const boundary = boundaries.find((candidate) => candidate.wordEnd === segment.wordEnd);
+    const sourceEnd = boundary ? sourceRangeEndingAt(source, boundary.endsWith, sourceCursor) : null;
+    if (sourceEnd === null) return null;
+    const text = source.slice(sourceCursor, sourceEnd).trim();
+    sourceCursor = sourceEnd;
+    return text || null;
+  }) : [];
+  const complete = fragments.length === group.length && fragments.every(Boolean) && source.slice(sourceCursor).trim() === "";
+  if (complete) return group.map((segment, index) => ({
+    ...segment,
+    translationSegment: { text: fragments[index]!, wordStart: segment.wordStart, wordEnd: segment.wordEnd, source: "saheeh-phrase-map", reviewStatus: "precomputed" },
+  }));
+  // A failed source-version check is deliberately safe: use the original full
+  // source, disclose uncertainty, and never guess from characters or timing.
+  return group.map((segment) => ({
+    ...segment,
+    translationSegment: { text: source, wordStart: segment.wordStart, wordEnd: segment.wordEnd, source: "fallback", reviewStatus: "needs-review" },
+  }));
+}
+
+/** Recomputes presentation fragments from contiguous Arabic ownership only. */
+export function resolveCaptionTranslationSegments(segments: readonly CaptionSegment[]): CaptionSegment[] {
+  const result: CaptionSegment[] = [];
+  for (let start = 0; start < segments.length;) {
+    let end = start + 1;
+    while (end < segments.length && sameAyahOwner(segments[start]!, segments[end]!)) end += 1;
+    const group = segments.slice(start, end);
+    const automatic = automaticTranslationSegments(group);
+    result.push(...automatic.map((segment) => {
+      const existing = group.find((candidate) => candidate.id === segment.id)?.translationSegment;
+      return existing?.source === "manual"
+        && existing.wordStart === segment.wordStart
+        && existing.wordEnd === segment.wordEnd
+        ? { ...segment, translationSegment: existing }
+        : segment;
+    }));
+    start = end;
+  }
+  return result;
+}
+
+export function updateCaptionTranslationSegment(segments: readonly CaptionSegment[], id: string, text: string): CaptionSegment[] {
+  return segments.map((segment) => segment.id === id ? {
+    ...segment,
+    translationSegment: { text: text.trim(), wordStart: segment.wordStart, wordEnd: segment.wordEnd, source: "manual", reviewStatus: "manual" },
+  } : segment);
+}
+
+export function resetCaptionTranslationSegment(segments: readonly CaptionSegment[], id: string): CaptionSegment[] {
+  return resolveCaptionTranslationSegments(segments.map((segment) => segment.id === id
+    ? { ...segment, translationSegment: undefined }
+    : segment));
+}
 
 /** The smallest valid display interval for a manually resized caption. */
 export const MINIMUM_CAPTION_DURATION_MS = 100;
@@ -706,7 +801,7 @@ export function createCaptionSegments(
       },
     }];
   });
-  return continuousDisplayTiming(generated);
+  return resolveCaptionTranslationSegments(continuousDisplayTiming(generated));
 }
 
 function canonicalArabicForComparison(value: string): string {
@@ -859,7 +954,7 @@ export function createCaptionSegmentsFromVerseBoundaries(
     });
   });
   const prelude = createBasmalahPreludeSegment(optionalPrelude, ayahSegments[0], content);
-  return prelude ? [prelude, ...ayahSegments] : ayahSegments;
+  return resolveCaptionTranslationSegments(prelude ? [prelude, ...ayahSegments] : ayahSegments);
 }
 
 export type GeneratedCaptionBoundaryTrace = {
@@ -929,12 +1024,12 @@ export function splitCaptionSegment(segment: CaptionSegment, boundary: number): 
       derived: true,
     },
   });
-  return [make(0, boundary, "a", segment.startMs, splitMs), make(boundary, verseWords.length, "b", splitMs, segment.endMs)];
+  return resolveCaptionTranslationSegments([make(0, boundary, "a", segment.startMs, splitMs), make(boundary, verseWords.length, "b", splitMs, segment.endMs)]);
 }
 
 function mergeSegments(left: CaptionSegment, right: CaptionSegment): CaptionSegment {
   if (left.contentKind !== "ayah" || right.contentKind !== "ayah") throw new Error("Only ayah caption segments can be merged.");
-  return {
+  return resolveCaptionTranslationSegments([{
     ...left,
     id: `${left.id}+${right.id}`,
     verseKeys: unique([...left.verseKeys, ...right.verseKeys]),
@@ -960,7 +1055,7 @@ function mergeSegments(left: CaptionSegment, right: CaptionSegment): CaptionSegm
       end: right.timingEvidence.end,
       derived: left.timingEvidence.derived || right.timingEvidence.derived,
     },
-  };
+  }])[0]!;
 }
 
 export function mergeCaptionWithPrevious(segments: readonly CaptionSegment[], index: number): CaptionSegment[] {

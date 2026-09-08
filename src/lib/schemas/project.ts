@@ -78,6 +78,12 @@ export const CaptionSegmentSchema = z.strictObject({
   endMs: PositiveNumber,
   arabic: z.string().min(1),
   translation: z.string().nullable(),
+  /** Derived display text; the immutable full parent source remains `translation`. */
+  translationSegment: z.strictObject({
+    text: z.string(), wordStart: z.number().int().nonnegative(), wordEnd: z.number().int().positive(),
+    source: z.enum(["full-ayah", "saheeh-phrase-map", "manual", "fallback"]),
+    reviewStatus: z.enum(["precomputed", "manual", "needs-review"]),
+  }).optional(),
   transliteration: z.string().nullable(),
   wordStart: z.number().int().nonnegative(),
   wordEnd: z.number().int().positive(),

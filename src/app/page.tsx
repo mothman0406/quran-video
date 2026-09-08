@@ -32,12 +32,15 @@ import {
   mergeCaptionWithNext,
   mergeCaptionWithPrevious,
   resetCaptionPositioning,
+  resetCaptionTranslationSegment,
+  resolveCaptionTranslationSegments,
   resetAllCaptionSegmentTiming,
   resetCaptionSegmentTiming,
   resetTypography as resetTypographyDefaults,
   resizeCaptionBoundary,
   resizeCaptionWidth,
   splitCaptionSegment,
+  updateCaptionTranslationSegment,
   updateCaptionPosition,
   updateCaptionSegmentTiming,
   type CaptionBackground,
@@ -509,13 +512,13 @@ export default function Home() {
         ),
       );
       setSegments((current) =>
-        current.map((segment) => {
+        resolveCaptionTranslationSegments(current.map((segment) => {
           const translation =
             segment.verseKeys
               .map((key) => payload.translations?.[key]?.text ?? null)
               .find(Boolean) ?? null;
           return translation ? { ...segment, translation } : segment;
-        }),
+        })),
       );
     } catch {
       /* Arabic remains available when translation enrichment fails. */
@@ -753,7 +756,7 @@ export default function Home() {
     setProjectFormat(project.format);
     setProjectFormatExplicitlyChosen(true);
     setAlignments(project.verseAlignments as VerseAlignment[]);
-    setSegments(project.captionSegments as CaptionSegment[]);
+    setSegments(resolveCaptionTranslationSegments(project.captionSegments as CaptionSegment[]));
     setPositioning(project.positioning);
     setCaptionBackground(project.captionBackground);
     setTypography(project.typography);
@@ -1767,22 +1770,22 @@ export default function Home() {
       );
       return index < 0
         ? current
-        : [
+        : resolveCaptionTranslationSegments([
             ...current.slice(0, index),
             ...splitCaptionSegment(selectedSegment, splitBoundary),
             ...current.slice(index + 1),
-          ];
+          ]);
     });
     setSelectedSegmentId(null);
   }
   function mergePrevious() {
     if (selectedIndex < 1) return;
-    setSegments((current) => mergeCaptionWithPrevious(current, selectedIndex));
+    setSegments((current) => resolveCaptionTranslationSegments(mergeCaptionWithPrevious(current, selectedIndex)));
     setSelectedSegmentId(null);
   }
   function mergeNext() {
     if (selectedIndex < 0 || selectedIndex >= segments.length - 1) return;
-    setSegments((current) => mergeCaptionWithNext(current, selectedIndex));
+    setSegments((current) => resolveCaptionTranslationSegments(mergeCaptionWithNext(current, selectedIndex)));
     setSelectedSegmentId(null);
   }
   async function exportVideo() {
@@ -2012,6 +2015,8 @@ export default function Home() {
         onSplit={splitSelected}
         onMergePrevious={mergePrevious}
         onMergeNext={mergeNext}
+        onTranslationFragmentChange={(text) => selectedSegment && setSegments((current) => updateCaptionTranslationSegment(current, selectedSegment.id, text))}
+        onResetTranslationFragment={() => selectedSegment && setSegments((current) => resetCaptionTranslationSegment(current, selectedSegment.id))}
         onResetTiming={() => selectedSegment && setSegments((current) => resetCaptionSegmentTiming(current, selectedSegment.id, projectDurationMs(mediaSource)))}
         onResetAllTiming={() => setSegments((current) => resetAllCaptionSegmentTiming(current, projectDurationMs(mediaSource)))}
       />
