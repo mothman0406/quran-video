@@ -1,5 +1,18 @@
 # Status
 
+## Current milestone: Quran-aware export preflight
+
+Complete:
+
+- Added one deterministic, browser-local `runExportPreflight(project, runtimeContext)` engine. It is read-only and separates persisted Quran/project validation from host-provided source, browser, measured-caption, and exporter facts; it makes no recognition, timing, translation, geometry, or history mutation and has $0 API cost.
+- Export now opens into preflight first. Ready projects show a concise confirmation, non-critical warnings allow **Export anyway**, and blocking findings remove the export action. Recheck refreshes local runtime inspection without adding Undo/Redo history; render progress remains separate once an export begins.
+- Blocking Quran safety checks cover an unresolved canonical passage, invalid verse keys/ranges, duplicate or incomplete automatic ownership, non-resolvable rendered Quran text, invalid basmalah/ornament state, invalid caption intervals, and malformed canonical word timings. Existing manual passage correction remains valid and no confidence is invented.
+- Translation review metadata is surfaced only for visible `needs-review` fragments; manual translation remains valid. The preflight also validates active source availability/relink status, media metadata/trim, supported playback rate, browser WebCodecs/output capability, and playback-rate export capability. Audio-only media is accepted.
+- Measured caption bounds can warn about canvas clipping, Arabic/translation overlap, and the currently selected social-platform safe zone only. Review selects the caption and opens Subtitles; safe-zone fixes reuse the existing move action; source relinking remains the existing Project Assets workflow.
+- Future completion actions remain outside this milestone: the flow is intentionally Preflight → Render → existing download completion.
+
+Verification: `npm test` (244 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the pre-existing non-fatal VAD ONNX Runtime dynamic-require warning. Real browser validation remains pending because this workspace has no browser automation or recognized-video fixture.
+
 ## Current milestone: Project playback-speed controls
 
 Complete:

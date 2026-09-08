@@ -100,6 +100,7 @@ import {
 } from "@/lib/export/quality";
 import { ExportCoordinator } from "@/lib/export/lifecycle";
 import { validateLocalExportInputs } from "@/lib/export/validation";
+import { runExportPreflight, type ExportPreflightAction, type ExportPreflightResult } from "@/lib/export/preflight";
 import type {
   ExportPhase,
   LocalExportDiagnostics,
@@ -283,6 +284,7 @@ export default function Home() {
   const [exportDiagnostics, setExportDiagnostics] =
     useState<LocalExportDiagnostics | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportPreflight, setExportPreflight] = useState<ExportPreflightResult | null>(null);
   const [exportQuality, setExportQuality] = useState<ExportQuality>(
     DEFAULT_EXPORT_QUALITY,
   );
@@ -1909,9 +1911,9 @@ export default function Home() {
   const handleCaptionBoundsChange = useCallback((next: CaptionCanvasBounds[]) => {
     setCaptionCanvasBounds((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
   }, []);
-  function moveSelectedCaptionToSafeArea() {
+  function moveSelectedCaptionToSafeArea(targetId = selectedSegmentId ?? getActiveCaptionSegment(segments, currentTimeMs)?.id) {
     const guide = socialPlatformGuide(platformPreview);
-    const targetSegmentId = selectedSegmentId ?? getActiveCaptionSegment(segments, currentTimeMs)?.id;
+    const targetSegmentId = targetId;
     if (!guide || !targetSegmentId) return;
     const collisions = platformCollisions.filter((collision) => collision.segmentId === targetSegmentId);
     if (!collisions.length) return;
@@ -1928,14 +1930,16 @@ export default function Home() {
     const layer: CaptionLayer = linked || focused.kind === "transliteration" ? "arabic" : focused.kind;
     const positioningKind = layer === "translation" ? "translation" : "arabic";
     const globalStyle = captionStyleFromState(typography, positioning, captionBackground, transitionSettings);
-    const localPositioning = styleScope === "segment" && selectedSegmentId
-      ? resolveCaptionLayerStyle(globalStyle, selectedSegment?.styleOverrides, layer).positioning
+    const targetSegment = segments.find((segment) => segment.id === targetSegmentId) ?? null;
+    const useSegmentStyle = styleScope === "segment" && selectedSegmentId === targetSegmentId && Boolean(targetSegment);
+    const localPositioning = useSegmentStyle
+      ? resolveCaptionLayerStyle(globalStyle, targetSegment?.styleOverrides, layer).positioning
       : positioning;
     const nextPositioning = updateCaptionPosition(localPositioning, positioningKind,
       (positioningKind === "arabic" ? localPositioning.x : localPositioning.translationX) + movement.dx,
       (positioningKind === "arabic" ? localPositioning.y : localPositioning.translationY) + movement.dy,
       projectFormat);
-    if (styleScope !== "segment" || !selectedSegmentId) {
+    if (!useSegmentStyle) {
       updateProjectHistory((current) => ({ ...current, positioning: nextPositioning }));
       return;
     }
@@ -2048,7 +2052,60 @@ export default function Home() {
     updateProjectHistory((current) => ({ ...current, segments: resolveCaptionTranslationSegments(mergeCaptionWithNext(current.segments, selectedIndex)) }));
     setSelectedSegmentId(null);
   }
+  async function checkExportPreflight() {
+    const capability = offlineWebCodecsSupport();
+    let outputProfileAvailable: boolean | null = null;
+    if (videoFile && capability.supported) {
+      try {
+        const nextOutputPlan = await inspectLocalExport(videoFile, projectFormat, exportQuality);
+        setOutputPlan(nextOutputPlan);
+        outputProfileAvailable = Boolean(nextOutputPlan.profile);
+      } catch {
+        outputProfileAvailable = false;
+      }
+    }
+    const result = runExportPreflight(
+      projectSnapshot(savedProject?.id ?? "export-preflight", projectName || "Untitled project", savedProject?.createdAt ?? new Date(0).toISOString()),
+      {
+        sourceAvailable: Boolean(videoFile),
+        sourceMedia: mediaSource,
+        activeMediaAssetId,
+        projectAssets,
+        captionBounds: captionCanvasBounds,
+        platformPreview,
+        exporterSupport: capability,
+        outputProfileAvailable,
+        playbackRateExportSupported: typeof AudioBuffer !== "undefined",
+      },
+    );
+    setExportPreflight(result);
+    setExportError(null);
+    return result;
+  }
+  function handleExportPreflightAction(action: ExportPreflightAction, segmentId?: string) {
+    if (action === "move-to-safe-area" && segmentId) {
+      setSelectedSegmentId(segmentId);
+      setSelectedObject("arabic");
+      setRightInspectorMode("settings");
+      moveSelectedCaptionToSafeArea(segmentId);
+      return;
+    }
+    if (action === "review-caption" || action === "review-translation") {
+      if (segmentId) {
+        setSelectedSegmentId(segmentId);
+        setSelectedObject(action === "review-translation" ? "translation" : "arabic");
+      }
+      setRightInspectorMode("subtitles");
+      setExportOpen(false);
+      return;
+    }
+    if (action === "relink-source") {
+      setExportOpen(false);
+      setErrorMessage("Relink the active source in Project assets before exporting.");
+    }
+  }
   async function exportVideo() {
+    if (!exportPreflight || exportPreflight.status === "blocked") return;
     if (!videoFile || exportAbort.current || !exportCoordinator.current.start())
       return;
     const capability = offlineWebCodecsSupport();
@@ -2187,6 +2244,7 @@ export default function Home() {
         availableBuiltInStyles={(Object.keys(BUILT_IN_STYLES) as BuiltInStyleName[]).filter((name) => isBuiltInStyleAvailable(plan, name))}
         availableQuranStyles={Object.keys(quranFontDefinitions).filter((name) => isFontAvailable(plan, name))}
         exportOpen={exportOpen}
+        exportPreflight={exportPreflight}
         exportQuality={exportQuality}
         outputPlan={outputPlan}
         exportResult={exportResult}
@@ -2265,12 +2323,14 @@ export default function Home() {
         onPlanChange={setSubscriptionPlan}
         onDiscard={savedProject ? () => void openProject(savedProject) : newProject}
         onNewProject={newProject}
-        onExportOpen={() => { setExportOpen(true); setExportError(null); }}
+        onExportOpen={() => { setExportOpen(true); void checkExportPreflight(); }}
         onExport={() => void exportVideo()}
+        onRecheckExport={() => { void checkExportPreflight(); }}
+        onExportPreflightAction={handleExportPreflightAction}
         onCancelExport={cancelExport}
         onDownloadExport={downloadExport}
-        onSetExportQuality={(quality) => { setExportQuality(quality); setOutputPlan(null); }}
-        onSetExportOpen={setExportOpen}
+        onSetExportQuality={(quality) => { setExportQuality(quality); setOutputPlan(null); setExportPreflight(null); }}
+        onSetExportOpen={(open) => { setExportOpen(open); if (!open) setExportPreflight(null); }}
         onTypographyChange={updateTypography}
         onBackgroundChange={updateCaptionBackground}
         onTransitionChange={(patch) => updateProjectHistory((current) => ({ ...current, transitionSettings: { ...current.transitionSettings, ...patch } }))}
