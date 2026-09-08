@@ -7,6 +7,7 @@ import {
   SyntheticEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -123,6 +124,7 @@ import { waveformPeaksFromPcm, type WaveformData } from "@/lib/editor/waveform";
 import { projectAssetFromMediaSource } from "@/lib/editor/project-assets";
 import { clearCaptionSelection, rightInspectorModeForSelection, selectCaptionLayer, selectTimelineCaption, type CaptionSelection, type RightInspectorMode } from "@/lib/editor/selection";
 import { EditorHistory } from "@/lib/editor/history";
+import { DEFAULT_SOCIAL_PLATFORM_PREVIEW, moveRectToSafeArea, platformCaptionCollisions, socialPlatformGuide, type CaptionCanvasBounds, type SocialPlatformId } from "@/lib/editor/social-platform-guides";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -270,6 +272,8 @@ export default function Home() {
   const [localStyles, setLocalStyles] = useState<LocalCaptionStyle[]>([]);
   const [localStyleName, setLocalStyleName] = useState("My Style");
   const [showSafeArea, setShowSafeArea] = useState(false);
+  const [platformPreview, setPlatformPreview] = useState<SocialPlatformId>(DEFAULT_SOCIAL_PLATFORM_PREVIEW);
+  const [captionCanvasBounds, setCaptionCanvasBounds] = useState<CaptionCanvasBounds[]>([]);
   const [showCorrection, setShowCorrection] = useState(false);
   const [exportState, setExportState] = useState<ExportState>(null);
   const [exportError, setExportError] = useState<string | null>(null);
@@ -1880,6 +1884,51 @@ export default function Home() {
     (segment) => segment.id === selectedSegmentId,
   );
   const selectedSegment = selectedIndex >= 0 ? segments[selectedIndex] : null;
+  const platformCollisions = useMemo(
+    () => platformCaptionCollisions(platformPreview, captionCanvasBounds),
+    [captionCanvasBounds, platformPreview],
+  );
+  const handleCaptionBoundsChange = useCallback((next: CaptionCanvasBounds[]) => {
+    setCaptionCanvasBounds((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
+  }, []);
+  function moveSelectedCaptionToSafeArea() {
+    const guide = socialPlatformGuide(platformPreview);
+    const targetSegmentId = selectedSegmentId ?? getActiveCaptionSegment(segments, currentTimeMs)?.id;
+    if (!guide || !targetSegmentId) return;
+    const collisions = platformCollisions.filter((collision) => collision.segmentId === targetSegmentId);
+    if (!collisions.length) return;
+    const focused = collisions.find((collision) => collision.kind === selectedObject) ?? collisions[0]!;
+    const linked = focused.linked;
+    const unit = linked ? captionCanvasBounds.filter((bounds) => bounds.segmentId === targetSegmentId && bounds.linked) : [focused];
+    if (!unit.length) return;
+    const left = Math.min(...unit.map((bounds) => bounds.x));
+    const top = Math.min(...unit.map((bounds) => bounds.y));
+    const right = Math.max(...unit.map((bounds) => bounds.x + bounds.width));
+    const bottom = Math.max(...unit.map((bounds) => bounds.y + bounds.height));
+    const movement = moveRectToSafeArea({ x: left, y: top, width: right - left, height: bottom - top }, guide.safeArea);
+    if (Math.abs(movement.dx) < 0.0001 && Math.abs(movement.dy) < 0.0001) return;
+    const layer: CaptionLayer = linked || focused.kind === "transliteration" ? "arabic" : focused.kind;
+    const positioningKind = layer === "translation" ? "translation" : "arabic";
+    const globalStyle = captionStyleFromState(typography, positioning, captionBackground, transitionSettings);
+    const localPositioning = styleScope === "segment" && selectedSegmentId
+      ? resolveCaptionLayerStyle(globalStyle, selectedSegment?.styleOverrides, layer).positioning
+      : positioning;
+    const nextPositioning = updateCaptionPosition(localPositioning, positioningKind,
+      (positioningKind === "arabic" ? localPositioning.x : localPositioning.translationX) + movement.dx,
+      (positioningKind === "arabic" ? localPositioning.y : localPositioning.translationY) + movement.dy,
+      projectFormat);
+    if (styleScope !== "segment" || !selectedSegmentId) {
+      updateProjectHistory((current) => ({ ...current, positioning: nextPositioning }));
+      return;
+    }
+    const changed = Object.fromEntries((Object.keys(nextPositioning) as Array<keyof CaptionPositioning>)
+      .filter((key) => nextPositioning[key] !== localPositioning[key])
+      .map((key) => [key, nextPositioning[key]])) as Partial<CaptionPositioning>;
+    if (!Object.keys(changed).length) return;
+    updateProjectHistory((current) => ({ ...current, segments: current.segments.map((segment) => segment.id === selectedSegmentId
+      ? { ...segment, styleOverrides: patchCaptionLayerStyleOverrides(segment.styleOverrides, layer, { positioning: changed }) }
+      : segment) }));
+  }
   const selectedFormatDefinition = projectFormatDefinition(projectFormat);
   const globalCaptionStyle = captionStyleFromState(typography, positioning, captionBackground, transitionSettings);
   const selectedLayer: CaptionLayer = selectedObject ?? "arabic";
@@ -2111,6 +2160,8 @@ export default function Home() {
         transitionSettings={transitionSettings}
         showVerseNumber={showVerseNumber}
         showSafeArea={showSafeArea}
+        platformPreview={platformPreview}
+        platformCollisions={platformCollisions}
         projectName={projectName}
         dirty={dirty}
         canUndo={projectHistory.current.canUndo}
@@ -2210,6 +2261,9 @@ export default function Home() {
         onTransitionChange={(patch) => updateProjectHistory((current) => ({ ...current, transitionSettings: { ...current.transitionSettings, ...patch } }))}
         onSetShowVerseNumber={(value) => updateProjectHistory((current) => ({ ...current, showVerseNumber: value }))}
         onSetShowSafeArea={setShowSafeArea}
+        onSetPlatformPreview={setPlatformPreview}
+        onMoveToSafeArea={moveSelectedCaptionToSafeArea}
+        onCaptionBoundsChange={handleCaptionBoundsChange}
         onApplyStyle={applyStyle}
         onSaveCurrentStyle={saveCurrentStyle}
         onSetLocalStyleName={setLocalStyleName}

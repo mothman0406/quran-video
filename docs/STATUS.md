@@ -1,5 +1,28 @@
 # Status
 
+## Current milestone: Social-platform safe-zone previews
+
+Complete:
+
+- Added session-only platform preview choices for None, TikTok, Instagram Reels,
+  and YouTube Shorts. The centralized, normalized canvas geometry is explicitly
+  documented as approximate and remains outside saved project/export state and
+  Undo/Redo history.
+- The canvas renders restrained translucent obstruction zones and a dashed Safe
+  Content Area above the preview, remains aligned through CSS canvas resizing,
+  and gives a compact 9:16 optimization note for square/landscape projects.
+- Active and selected caption layers now provide measured project-canvas bounds
+  for Arabic (including its verse ornament), translation, and transliteration.
+  Contextual collision warnings use those actual bounds rather than anchors.
+- Move to safe area moves the linked Arabic/translation stack as one unit when
+  applicable, preserves canvas bounds and widths, and writes one undoable shared
+  position or property-level selected-segment override according to Apply to.
+  Guides themselves are not imported by the export renderer.
+
+Verification: `npm test` (232 passing), `npx tsc --noEmit`, `npm run lint --
+--quiet`, `npm run build`, and `git diff --check` pass. Build retains the
+pre-existing non-fatal VAD ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Real caption-generation progress
 
 Complete:

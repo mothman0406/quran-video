@@ -15,12 +15,14 @@ import { hafsSurahs } from "@/lib/recognition/core";
 import { arabicCaptionDisplay, captionSegmentLabel, getActiveCaptionSegment, translationDisplayText } from "@/lib/editor/captions";
 import CaptionPreview from "@/components/caption-preview";
 import SafeAreaOverlay from "@/components/safe-area-overlay";
+import SocialPlatformGuideOverlay from "@/components/social-platform-guide-overlay";
 import AccountPanel from "@/components/account-panel";
 import { DEFAULT_SOURCE_VIDEO_FIT, PROJECT_FORMATS, projectFormatDefinition } from "@/lib/editor/formats";
 import { BUILT_IN_STYLES, type BuiltInStyleName } from "@/lib/editor/styles";
 import { quranFontDefinitions } from "@/lib/quran/content";
 import { formatTimelineClock, projectDurationMs, timeToViewportPosition, timelineItemGeometry, timelineRulerTicks, timelineTracks, type MediaSource, type MediaTrim, type TimelineItem, type TimelineViewport } from "@/lib/editor/media";
 import { waveformPeaksForViewport, type WaveformData } from "@/lib/editor/waveform";
+import type { CaptionCanvasBounds, PlatformCollision, SocialPlatformId } from "@/lib/editor/social-platform-guides";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage = "idle" | "preparing" | "detecting-speech" | "loading-model" | "transcribing" | "matching" | "captions" | "complete" | "error";
@@ -61,6 +63,8 @@ type EditorWorkspaceProps = {
   transitionSettings: TransitionSettings;
   showVerseNumber: boolean;
   showSafeArea: boolean;
+  platformPreview: SocialPlatformId;
+  platformCollisions: PlatformCollision[];
   projectName: string;
   dirty: boolean;
   canUndo: boolean;
@@ -160,6 +164,9 @@ type EditorWorkspaceProps = {
   onTransitionChange: (patch: Partial<TransitionSettings>) => void;
   onSetShowVerseNumber: (value: boolean) => void;
   onSetShowSafeArea: (value: boolean) => void;
+  onSetPlatformPreview: (value: SocialPlatformId) => void;
+  onMoveToSafeArea: () => void;
+  onCaptionBoundsChange: (bounds: CaptionCanvasBounds[]) => void;
   onApplyStyle: (style: CaptionStyle) => void;
   onSaveCurrentStyle: () => void;
   onSetLocalStyleName: (value: string) => void;
@@ -195,7 +202,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="editor-section-label">{children}</p>;
 }
 
-function Segmented({ value, options, onChange }: { value: string; options: [string, string][]; onChange: (value: string) => void }) {
+function Segmented({ value, options, onChange }: { value: string; options: readonly (readonly [string, string])[]; onChange: (value: string) => void }) {
   return <div className="editor-segmented">{options.map(([option, label]) => <button key={option} type="button" className={value === option ? "is-active" : ""} onClick={() => onChange(option)}>{label}</button>)}</div>;
 }
 
@@ -213,7 +220,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     videoFile, videoUrl, videoMetadata, mediaSource, projectAssets, activeMediaAssetId, mediaTrim, videoRef, previewRef, timelineRef, stage, progress, support,
     alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
     selectedObject, rightInspectorMode, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
-    transitionSettings, showVerseNumber, showSafeArea, projectName, dirty, canUndo, canRedo, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
+    transitionSettings, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, canUndo, canRedo, busy, localStyles, localStyleName, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportQuality, outputPlan, exportResult, exportState, exportError, exportDiagnostics, errorMessage, timingWarning,
     showCorrection, surah, startAyah, endAyah, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, entitlements, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
     onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
@@ -222,7 +229,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     onCorrectDetection, onToggleCorrection, onSurahChange, onStartAyahChange, onEndAyahChange, onClearVideo, onSaveProject, onUndo, onRedo, onHistoryTransactionStart, onHistoryTransactionCommit, onSaveToAccount, onOpenProjects,
     onOpenCloudProjects, onSessionChange, onPlanChange, onDiscard, onNewProject, onExportOpen, onExport, onCancelExport, onDownloadExport,
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange,
-    onSetShowVerseNumber, onSetShowSafeArea, onApplyStyle, onSaveCurrentStyle, onSetLocalStyleName,
+    onSetShowVerseNumber, onSetShowSafeArea, onSetPlatformPreview, onMoveToSafeArea, onCaptionBoundsChange, onApplyStyle, onSaveCurrentStyle, onSetLocalStyleName,
     onResetSelectedObjectStyle, onSetStyleScope, onAlignTranslation, onSetSplitBoundary, onSplit, onMergePrevious,
     onMergeNext, onTranslationFragmentChange, onResetTranslationFragment, onResetTiming, onResetAllTiming, onTimelinePinchZoom,
   } = props;
@@ -274,6 +281,10 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const inspectorTypography = inspectorStyle.typography;
   const inspectorBackground = inspectorStyle.captionBackground;
   const inspectorPositioning = inspectorStyle.positioning;
+  const contextualPlatformCollisions = useMemo(() => {
+    const relevant = selectedSegmentId ? platformCollisions.filter((collision) => collision.segmentId === selectedSegmentId) : platformCollisions;
+    return [...new Map(relevant.map((collision) => [`${collision.kind}:${collision.obstructionId}`, collision])).values()];
+  }, [platformCollisions, selectedSegmentId]);
   const updateObjectTypography = <K extends keyof Typography>(key: K, value: Typography[K]) => onTypographyChange(key, value);
   const renderTimelineItem = (item: TimelineItem) => {
     const geometry = timelineItemGeometry(item.startMs, item.endMs, timelineViewport);
@@ -356,7 +367,8 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           {videoUrl ? <div ref={previewRef} className={`project-preview-canvas editor-canvas ${mediaSource?.hasVideo ? "" : "editor-audio-canvas"}`} data-project-aspect-ratio={selectedFormatDefinition.aspectRatio} data-project-format={projectFormat.preset} style={{ aspectRatio: `${projectFormat.width} / ${projectFormat.height}` }} onPointerDown={onCanvasBackgroundPointerDown}>
             {mediaSource?.hasVideo ? <video ref={videoRef} className="h-full w-full object-contain" controls playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onPointerDown={onSelectMedia} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={(node) => { (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node as unknown as HTMLVideoElement; }} className="editor-audio-element" controls preload="metadata" src={videoUrl} onPointerDown={onSelectMedia} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support audio playback.</audio>}
             {showSafeArea && <SafeAreaOverlay format={projectFormat} />}
-            <CaptionPreview currentTimeMs={currentTimeMs} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedSegmentId={selectedSegmentId} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} />
+            <SocialPlatformGuideOverlay platform={platformPreview} />
+            <CaptionPreview currentTimeMs={currentTimeMs} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedSegmentId={selectedSegmentId} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} onCaptionBoundsChange={onCaptionBoundsChange} />
           </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
         </div>
         <div className="editor-playback-row"><span className="editor-playback-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(durationMs / 1000)}</span><span className="editor-playback-hint">Space to play · ← → to nudge</span></div>
@@ -392,6 +404,11 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
             <SectionLabel>Canvas settings</SectionLabel>
             <p className="editor-muted">{selectedFormatDefinition.label} · {selectedFormatDefinition.width} × {selectedFormatDefinition.height}</p>
             <label className="editor-toggle"><input checked={showSafeArea} type="checkbox" onChange={(event) => onSetShowSafeArea(event.target.checked)} /><span />Safe area guides</label>
+            <div className="editor-platform-preview"><SectionLabel>Platform Preview</SectionLabel><Segmented value={platformPreview} options={[["none", "None"], ["tiktok", "TikTok"], ["instagram-reels", "Instagram Reels"], ["youtube-shorts", "YouTube Shorts"]]} onChange={(value) => onSetPlatformPreview(value as SocialPlatformId)} />
+              {platformPreview !== "none" && projectFormat.preset !== "vertical" && <p className="editor-muted">Platform safe-zone guides are optimized for 9:16 video.</p>}
+              {platformPreview !== "none" && <p className="editor-platform-guide-note">Approximate safe-zone guide · platform interfaces can change.</p>}
+              {contextualPlatformCollisions.length > 0 && <div className="editor-platform-warning" role="status"><strong>{contextualPlatformCollisions.map((collision) => `${collision.kind === "arabic" ? "Arabic" : collision.kind === "translation" ? "Translation" : "Transliteration"} may be covered by ${platformPreview === "instagram-reels" ? "Reels" : platformPreview === "youtube-shorts" ? "Shorts" : "TikTok"} ${collision.obstructionLabel}`).at(0)}</strong><button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onMoveToSafeArea}>Move to safe area</button></div>}
+            </div>
             {selectedSegment ? <div className="editor-inspector-context"><SectionLabel>Selected subtitle</SectionLabel><strong>{captionSegmentLabel(selectedSegment)} · {objectLabel}</strong><p className="editor-muted">Its caption controls remain available in Subtitles.</p></div> : <div className="editor-inspector-context"><SectionLabel>Selected object</SectionLabel><strong>{mediaSource?.hasVideo ? "Video" : mediaSource ? "Audio" : "Canvas"}</strong><p className="editor-muted">Select caption text or a timeline caption to edit subtitle styling and timing.</p></div>}
           </div> : <>
           {selectedSegment ? <>

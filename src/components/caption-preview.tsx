@@ -6,6 +6,7 @@ import type { QuranContentResponse } from "@/lib/quran/content";
 import { quranFontDefinitions } from "@/lib/quran/content";
 import type { ProjectFormat } from "@/lib/schemas/project";
 import { captionStyleFromState, resolveCaptionLayerStyle } from "@/lib/editor/styles";
+import type { CaptionCanvasBounds } from "@/lib/editor/social-platform-guides";
 
 export type CaptionObject = "arabic" | "translation" | "transliteration";
 export type CaptionResizeEdge = "left" | "right";
@@ -27,6 +28,7 @@ type CaptionPreviewProps = {
   onResizePointerDown: (event: PointerEvent<HTMLButtonElement>, kind: CaptionObject, edge: CaptionResizeEdge) => void;
   onPointerMove: (event: PointerEvent<HTMLElement>) => void;
   onPointerUp: () => void;
+  onCaptionBoundsChange?: (bounds: CaptionCanvasBounds[]) => void;
 };
 
 function CaptionPreview({
@@ -46,6 +48,7 @@ function CaptionPreview({
   onResizePointerDown,
   onPointerMove,
   onPointerUp,
+  onCaptionBoundsChange,
 }: CaptionPreviewProps) {
   const layerRefs = useRef(new Map<string, HTMLDivElement>());
   const linkedStackRefs = useRef(new Map<string, HTMLDivElement>());
@@ -103,6 +106,44 @@ function CaptionPreview({
     applyVisualState();
   }, [currentTimeMs, segments, transitionSettings]);
 
+  useLayoutEffect(() => {
+    if (!onCaptionBoundsChange) return;
+    const measure = () => {
+      const canvas = layerRefs.current.values().next().value?.parentElement as HTMLDivElement | undefined;
+      if (!canvas) return onCaptionBoundsChange([]);
+      const canvasRect = canvas.getBoundingClientRect();
+      if (!canvasRect.width || !canvasRect.height) return onCaptionBoundsChange([]);
+      const activeIds = new Set(captionVisualStatesAtTime(segments, currentTimeMs, transitionSettings).map((state) => state.segment.id));
+      if (selectedSegmentId) activeIds.add(selectedSegmentId);
+      const next: CaptionCanvasBounds[] = [];
+      layerRefs.current.forEach((layer, segmentId) => {
+        if (!activeIds.has(segmentId)) return;
+        layer.querySelectorAll<HTMLDivElement>("[data-caption-object]").forEach((object) => {
+          const kind = object.dataset.captionObject;
+          if (kind !== "arabic" && kind !== "translation" && kind !== "transliteration") return;
+          const rect = object.getBoundingClientRect();
+          if (!rect.width || !rect.height) return;
+          next.push({
+            segmentId,
+            kind,
+            linked: object.classList.contains("caption-object-linked"),
+            x: Math.max(0, (rect.left - canvasRect.left) / canvasRect.width),
+            y: Math.max(0, (rect.top - canvasRect.top) / canvasRect.height),
+            width: Math.min(1, rect.width / canvasRect.width),
+            height: Math.min(1, rect.height / canvasRect.height),
+          });
+        });
+      });
+      onCaptionBoundsChange(next);
+    };
+    const frame = requestAnimationFrame(measure);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    const canvas = layerRefs.current.values().next().value?.parentElement;
+    if (canvas) observer?.observe(canvas);
+    layerRefs.current.forEach((layer) => observer?.observe(layer));
+    return () => { cancelAnimationFrame(frame); observer?.disconnect(); };
+  }, [captionBackground, currentTimeMs, onCaptionBoundsChange, positioning, segments, transitionSettings, typography]);
+
   const globalStyle = captionStyleFromState(typography, positioning, captionBackground, transitionSettings);
   const styleText = (kind: CaptionObject, layerTypography: Typography) => {
     const outline = kind === "arabic" ? layerTypography.arabicOutlineEnabled : layerTypography.translationOutlineEnabled;
@@ -129,6 +170,7 @@ function CaptionPreview({
       if (segment.contentKind === "ayah" && item?.status !== "ready") return null;
       const translation = translationDisplayText(segment) ?? (item?.status === "ready" ? item.verse.translation : null);
       const hasTranslation = translationStyleState.typography.translationVisible && Boolean(translation);
+      const hasTransliteration = segmentTypography.transliterationVisible && Boolean(segment.transliteration);
       const arabicWords = arabicCaptionPresentationWords(segment, showVerseNumber, currentTimeMs, segmentTypography.wordHighlightMode);
       const background = captionBackgroundStyle(segmentBackground);
       const arabicWidth = `${segmentPositioning.maxWidthPercent * 100}%`;
@@ -173,6 +215,13 @@ function CaptionPreview({
         <p className="pointer-events-none" style={translationStyle}>{translation}</p>
         {handles("translation")}
       </div>;
+      const transliterationObject = (linked: boolean) => hasTransliteration && <div
+        className={`caption-object caption-object-transliteration${linked ? " caption-object-linked" : ""}`}
+        data-caption-object="transliteration"
+        style={linked ? { width: "100%" } : { left: `${segmentPositioning.x * 100}%`, top: `${Math.min(0.94, segmentPositioning.y + 0.12) * 100}%`, width: arabicWidth }}
+      >
+        <p className="pointer-events-none" style={{ color: segmentTypography.translationTextColor, fontFamily: segmentTypography.transliterationFontFamily, fontSize: segmentTypography.transliterationFontSize, lineHeight: 1.25, opacity: segmentTypography.translationOpacity, margin: 0 }}>{segment.transliteration}</p>
+      </div>;
       return <div key={segment.id} ref={registerLayer(segment.id)} className="absolute inset-0 pointer-events-none" data-caption-segment={segment.id} data-caption-opacity="0" style={{ opacity: 0, visibility: "hidden", willChange: "opacity, filter" }}>
         {positioning.translationPositionLinked ? <div
           ref={registerLinkedStack(segment.id)}
@@ -181,9 +230,11 @@ function CaptionPreview({
         >
           {arabicObject(true)}
           {translationObject(true)}
+          {transliterationObject(true)}
         </div> : <>
           {arabicObject(false)}
           {translationObject(false)}
+          {transliterationObject(false)}
         </>}
       </div>;
     })}
