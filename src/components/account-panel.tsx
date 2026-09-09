@@ -4,9 +4,10 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { getSupabaseClient, listCloudProjectRecords, sendMagicLink, signInWithGoogle, signOut } from "@/lib/cloud-sync";
 import { accountEntitlementsForPlan, type AccountEntitlements } from "@/lib/entitlements";
+import { openCustomerPortal } from "@/lib/billing/client";
 import PlanComparisonDialog from "@/components/plan-comparison-dialog";
 
-type AccountPanelProps = { session: Session | null; entitlements?: AccountEntitlements; onClose: () => void; onBeforeAuthenticate?: () => Promise<void>; authReturnPath?: "/editor" | "/projects"; onOpenPlanComparison?: () => void };
+type AccountPanelProps = { session: Session | null; entitlements?: AccountEntitlements; onClose: () => void; onBeforeAuthenticate?: () => Promise<void>; authReturnPath?: "/editor" | "/projects"; onOpenPlanComparison?: () => void; onEntitlementsRefresh?: () => Promise<void> };
 
 function displayName(user: User): string {
   const metadata = user.user_metadata;
@@ -33,7 +34,7 @@ function friendlyAuthError(error: unknown): string {
   return message;
 }
 
-export default function AccountPanel({ session, entitlements = accountEntitlementsForPlan("free"), onClose, onBeforeAuthenticate, authReturnPath = "/editor", onOpenPlanComparison }: AccountPanelProps) {
+export default function AccountPanel({ session, entitlements = accountEntitlementsForPlan("free"), onClose, onBeforeAuthenticate, authReturnPath = "/editor", onOpenPlanComparison, onEntitlementsRefresh }: AccountPanelProps) {
   const configured = getSupabaseClient() !== null;
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -92,6 +93,13 @@ export default function AccountPanel({ session, entitlements = accountEntitlemen
     finally { setCheckingEmail(false); }
   }
 
+  async function managePlan() {
+    if (!session) return;
+    setMessage(null);
+    try { window.location.assign(await openCustomerPortal(session)); }
+    catch (error) { setMessage(error instanceof Error ? error.message : "Customer Portal could not be opened. Please try again."); }
+  }
+
   if (session) {
     const user = session.user;
     const avatar = avatarUrl(user);
@@ -101,14 +109,14 @@ export default function AccountPanel({ session, entitlements = accountEntitlemen
     return <div className="editor-account-menu" ref={menuRef} role="menu" aria-label="Account menu" onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onClose(); } }}>
       <div className="editor-account-identity">{avatar ? <span aria-label="Account avatar" style={{ backgroundImage: `url(${avatar})` }} /> : <span aria-hidden="true">{displayName(user).slice(0, 1).toUpperCase()}</span>}<div><strong>{displayName(user)}</strong><small>{user.email}</small></div></div>
       <section className="editor-account-plan-card" aria-label={`${planName} plan`}>
-        <div><span>{planName} PLAN</span><b>{entitlements.plan === "free" ? "Creator essentials" : "Active access"}</b></div>
+        <div><span>{planName} PLAN</span><b>{entitlements.plan === "free" ? "Editor essentials" : "Active access"}</b></div>
         {entitlements.plan === "free" ? <ul><li>720p exports</li><li>Watermark on exports</li><li>{freeUsage}</li></ul> : <ul>{paidBenefits.map((benefit) => <li key={benefit}>{benefit}</li>)}</ul>}
-        <button type="button" className="editor-account-plan-action" onClick={openPlanComparison}>{entitlements.plan === "free" ? "Upgrade plan" : "Manage plan"}</button>
+        <button type="button" className="editor-account-plan-action" onClick={entitlements.plan === "free" ? openPlanComparison : () => void managePlan()}>{entitlements.plan === "free" ? "Upgrade plan" : "Manage plan"}</button>
       </section>
       <div className="editor-account-menu-links"><a role="menuitem" className="editor-account-menu-item" href="/projects" onClick={onClose}>Projects</a><button type="button" role="menuitem" className="editor-account-menu-item" onClick={openPlanComparison}>Billing &amp; plans</button></div>
       <button type="button" role="menuitem" className="editor-account-menu-item editor-account-signout" onClick={() => void signOut().then(onClose).catch((error: unknown) => setMessage(friendlyAuthError(error)))}>Sign out</button>
       {message && <p className="editor-auth-message editor-auth-error" role="alert">{message}</p>}
-      {planComparisonOpen && <PlanComparisonDialog entitlements={entitlements} onClose={() => setPlanComparisonOpen(false)} />}
+      {planComparisonOpen && <PlanComparisonDialog entitlements={entitlements} session={session} onEntitlementsRefresh={onEntitlementsRefresh} onClose={() => setPlanComparisonOpen(false)} />}
     </div>;
   }
 

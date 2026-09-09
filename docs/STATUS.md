@@ -1,6 +1,18 @@
 # Status
 
-## Current milestone: Polished account and upgrade experience
+## Current milestone: Stripe subscription billing in test mode
+
+Complete:
+
+- Added test-mode Stripe-hosted Checkout for the canonical Free / Pro / Premium plans: Pro $9.99/month or $99/year, and Premium $19.99/month or $199/year. The server accepts only `{ plan, interval }`, resolves one of four server-only allowlisted Price IDs, and blocks duplicate paid Checkout sessions.
+- Added server-only one-account/one-Stripe-Customer mapping, a verified Stripe subscription projection, safe Customer Portal sessions, and an additive restrictive-RLS billing migration. `account_entitlements` remains the single product-plan authority.
+- Added raw-body signature verification and replay-safe webhook processing for Checkout completion plus subscription create/update/delete. Known `active`/`trialing` prices grant the matching plan; `past_due`, unpaid, canceled, incomplete, expired, paused, or unknown-price rows resolve Free. Checkout redirects merely poll the authoritative state.
+- Replaced provisional plan actions with Monthly/Annual launch pricing, mathematically derived annual savings, real Checkout/Manage plan actions when configured, a precise unconfigured state in development, and current subscription status in the dialog.
+- Added [STRIPE_SETUP.md](./STRIPE_SETUP.md) with Stripe Dashboard test-mode setup, Customer Portal/webhook configuration, Supabase verification, test cards, safe reset, and local Stripe CLI forwarding instructions.
+
+Verification: focused Stripe tests pass; `npm test` passes (296 tests); `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes its production invariant probes; its optional real-audio benchmark still fails in this workspace and refreshes `docs/regression/results/20260909.md`, with no recognition changes. Live Stripe/Supabase delivery remains a manual test-mode setup step.
+
+## Previous milestone: Polished account and upgrade experience
 
 Complete:
 

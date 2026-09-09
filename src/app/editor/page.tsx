@@ -2544,6 +2544,12 @@ export default function Home() {
         dirty={dirty}
         session={session}
         accountEntitlements={accountEntitlements}
+        onRefreshEntitlements={async () => {
+          if (!session) return;
+          const entitlements = await getAccountEntitlements(session);
+          setAccountEntitlements(entitlements);
+          setExportQuality((current) => canExportQuality(entitlements, current) ? current : defaultExportQualityForPlan(entitlements.plan));
+        }}
         canUndo={projectHistory.current.canUndo}
         canRedo={projectHistory.current.canRedo}
         busy={busy}

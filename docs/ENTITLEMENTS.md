@@ -51,4 +51,4 @@ on conflict (user_id) do update set plan = excluded.plan, source = excluded.sour
 
 Sign out/in or reopen Export Settings to refresh the displayed account entitlement. The server always rechecks before a new render.
 
-Stripe Checkout, Customer Portal, price IDs, and webhook synchronization are intentionally not part of this milestone.
+Stripe Checkout and Customer Portal use server-only configured Price IDs. The signed Stripe webhook projects known active/trialing subscriptions into this canonical table with `source = 'stripe'`; browser redirects and client actions never write entitlements. See [STRIPE_SETUP.md](./STRIPE_SETUP.md) for the required test-mode setup and the conservative payment-status policy.

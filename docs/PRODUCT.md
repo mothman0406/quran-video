@@ -15,15 +15,15 @@ Defaults: vertical 9:16, centered Arabic with translation below, ayah-level timi
 
 ## V1 plan entitlements
 
-The V1 model is centralized in `src/lib/entitlements.ts`. Prices below are intended display values; Stripe price IDs remain deployment configuration.
+The V1 model is centralized in `src/lib/entitlements.ts`. Stripe Price IDs are deployment configuration and are mapped only on the server.
 
-- Free ($0): unlimited local recognition, editing, and export count; 720p maximum output with a small watermark; basic Quran font/style set, Saheeh International, basic transitions, Hafs only; 2 saved custom styles and 2 cloud projects.
-- Creator (intended $7.99/month): unlimited local workflows and 1080p output without watermark; all currently supported fonts/styles, translations, transitions/presets, unlimited custom styles, 25 cloud projects, and a future advanced/word-alignment entitlement; Hafs initially.
-- Pro (intended $14.99/month): Creator capabilities with a centralized 1,000-project technical ceiling, plus future 4K, supported-qiraat, and premium creator capability entitlements. 4K and other qiraat are not implemented.
+- Free ($0): unlimited local recognition, editing, and export count; 720p maximum output with a watermark and up to 3 cloud projects.
+- Pro ($9.99/month or $99/year): unwatermarked 720p/1080p output. Paid cloud/storage policy remains TBD.
+- Premium ($19.99/month or $199/year): Pro access plus unwatermarked 4K output. Paid cloud/storage policy remains TBD.
 
 Export count is recorded for future accounting but is not a quota on any plan. Canonical Arabic, core recognition, manual timing/editing, and local-first workflows remain available on Free.
 
-V1 is Hafs only. Free includes the basic Uthmani font/style set; Creator and Pro include all currently supported typography. Recognition, canonical content, rendering, accounts, billing, and additional media features remain explicitly staged by milestone.
+V1 is Hafs only. Recognition, canonical content, rendering, accounts, billing, and additional media features remain explicitly staged by milestone.
 
 ## Local-first product behavior
 

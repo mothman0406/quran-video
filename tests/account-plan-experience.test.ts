@@ -19,12 +19,16 @@ test("account menu derives its tier and Free cloud usage from authoritative acco
   assert.doesNotMatch(account, /setEntitlements|onPlanChange|plan selector/i);
 });
 
-test("the reusable comparison marks the active tier and does not invent paid quotas or pricing", () => {
+test("the reusable comparison marks the active tier, shows launch pricing, and does not invent paid quotas", () => {
   assert.match(plans, /Current plan/);
-  assert.match(plans, /Upgrade available soon/);
+  assert.match(plans, /monthly: 9\.99/);
+  assert.match(plans, /monthly: 19\.99/);
+  assert.match(plans, /Annual/);
+  assert.match(plans, /Upgrade to \$\{detail\.name\}/);
+  assert.match(plans, /Manage plan/);
   assert.match(plans, /Plan capability comparison/);
   assert.match(plans, /TBD/);
-  assert.doesNotMatch(plans, /\$\s*\d|\d+\.\d{2}/);
+  assert.doesNotMatch(plans, /Upgrade available soon/);
 });
 
 test("account navigation, sign out, Escape, and locked export upgrade use the shared account surfaces", () => {

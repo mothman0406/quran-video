@@ -1,0 +1,79 @@
+# Stripe subscription billing setup (test mode)
+
+Quran Video uses Stripe-hosted Checkout and the Customer Portal. The application never accepts card details. Keep the Stripe Dashboard in **Test mode** until launch approval, and use only `sk_test_…` and test-mode `price_…` values below.
+
+## 1. Create the products and recurring prices
+
+In the Stripe Dashboard test-mode toggle:
+
+1. Open **Product catalog** and create **Quran Video Pro**.
+2. Add a recurring USD price of **$9.99**, billed **monthly**. Copy its Price ID into `STRIPE_PRO_MONTHLY_PRICE_ID`.
+3. Add a recurring USD price of **$99.00**, billed **yearly**. Copy its Price ID into `STRIPE_PRO_ANNUAL_PRICE_ID`.
+4. Create **Quran Video Premium**.
+5. Add a recurring USD price of **$19.99**, billed **monthly**. Copy its Price ID into `STRIPE_PREMIUM_MONTHLY_PRICE_ID`.
+6. Add a recurring USD price of **$199.00**, billed **yearly**. Copy its Price ID into `STRIPE_PREMIUM_ANNUAL_PRICE_ID`.
+
+Do not create Prices in the browser or place Price IDs in client code. Configure the Customer Portal only after all four Prices exist.
+
+## 2. Configure application variables
+
+Put these in local `.env.local` and in the server-side environment for the deployed app. Never commit any values. Restart `npm run dev` after a change.
+
+```dotenv
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_PRO_MONTHLY_PRICE_ID=price_...
+STRIPE_PRO_ANNUAL_PRICE_ID=price_...
+STRIPE_PREMIUM_MONTHLY_PRICE_ID=price_...
+STRIPE_PREMIUM_ANNUAL_PRICE_ID=price_...
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+SUPABASE_SERVICE_ROLE_KEY=your-server-only-supabase-service-role-key
+```
+
+`NEXT_PUBLIC_APP_URL` is an origin, not a secret; it must be the exact deployed HTTPS origin in production. Every other value here is server-only. Do not add a `NEXT_PUBLIC_STRIPE_*` key: Checkout is hosted by Stripe and does not need Stripe.js.
+
+## 3. Apply the Supabase migration
+
+Apply `supabase/migrations/20260909000000_stripe_subscription_billing.sql` after the existing migrations. It adds `billing_customers`, `billing_subscriptions`, and a replay-safe extension of `stripe_webhook_events`. It does not replace `account_entitlements`; the signed webhook is its only Stripe write path.
+
+The launch policy is intentionally conservative: a known Price with `active` or `trialing` grants its matching plan. `past_due`, `unpaid`, `canceled`, `incomplete`, `incomplete_expired`, `paused`, unknown Price IDs, and missing subscriptions resolve to Free. A subscription with `cancel_at_period_end` remains paid until Stripe reports it ended.
+
+## 4. Configure webhooks and Customer Portal
+
+For the deployed app, create a test-mode webhook endpoint at:
+
+```text
+https://YOUR_DOMAIN/api/stripe/webhook
+```
+
+Subscribe it to:
+
+- `checkout.session.completed`
+- `customer.subscription.created`
+- `customer.subscription.updated`
+- `customer.subscription.deleted`
+
+Copy that endpoint’s signing secret into `STRIPE_WEBHOOK_SECRET`; it is different from the API secret key. In **Settings → Billing → Customer portal**, activate the portal, enable payment-method and invoice history, and enable cancellation. Optionally enable switching among all four Quran Video Prices; Stripe recommends portal price-switch/downgrade configuration appropriate to the desired proration behavior. [Stripe’s portal configuration guide](https://docs.stripe.com/customer-management/configure-portal) documents these settings.
+
+## 5. Local webhook workflow
+
+Install and authenticate the Stripe CLI yourself (the repository does not install global tools), then run the application in one terminal and the listener in another:
+
+```bash
+npm run dev
+stripe listen --forward-to localhost:3000/api/stripe/webhook
+```
+
+Copy the `whsec_…` printed by `stripe listen` into local `STRIPE_WEBHOOK_SECRET`, restart the dev server, and complete Checkout. You can also send representative events with `stripe trigger customer.subscription.updated`. Stripe documents this CLI forwarding workflow in its [webhook guide](https://docs.stripe.com/webhooks?lang=node).
+
+## 6. Test and inspect
+
+1. Sign in to Quran Video and choose Pro or Premium, then Monthly or Annual.
+2. Complete Stripe-hosted Checkout with `4242 4242 4242 4242`, any future expiry, any three-digit CVC, and any postal code. Use only test keys and test cards.
+3. Check **Developers → Event destinations** in Stripe for a successful webhook delivery.
+4. In Supabase, verify the account row in `account_entitlements` changed to `pro` or `premium` with `source = 'stripe'`; inspect `billing_subscriptions` for status/interval without exposing it to browser writes.
+5. Open **Manage plan**, verify the Customer Portal opens, then cancel at period end. The webhook should set `cancel_at_period_end = true` while access remains paid. Use Stripe’s test clock or end/cancel the test subscription to exercise the final downgrade webhook.
+
+Stripe’s current test-card documentation confirms the `4242` Visa number, a future expiry, and any three-digit CVC for an interactive successful payment. [Stripe test cards](https://docs.stripe.com/testing?numbers-or-method-or-token=tokens)
+
+To reset a test user safely, cancel/delete that user’s test subscription in the Stripe Dashboard, wait for the signed `customer.subscription.deleted` delivery, and confirm `account_entitlements` becomes `free`. Do not manually assign a paid entitlement or edit a customer mapping. Delete the test Customer only after its subscriptions are resolved; the next Checkout will recreate the mapping through the normal server path.
