@@ -6,7 +6,7 @@ import { formatRuntimeConfigurationIssues, runtimeConfigurationIssues } from "..
 import { stripeCheckoutConfigured, stripeEnvironmentIsSafe } from "../src/lib/billing/server.ts";
 
 const workspace = readFileSync(new URL("../src/components/editor-workspace.tsx", import.meta.url), "utf8");
-const editor = readFileSync(new URL("../src/app/editor/page.tsx", import.meta.url), "utf8");
+const editor = readFileSync(new URL("../src/components/editor-client.tsx", import.meta.url), "utf8");
 const cloud = readFileSync(new URL("../src/lib/cloud-sync.ts", import.meta.url), "utf8");
 const billingServer = readFileSync(new URL("../src/lib/billing/server.ts", import.meta.url), "utf8");
 const entitlementServer = readFileSync(new URL("../src/lib/entitlements/server.ts", import.meta.url), "utf8");

@@ -6,6 +6,7 @@ import type {
 import { analyzeMonoPcm } from "./audio-analysis.ts";
 import { detectLocalSpeechRegions } from "./vad.ts";
 import { createFastConformerIdentificationRunner, createFastConformerRunner } from "./local-fastconformer.ts";
+export { localTranscriptionSupport } from "./support.ts";
 import type { TimestampValidationDiagnostics } from "./transcriber";
 
 /** This export retains the decoder cross-attentions Transformers.js needs for word timestamps. */
@@ -346,13 +347,3 @@ export const localWhisperTranscriber: RecognitionTranscriber = {
     return runWhisperFallback();
   },
 };
-
-export function localTranscriptionSupport() {
-  if (typeof window === "undefined") return { supported: false, reason: "This check must run in a browser." };
-  if (typeof AudioContext === "undefined") return { supported: false, reason: "This browser does not expose AudioContext for local audio decoding." };
-  return {
-    supported: true,
-    webgpu: supportsWebGpu(),
-    reason: supportsWebGpu() ? "WebGPU will be tried first; WASM is used if it fails." : "WebGPU is unavailable; local WASM will be used.",
-  };
-}

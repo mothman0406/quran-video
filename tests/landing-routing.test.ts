@@ -11,11 +11,13 @@ const fromRoot = (...parts: string[]) => resolve(process.cwd(), ...parts);
 test("public route renders the lightweight landing page and leaves the editor on /editor", () => {
   const landingRoute = readFileSync(fromRoot("src/app/page.tsx"), "utf8");
   const editorRoute = readFileSync(fromRoot("src/app/editor/page.tsx"), "utf8");
+  const editorClient = readFileSync(fromRoot("src/components/editor-client.tsx"), "utf8");
   const landingComponent = readFileSync(fromRoot("src/components/landing-page.tsx"), "utf8");
 
   assert.match(landingRoute, /LandingPage/);
   assert.doesNotMatch(landingRoute, /recognition|fastconformer|EditorWorkspace/i);
-  assert.match(editorRoute, /EditorWorkspace/);
+  assert.match(editorRoute, /EditorClient/);
+  assert.match(editorClient, /EditorWorkspace/);
   assert.match(landingComponent, /href="\/editor"/);
   assert.match(landingComponent, /No sign-up required to start\./);
 });

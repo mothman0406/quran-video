@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const editor = readFileSync(new URL("../src/app/editor/page.tsx", import.meta.url), "utf8");
+const editor = readFileSync(new URL("../src/components/editor-client.tsx", import.meta.url), "utf8");
 
 test("editor Save keeps guest intent and confirms a first cloud-project name", () => {
   assert.match(editor, /rememberAuthContinuation\("save"\)/);

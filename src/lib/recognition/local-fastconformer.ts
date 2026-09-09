@@ -17,6 +17,44 @@ import {
   type FastConformerIdentificationResult,
   type QuranWideLexicalIndex,
 } from "./fastconformer-identification.ts";
+import {
+  FASTCONFORMER_BASE_URL,
+  FASTCONFORMER_MODEL,
+  FASTCONFORMER_MODEL_ARTIFACT,
+  FASTCONFORMER_MODEL_BYTES,
+  FASTCONFORMER_MODEL_LICENSE,
+  FASTCONFORMER_MODEL_REVISION,
+  FASTCONFORMER_MODEL_URL,
+  FASTCONFORMER_ORT_IMPORT,
+  FASTCONFORMER_ORT_VERSION,
+  FASTCONFORMER_QURAN_BYTES,
+  FASTCONFORMER_RUNTIME,
+  FASTCONFORMER_TILAWA_RELEASE,
+  FASTCONFORMER_TOKEN_TABLE_BYTES,
+  FASTCONFORMER_TOKEN_TABLE_REVISION,
+  FASTCONFORMER_VOCAB_BYTES,
+  FASTCONFORMER_VOCAB_REVISION,
+  type FastConformerProgress,
+  type FastConformerProgressCallback,
+} from "./contracts.ts";
+export {
+  FASTCONFORMER_MODEL,
+  FASTCONFORMER_MODEL_ARTIFACT,
+  FASTCONFORMER_MODEL_BYTES,
+  FASTCONFORMER_MODEL_LICENSE,
+  FASTCONFORMER_MODEL_REVISION,
+  FASTCONFORMER_MODEL_URL,
+  FASTCONFORMER_ORT_IMPORT,
+  FASTCONFORMER_ORT_VERSION,
+  FASTCONFORMER_QURAN_BYTES,
+  FASTCONFORMER_RUNTIME,
+  FASTCONFORMER_TILAWA_RELEASE,
+  FASTCONFORMER_TOKEN_TABLE_BYTES,
+  FASTCONFORMER_TOKEN_TABLE_REVISION,
+  FASTCONFORMER_VOCAB_BYTES,
+  FASTCONFORMER_VOCAB_REVISION,
+  type FastConformerProgress,
+} from "./contracts.ts";
 
 /**
  * Tilawa FastConformer known-passage timing adapter. The public artifact is
@@ -24,23 +62,6 @@ import {
  * passage identification and becomes authoritative only after structural
  * validation in the central timing-engine selector.
  */
-export const FASTCONFORMER_MODEL = "acibZ/tilawa-quran-onnx";
-export const FASTCONFORMER_MODEL_LICENSE = "CC-BY-4.0";
-export const FASTCONFORMER_MODEL_REVISION = "0cd79471524bc9cfa1c9296055242a935a1873e4";
-export const FASTCONFORMER_MODEL_ARTIFACT = "fastconformer_full_mixed.onnx";
-export const FASTCONFORMER_MODEL_BYTES = 88_307_366;
-export const FASTCONFORMER_TOKEN_TABLE_BYTES = 12_211_783;
-export const FASTCONFORMER_VOCAB_BYTES = 21_062;
-export const FASTCONFORMER_QURAN_BYTES = 3_186_385;
-export const FASTCONFORMER_RUNTIME = "ONNX Runtime Web 1.24.2 (WASM only; Tilawa-compatible)";
-export const FASTCONFORMER_ORT_IMPORT = "fastconformer-onnxruntime-web/wasm";
-export const FASTCONFORMER_ORT_VERSION = "1.24.2";
-/** Public Tilawa release whose browser assets and core contract were audited. */
-export const FASTCONFORMER_TILAWA_RELEASE = "v0.2.0";
-export const FASTCONFORMER_VOCAB_REVISION = FASTCONFORMER_MODEL_REVISION;
-export const FASTCONFORMER_TOKEN_TABLE_REVISION = FASTCONFORMER_MODEL_REVISION;
-const FASTCONFORMER_BASE_URL = `https://huggingface.co/${FASTCONFORMER_MODEL}/resolve/${FASTCONFORMER_MODEL_REVISION}`;
-export const FASTCONFORMER_MODEL_URL = `${FASTCONFORMER_BASE_URL}/${FASTCONFORMER_MODEL_ARTIFACT}`;
 const VOCAB_URL = `${FASTCONFORMER_BASE_URL}/vocab.json`;
 const TOKEN_TABLE_URL = `${FASTCONFORMER_BASE_URL}/quran_ctc_tokens.json`;
 const QURAN_URL = `${FASTCONFORMER_BASE_URL}/quran.json`;
@@ -201,12 +222,6 @@ export type FastConformerResult = {
     totalMs: number;
   };
 };
-
-export type FastConformerProgress =
-  | { phase: "downloading-model"; bytesLoaded: number; bytesTotal: number }
-  | { phase: "identifying-passage"; completed: number; total: number }
-  | { phase: "aligning-words"; step: "inference" | "forced-alignment" };
-export type FastConformerProgressCallback = (progress: FastConformerProgress) => void;
 
 export type FastConformerRunner = (
   verses: readonly QuranCorpusVerse[],

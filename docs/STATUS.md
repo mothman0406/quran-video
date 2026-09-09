@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Netlify server-handler deployment repair
+
+Complete:
+
+- Diagnosed the production upload failure from Netlify/OpenNext output rather than applying an externalization setting. The `/editor` server trace reached Transformers.js through a client-page import used only for browser capability detection, which in turn traced the Transformers Node backend, `onnxruntime-node`, native libraries, and bundled Sharp assets.
+- Isolated the editor behind a client-only `next/dynamic` boundary with `ssr: false`; the route now contains no recognition or export engine imports. Lightweight FastConformer metadata, browser recognition support, and browser export support have separate contracts/support modules.
+- Kept the recognition engine lazy-loaded when detection begins and made the Mediabunny export inspection lazy-loaded for preflight/export. No model, timing, Quran, export, entitlement, or server-route behavior changed.
+- Added `npm run analyze:netlify-server`, a dependency-free inspection of the generated handler, plus regression coverage that prevents browser runtimes from returning to the editor server graph. Documented the local Netlify build/inspection workflow in [PRODUCTION_DEPLOYMENT.md](./PRODUCTION_DEPLOYMENT.md).
+- An isolated Netlify Runtime v5.15.13 baseline build at `8197eb3` produced an 82,295,803-byte ZIP / 222,482,799-byte unpacked handler. The repaired local build produces a 19,081,633-byte ZIP / 53,276,981-byte unpacked handler, a 76.8% packaged-size reduction. Browser VAD/WASM assets remain static deployment assets, not function files.
+
+Verification: local Next build and Netlify offline production build pass. `npm run analyze:netlify-server` confirms the repaired handler has no Transformers, ONNX Runtime, VAD, or Mediabunny contributor. The existing non-fatal VAD dynamic-require warning remains limited to the browser client graph.
+
 ## Current milestone: Production deployment readiness
 
 Complete:

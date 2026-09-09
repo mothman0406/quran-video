@@ -35,6 +35,19 @@ Set these in `.env.local` for local work and in Vercel Project Settings → Envi
 5. Deploy. Copy the final deployed production URL, attach a custom domain later if desired, update `NEXT_PUBLIC_APP_URL` to the final canonical origin, and redeploy after any environment-variable change.
 6. Confirm `/`, `/editor`, `/projects`, and `/api/stripe/webhook` resolve through the deployment. The webhook endpoint expects POST and returns a signature/configuration error rather than granting any entitlement without Stripe verification.
 
+## Netlify server-function size check
+
+The modern Netlify Next.js Runtime packages one shared `___netlify-server-handler`. Recognition, VAD, ONNX Runtime Web, Transformers.js, and Mediabunny must stay out of that handler: they are browser-only engines and are loaded only from the client editor boundary.
+
+Before deploying a Netlify production build, run:
+
+```bash
+npm exec --yes --package=netlify-cli -- netlify build --offline
+npm run analyze:netlify-server
+```
+
+The first command creates the local `.netlify` output without deploying. The second reports the handler ZIP size, unpacked size, and its largest files/packages. It should report no `@huggingface/transformers`, `onnxruntime-node`, `onnxruntime-web`, `fastconformer-onnxruntime-web`, `@ricky0123/vad-web`, or `mediabunny` entries. Do not use `serverExternalPackages` to hide a browser engine: externalization can still package its `node_modules` files.
+
 ## Supabase and Google OAuth dashboard setup
 
 In Supabase Dashboard → Authentication → URL Configuration:

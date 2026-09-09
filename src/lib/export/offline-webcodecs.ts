@@ -27,6 +27,9 @@ import { DEFAULT_EXPORT_QUALITY, exportQualityPreset, type ExportQuality } from 
 import { durationMatches, frameTimeline, onceCleanup, resolveExportFrameRate } from "./timeline.ts";
 import { assertValidLocalExportInputs } from "./validation.ts";
 import type { ExportPhase, LocalExportDiagnostics, LocalExportRequest, LocalExportResult, LocalExportSupport, LocalVideoRenderer } from "./types.ts";
+import { offlineWebCodecsSupport } from "./support.ts";
+
+export { offlineWebCodecsSupport } from "./support.ts";
 
 export const DEFAULT_LOCAL_RENDERER_ID = "offline-webcodecs";
 
@@ -64,12 +67,6 @@ export async function inspectLocalExport(source: File, format: LocalExportReques
     const profile = selectOutputProfile(await capabilities(format.width, format.height, bitrate), Boolean(audioTrack), bitrate);
     return { sourceHasAudio: Boolean(audioTrack), profile };
   } finally { input.dispose(); }
-}
-
-export function offlineWebCodecsSupport(): LocalExportSupport {
-  if (typeof window === "undefined") return { supported: false, path: "Offline WebCodecs", reason: "Local export is available only in a browser." };
-  if (typeof VideoEncoder === "undefined" || typeof VideoDecoder === "undefined") return { supported: false, path: "Offline WebCodecs", reason: "This browser needs WebCodecs video decoding and encoding for deterministic local export." };
-  return { supported: true, path: "Offline WebCodecs", reason: "Frames and source audio are read directly from the local file; export does not play in real time." };
 }
 
 async function copyOrEncodeAudio(options: {
