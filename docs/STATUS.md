@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Polished account and upgrade experience
+
+Complete:
+
+- Redesigned the authenticated editor account menu as a compact account hub with profile identity, an entitlement-driven plan card, plan-specific export/watermark benefits, Projects, Billing & plans, and sign out. No account settings destination was added because no real settings surface exists.
+- Free account usage reads the existing authenticated `listCloudProjectRecords()` path, which lists only completed saved cloud projects; local checkpoints and incomplete/failed saves remain excluded. Pro and Premium deliberately show no fabricated cloud-storage quota.
+- Added a reusable, keyboard-accessible plan comparison dialog with Free, Pro, and Premium capability cards/matrix, active-tier Current plan treatment, no prices, and only “Upgrade available soon” paid actions. The dialog is presentation-only and cannot mutate entitlements.
+- Added restrained Upgrade actions beside locked Standard/Ultra export qualities and routed account and export affordances to the same reusable comparison experience. The account popover now closes on outside interaction and Escape without leaking editor shortcuts.
+
+Verification: `npm test` (290 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Production Free / Pro / Premium entitlement engine
 
 Complete:
