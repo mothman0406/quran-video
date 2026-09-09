@@ -1,6 +1,17 @@
 # Status
 
-## Current milestone: Stripe subscription billing in test mode
+## Current milestone: Streamlined paid plan upgrades
+
+Complete:
+
+- Added an authenticated Pro-to-Premium Customer Portal deep link. It derives the paid subscription and Stripe Customer exclusively from server-side billing records, confirms the mapping belongs to the signed-in account, and starts Stripe's `subscription_update` flow without creating a second subscription.
+- Preserved ordinary **Manage plan** as the general Customer Portal and preserved the paid-user Checkout rejection. Free users still use Checkout for either paid plan and the monthly/annual selector; Stripe's portal configuration owns paid-user plan/interval choices.
+- Portal returns now revalidate the canonical entitlement projection and keep an updating state until the signed webhook has reported Premium. The redirect itself never grants access.
+- Updated [STRIPE_SETUP.md](./STRIPE_SETUP.md) with the required Customer Portal subscription-switching configuration and Pro-to-Premium test step.
+
+Verification: `npm test` (298 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning. Live Stripe/Supabase validation remains a manual test-mode step.
+
+## Previous milestone: Stripe subscription billing in test mode
 
 Complete:
 

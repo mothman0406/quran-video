@@ -105,8 +105,14 @@ export async function getBillingSubscription(userId: string, admin: BillingAdmin
   return data as BillingSubscription | null;
 }
 
-export function hasPaidSubscription(subscription: BillingSubscription | null): boolean {
-  return Boolean(subscription && effectivePlanForSubscription(subscription.status, subscription.stripe_price_id) !== "free");
+export function hasPaidSubscription(subscription: BillingSubscription | null, env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(subscription && effectivePlanForSubscription(subscription.status, subscription.stripe_price_id, env) !== "free");
+}
+
+/** Returns only the signed-webhook subscription recorded for this account's mapped Stripe Customer. */
+export function subscriptionUpdateTarget(subscription: BillingSubscription | null, customer: BillingCustomer | null, env: NodeJS.ProcessEnv = process.env): string | null {
+  if (!subscription || !customer || subscription.user_id !== customer.user_id || subscription.stripe_customer_id !== customer.stripe_customer_id || !hasPaidSubscription(subscription, env)) return null;
+  return subscription.stripe_subscription_id;
 }
 
 async function persistCustomerMapping(userId: string, customerId: string, admin: BillingAdmin = billingAdminClient()): Promise<void> {

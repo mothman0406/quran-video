@@ -53,7 +53,7 @@ Subscribe it to:
 - `customer.subscription.updated`
 - `customer.subscription.deleted`
 
-Copy that endpoint’s signing secret into `STRIPE_WEBHOOK_SECRET`; it is different from the API secret key. In **Settings → Billing → Customer portal**, activate the portal, enable payment-method and invoice history, and enable cancellation. Optionally enable switching among all four Quran Video Prices; Stripe recommends portal price-switch/downgrade configuration appropriate to the desired proration behavior. [Stripe’s portal configuration guide](https://docs.stripe.com/customer-management/configure-portal) documents these settings.
+Copy that endpoint’s signing secret into `STRIPE_WEBHOOK_SECRET`; it is different from the API secret key. In **Settings → Billing → Customer portal**, activate the portal, enable payment-method and invoice history, and enable cancellation. Enable subscription switching and expose all four recurring Prices in its update configuration: Quran Video Pro monthly/yearly and Quran Video Premium monthly/yearly. The Pro-to-Premium action deep-links into Stripe's `subscription_update` flow; the portal configuration controls the allowed plan/interval choices and proration. If subscription switching is disabled or excludes a Price, Stripe rejects the deep link and Quran Video leaves the current entitlement unchanged. [Stripe’s portal configuration guide](https://docs.stripe.com/customer-management/configure-portal) documents these settings.
 
 ## 5. Local webhook workflow
 
@@ -72,7 +72,8 @@ Copy the `whsec_…` printed by `stripe listen` into local `STRIPE_WEBHOOK_SECRE
 2. Complete Stripe-hosted Checkout with `4242 4242 4242 4242`, any future expiry, any three-digit CVC, and any postal code. Use only test keys and test cards.
 3. Check **Developers → Event destinations** in Stripe for a successful webhook delivery.
 4. In Supabase, verify the account row in `account_entitlements` changed to `pro` or `premium` with `source = 'stripe'`; inspect `billing_subscriptions` for status/interval without exposing it to browser writes.
-5. Open **Manage plan**, verify the Customer Portal opens, then cancel at period end. The webhook should set `cancel_at_period_end = true` while access remains paid. Use Stripe’s test clock or end/cancel the test subscription to exercise the final downgrade webhook.
+5. Open **Manage plan**, verify the general Customer Portal opens, then cancel at period end. The webhook should set `cancel_at_period_end = true` while access remains paid. Use Stripe’s test clock or end/cancel the test subscription to exercise the final downgrade webhook.
+6. With an active Pro subscription, open **Billing & plans**, choose **Upgrade to Premium**, and verify Stripe opens the existing subscription's plan-update flow rather than Checkout. After completing it, wait for `customer.subscription.updated`; Quran Video refreshes the signed-webhook entitlement and shows Premium only after that projection completes.
 
 Stripe’s current test-card documentation confirms the `4242` Visa number, a future expiry, and any three-digit CVC for an interactive successful payment. [Stripe test cards](https://docs.stripe.com/testing?numbers-or-method-or-token=tokens)
 

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { User } from "@supabase/supabase-js";
 import type Stripe from "stripe";
-import { effectivePlanForSubscription, getOrCreateCustomer, hasPaidSubscription, planForPriceId, priceIdForPlan, safeApplicationOrigin } from "../src/lib/billing/server.ts";
+import { effectivePlanForSubscription, getOrCreateCustomer, hasPaidSubscription, planForPriceId, priceIdForPlan, safeApplicationOrigin, subscriptionUpdateTarget } from "../src/lib/billing/server.ts";
 
 const prices: NodeJS.ProcessEnv = {
   NODE_ENV: "test",
@@ -15,6 +15,7 @@ const prices: NodeJS.ProcessEnv = {
 };
 const checkoutRoute = readFileSync(new URL("../src/app/api/billing/checkout/route.ts", import.meta.url), "utf8");
 const portalRoute = readFileSync(new URL("../src/app/api/billing/portal/route.ts", import.meta.url), "utf8");
+const portalUpgradeRoute = readFileSync(new URL("../src/app/api/billing/portal/upgrade/route.ts", import.meta.url), "utf8");
 const webhookRoute = readFileSync(new URL("../src/app/api/stripe/webhook/route.ts", import.meta.url), "utf8");
 const migration = readFileSync(new URL("../supabase/migrations/20260909000000_stripe_subscription_billing.sql", import.meta.url), "utf8");
 
@@ -55,9 +56,31 @@ test("routes enforce authentication, server allowlists, portal ownership, and si
   assert.doesNotMatch(checkoutRoute, /body\.price|price_id/i);
   assert.match(checkoutRoute, /hasPaidSubscription/);
   assert.match(portalRoute, /getBillingCustomer\(user\.id\)/);
+  assert.match(portalUpgradeRoute, /getBillingCustomer\(user\.id\)/);
+  assert.match(portalUpgradeRoute, /getBillingSubscription\(user\.id\)/);
+  assert.match(portalUpgradeRoute, /flow_data: \{ type: "subscription_update", subscription_update: \{ subscription: subscriptionId \} \}/);
+  assert.doesNotMatch(portalUpgradeRoute, /request\.json/);
   assert.match(webhookRoute, /constructEvent\(await request\.text\(\), signature, secret\)/);
   assert.match(webhookRoute, /claimWebhookEvent/);
   assert.match(webhookRoute, /finishWebhookEvent/);
+});
+
+test("only the authenticated account's mapped paid subscription can enter the update flow", () => {
+  const paid = { user_id: "user-a", stripe_customer_id: "cus_a", stripe_subscription_id: "sub_a", stripe_price_id: "price_pro_month", plan: "pro" as const, billing_interval: "month" as const, status: "active", current_period_end: null, cancel_at_period_end: false };
+  assert.equal(subscriptionUpdateTarget(paid, { user_id: "user-a", stripe_customer_id: "cus_a" }, prices), "sub_a");
+  assert.equal(subscriptionUpdateTarget(paid, { user_id: "user-b", stripe_customer_id: "cus_a" }, prices), null);
+  assert.equal(subscriptionUpdateTarget(paid, { user_id: "user-a", stripe_customer_id: "cus_b" }, prices), null);
+  assert.equal(subscriptionUpdateTarget({ ...paid, status: "past_due" }, { user_id: "user-a", stripe_customer_id: "cus_a" }, prices), null);
+});
+
+test("the client uses Checkout only from Free and refreshes an update after its webhook projection", () => {
+  const plans = readFileSync(new URL("../src/components/plan-comparison-dialog.tsx", import.meta.url), "utf8");
+  const workspace = readFileSync(new URL("../src/components/editor-workspace.tsx", import.meta.url), "utf8");
+  assert.match(plans, /entitlements\.plan === "pro" && plan === "premium"/);
+  assert.match(plans, /openSubscriptionUpdatePortal\(session\)/);
+  assert.match(plans, /entitlements\.plan === "free" && plan !== "free"/);
+  assert.match(plans, /billingReturn !== "plan-update" \|\| next\.plan === "premium"/);
+  assert.match(workspace, /billing === "plan-update"/);
 });
 
 test("billing migration is server-write-only and records webhook work only after processing", () => {

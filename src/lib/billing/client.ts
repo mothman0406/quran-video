@@ -21,3 +21,8 @@ export async function openCustomerPortal(session: Session): Promise<string> {
   if (!payload.url) throw new Error("Customer Portal could not be opened. Please try again.");
   return payload.url;
 }
+export async function openSubscriptionUpdatePortal(session: Session): Promise<string> {
+  const payload = await billingRequest("/api/billing/portal/upgrade", session, { method: "POST", body: "{}" }) as { url?: string };
+  if (!payload.url) throw new Error("We couldn't open plan management. Try again.");
+  return payload.url;
+}
