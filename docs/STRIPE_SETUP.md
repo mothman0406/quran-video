@@ -32,6 +32,8 @@ SUPABASE_SERVICE_ROLE_KEY=your-server-only-supabase-service-role-key
 
 `NEXT_PUBLIC_APP_URL` is an origin, not a secret; it must be the exact deployed HTTPS origin in production. Every other value here is server-only. Do not add a `NEXT_PUBLIC_STRIPE_*` key: Checkout is hosted by Stripe and does not need Stripe.js.
 
+For Vercel Preview, use only `sk_test_…` credentials or leave billing unset. The application rejects an `sk_live_…` key when `VERCEL_ENV=preview`; previews must not exercise live billing.
+
 ## 3. Apply the Supabase migration
 
 Apply `supabase/migrations/20260909000000_stripe_subscription_billing.sql` after the existing migrations. It adds `billing_customers`, `billing_subscriptions`, and a replay-safe extension of `stripe_webhook_events`. It does not replace `account_entitlements`; the signed webhook is its only Stripe write path.
@@ -78,3 +80,15 @@ Copy the `whsec_…` printed by `stripe listen` into local `STRIPE_WEBHOOK_SECRE
 Stripe’s current test-card documentation confirms the `4242` Visa number, a future expiry, and any three-digit CVC for an interactive successful payment. [Stripe test cards](https://docs.stripe.com/testing?numbers-or-method-or-token=tokens)
 
 To reset a test user safely, cancel/delete that user’s test subscription in the Stripe Dashboard, wait for the signed `customer.subscription.deleted` delivery, and confirm `account_entitlements` becomes `free`. Do not manually assign a paid entitlement or edit a customer mapping. Delete the test Customer only after its subscriptions are resolved; the next Checkout will recreate the mapping through the normal server path.
+
+## Future live-mode change (do not perform during this milestone)
+
+Live mode is a separate launch change, not an environment-value swap to make ahead of time. When it is explicitly approved:
+
+1. Create or select the live versions of the same Pro/Premium monthly/yearly recurring Prices. Keep the same price structure, SaaS tax code, and portal subscription-switch configuration.
+2. Replace the test secret with a live `STRIPE_SECRET_KEY`, and replace all four Price IDs with their live recurring IDs.
+3. Create a live webhook endpoint at `https://<production-domain>/api/stripe/webhook`, subscribe to the same four event types, and set its distinct live `STRIPE_WEBHOOK_SECRET`.
+4. Activate and verify the live Customer Portal configuration before allowing paid users into it.
+5. Deploy the changed production-only variables, then repeat Checkout, webhook, portal switching, cancellation-at-period-end, and immediate-cancellation validation with a real internal test account.
+
+Never copy live variables to Preview or Development, and do not create live products automatically from this repository.

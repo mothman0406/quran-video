@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Production deployment readiness
+
+Complete:
+
+- Added [PRODUCTION_DEPLOYMENT.md](./PRODUCTION_DEPLOYMENT.md), the single Vercel/Supabase/Google/Stripe sandbox/Storage/migration release checklist. It records the exact environment contract, the local-first browser architecture, Preview safety, dashboard URLs, manual validation sequence, future live-mode boundary, and the deliberately deferred CSP rollout.
+- Made `NEXT_PUBLIC_APP_URL` the canonical safe origin for Stripe return URLs and Supabase authentication callbacks. Localhost remains the development fallback; production rejects missing, path-bearing, non-HTTPS, or otherwise unsafe origins instead of trusting a request host.
+- Added startup/build configuration diagnostics that print missing variable names only, baseline security headers, explicit `server-only` guards for service-role billing/entitlement code, and a Vercel Preview guard that refuses `sk_live_…` Stripe keys.
+- Kept cloud media browser-direct to private Supabase Storage; recognition/model/WASM loading and WebCodecs/Mediabunny export remain browser-local. The development-only yt-dlp control is now replaced by clear production copy, while the server route remains independently denied outside development. TikTok stays safely configuration-gated.
+- Added production-readiness regression coverage for origins, configuration failure tolerance, Preview Stripe safety, service-role isolation, raw Node webhook handling, direct cloud media, development-only YouTube gating, and baseline headers.
+
+Verification: `npm run regression:quran` passes production invariant probes; the optional local real-audio benchmark remains unavailable/failing in this workspace and refreshed `docs/regression/results/20260909.md` without recognition changes. `npm test` (305 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD ONNX Runtime dynamic-require warning. `npm audit --omit=dev` reports two high-severity transitive `sharp` advisories through `@huggingface/transformers`, with no available fix; this is a release-risk decision, not changed by this milestone. Live dashboard/browser validation remains manual and Stripe stays test mode.
+
 ## Current milestone: Streamlined paid plan upgrades
 
 Complete:

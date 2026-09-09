@@ -108,6 +108,7 @@ type EditorWorkspaceProps = {
   surah: number;
   startAyah: number;
   endAyah: number;
+  youtubeImportAvailable: boolean;
   youtubeUrl: string;
   youtubeMode: "video" | "audio";
   youtubeImportStatus: YouTubeImportStatus;
@@ -259,7 +260,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     selectedObject, rightInspectorMode, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, playbackRate, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, session, accountEntitlements, onRefreshEntitlements, canUndo, canRedo, busy, localStyles, localStyleName, authOpen, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportPreflight, exportQuality, exportFormat, outputPlan, exportResult, exportIsStale, exportState, exportError, exportDiagnostics, tiktokCaption, errorMessage, onRetrySourceRestore, timingWarning,
-    showCorrection, surah, startAyah, endAyah, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
+    showCorrection, surah, startAyah, endAyah, youtubeImportAvailable, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
     onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown, onSetRightInspectorMode, onSelectMedia,
     onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
@@ -447,12 +448,14 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           </>}
           <div className="editor-youtube-import" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setYoutubeChoicesOpen(false); }} onKeyDown={(event) => { if (event.key === "Escape") { setYoutubeChoicesOpen(false); (event.target as HTMLElement).blur(); } }}>
             <SectionLabel>YouTube</SectionLabel>
-            <div className="editor-youtube-row"><input aria-label="YouTube URL" type="url" placeholder="Paste YouTube link…" value={youtubeUrl} disabled={!['idle', 'failed', 'ready'].includes(youtubeImportStatus)} onFocus={() => setYoutubeChoicesOpen(true)} onPointerDown={() => setYoutubeChoicesOpen(true)} onChange={(event) => onYoutubeUrlChange(event.target.value)} /><button className="editor-button editor-button-primary" type="button" disabled={!youtubeUrl.trim() || !['idle', 'failed', 'ready'].includes(youtubeImportStatus)} onClick={() => { setYoutubeChoicesOpen(false); onImportYouTube(); }}>Import</button></div>
-            {youtubeChoicesOpen && <div className="editor-youtube-choices" aria-label="YouTube import type"><button type="button" className={youtubeMode === "video" ? "is-active" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => onYoutubeModeChange("video")}>Video</button><button type="button" className={youtubeMode === "audio" ? "is-active" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => onYoutubeModeChange("audio")}>Audio only</button></div>}
-            {!['idle', 'failed', 'ready'].includes(youtubeImportStatus) && <div className="editor-youtube-progress" role="status"><span>{youtubeImportStatus === "validating" ? "Validating URL" : youtubeImportStatus === "fetching-metadata" ? "Fetching metadata" : youtubeImportStatus === "downloading" ? "Downloading" : "Preparing media"}…</span><button className="editor-text-button" type="button" onClick={onCancelYouTubeImport}>Cancel</button></div>}
-            {youtubeImportStatus === "ready" && <p className="editor-youtube-help">Added to Project Assets for this browser session.</p>}
-            {youtubeImportError && <p className="editor-alert">{youtubeImportError}</p>}
-            {youtubeImportStatus !== "ready" && <p className="editor-youtube-help">Imports are local and temporary.</p>}
+            {youtubeImportAvailable ? <>
+              <div className="editor-youtube-row"><input aria-label="YouTube URL" type="url" placeholder="Paste YouTube link…" value={youtubeUrl} disabled={!['idle', 'failed', 'ready'].includes(youtubeImportStatus)} onFocus={() => setYoutubeChoicesOpen(true)} onPointerDown={() => setYoutubeChoicesOpen(true)} onChange={(event) => onYoutubeUrlChange(event.target.value)} /><button className="editor-button editor-button-primary" type="button" disabled={!youtubeUrl.trim() || !['idle', 'failed', 'ready'].includes(youtubeImportStatus)} onClick={() => { setYoutubeChoicesOpen(false); onImportYouTube(); }}>Import</button></div>
+              {youtubeChoicesOpen && <div className="editor-youtube-choices" aria-label="YouTube import type"><button type="button" className={youtubeMode === "video" ? "is-active" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => onYoutubeModeChange("video")}>Video</button><button type="button" className={youtubeMode === "audio" ? "is-active" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => onYoutubeModeChange("audio")}>Audio only</button></div>}
+              {!['idle', 'failed', 'ready'].includes(youtubeImportStatus) && <div className="editor-youtube-progress" role="status"><span>{youtubeImportStatus === "validating" ? "Validating URL" : youtubeImportStatus === "fetching-metadata" ? "Fetching metadata" : youtubeImportStatus === "downloading" ? "Downloading" : "Preparing media"}…</span><button className="editor-text-button" type="button" onClick={onCancelYouTubeImport}>Cancel</button></div>}
+              {youtubeImportStatus === "ready" && <p className="editor-youtube-help">Added to Project Assets for this browser session.</p>}
+              {youtubeImportError && <p className="editor-alert">{youtubeImportError}</p>}
+              {youtubeImportStatus !== "ready" && <p className="editor-youtube-help">Imports are local and temporary.</p>}
+            </> : <p className="editor-youtube-help">YouTube import is available only in local development. Upload a media file to edit in this deployment.</p>}
           </div>
 
           <div className="editor-divider" />

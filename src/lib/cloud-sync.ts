@@ -1,5 +1,6 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
+import { authCallbackUrl as configuredAuthCallbackUrl } from "./application-url.ts";
 import { cloudProjectName, mediaExtension, PROJECT_MEDIA_BUCKET, projectMediaPath, quranProjectMetadata } from "./cloud-projects.ts";
 import { loadSavedProject, serializeSavedProject } from "./project-storage.ts";
 import type { SavedProject } from "./schemas/project.ts";
@@ -130,7 +131,7 @@ function requireClient(): SupabaseClient {
 }
 
 export async function getAuthSession(): Promise<Session | null> { const { data, error } = await requireClient().auth.getSession(); if (error) throw error; return data.session; }
-function authCallbackUrl(next = "/editor"): string { if (typeof window === "undefined") throw new Error("Authentication can only start in the browser."); return new URL(`/auth/callback?next=${encodeURIComponent(next)}`, window.location.origin).toString(); }
+export function authCallbackUrl(next = "/editor"): string { if (typeof window === "undefined") throw new Error("Authentication can only start in the browser."); return configuredAuthCallbackUrl(next, window.location.origin); }
 export async function signInWithGoogle(next = "/editor"): Promise<void> { const { error } = await requireClient().auth.signInWithOAuth({ provider: "google", options: { redirectTo: authCallbackUrl(next) } }); if (error) throw error; }
 export async function sendMagicLink(email: string, next = "/editor"): Promise<void> { const { error } = await requireClient().auth.signInWithOtp({ email, options: { emailRedirectTo: authCallbackUrl(next) } }); if (error) throw error; }
 export async function signOut(): Promise<void> { const { error } = await requireClient().auth.signOut(); if (error) throw error; }

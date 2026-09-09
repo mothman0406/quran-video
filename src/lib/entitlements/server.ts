@@ -1,3 +1,5 @@
+import "server-only";
+
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 import { accountEntitlementsForPlan, type AccountEntitlements } from "../entitlements.ts";
 

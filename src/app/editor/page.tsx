@@ -236,6 +236,7 @@ type AlignmentDebug = {
 };
 
 export default function Home() {
+  const youtubeImportAvailable = process.env.NODE_ENV !== "production";
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(
@@ -2578,6 +2579,7 @@ export default function Home() {
         surah={surah}
         startAyah={startAyah}
         endAyah={endAyah}
+        youtubeImportAvailable={youtubeImportAvailable}
         youtubeUrl={youtubeUrl}
         youtubeMode={youtubeMode}
         youtubeImportStatus={youtubeImportStatus}

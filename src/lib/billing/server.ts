@@ -1,6 +1,9 @@
+import "server-only";
+
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 import Stripe from "stripe";
 import { accountEntitlementsForPlan, type Plan } from "../entitlements.ts";
+import { applicationOrigin } from "../application-url.ts";
 
 export const BILLING_INTERVALS = ["month", "year"] as const;
 export type BillingInterval = (typeof BILLING_INTERVALS)[number];
@@ -52,7 +55,12 @@ export function planForPriceId(priceId: string | null | undefined, env: NodeJS.P
 }
 
 export function stripeCheckoutConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(env.STRIPE_SECRET_KEY && priceIdForPlan("pro", "month", env) && priceIdForPlan("pro", "year", env) && priceIdForPlan("premium", "month", env) && priceIdForPlan("premium", "year", env));
+  return Boolean(stripeEnvironmentIsSafe(env) && env.STRIPE_SECRET_KEY && priceIdForPlan("pro", "month", env) && priceIdForPlan("pro", "year", env) && priceIdForPlan("premium", "month", env) && priceIdForPlan("premium", "year", env));
+}
+
+/** Vercel preview deployments must never be able to use a live Stripe secret. */
+export function stripeEnvironmentIsSafe(env: NodeJS.ProcessEnv = process.env): boolean {
+  return !(env.VERCEL_ENV === "preview" && env.STRIPE_SECRET_KEY?.startsWith("sk_live_"));
 }
 
 /** Conservative launch policy: only active/trialing subscriptions on known prices are paid; past_due and every terminal/incomplete status resolve Free. */
@@ -63,7 +71,7 @@ export function effectivePlanForSubscription(status: StripeSubscriptionStatus, p
 
 export function getStripeClient(): Stripe {
   if (stripeClient) return stripeClient;
-  if (!process.env.STRIPE_SECRET_KEY) throw new Error("Stripe billing is not configured.");
+  if (!process.env.STRIPE_SECRET_KEY || !stripeEnvironmentIsSafe()) throw new Error("Stripe billing is not configured.");
   stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY);
   return stripeClient;
 }
@@ -78,19 +86,7 @@ function billingAdminClient(): SupabaseClient {
 }
 
 export function safeApplicationOrigin(request: Request): string | null {
-  const configured = process.env.NEXT_PUBLIC_APP_URL;
-  if (configured) {
-    try {
-      const url = new URL(configured);
-      if ((url.protocol === "https:" || (process.env.NODE_ENV !== "production" && url.protocol === "http:")) && url.pathname === "/" && !url.search && !url.hash) return url.origin;
-    } catch { /* fall through to the development-only origin */ }
-    return null;
-  }
-  if (process.env.NODE_ENV === "production") return null;
-  try {
-    const url = new URL(request.url);
-    return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1") ? url.origin : null;
-  } catch { return null; }
+  return applicationOrigin(process.env.NEXT_PUBLIC_APP_URL, request.url);
 }
 
 export async function getBillingCustomer(userId: string, admin: BillingAdmin = billingAdminClient()): Promise<BillingCustomer | null> {

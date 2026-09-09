@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "next dev",
-    "build": "npm run check:vad-assets && next build --webpack",
+    "build": "npm run check:vad-assets && npm run check:production-config && next build --webpack",
+    "check:production-config": "node --experimental-strip-types scripts/check-production-config.ts",
     "check:vad-assets": "node scripts/check-vad-assets.mjs",
-    "test": "node --experimental-strip-types --test",
+    "test": "node --conditions=react-server --experimental-strip-types --test",
     "recognize": "node --experimental-strip-types scripts/recognize.ts",
     "timing:benchmark": "node --experimental-strip-types tools/timing-benchmark/run.ts",
     "timing:benchmark:real": "node --expose-gc --experimental-strip-types tools/timing-benchmark/real-run.ts",
@@ -31,6 +32,7 @@
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "remotion": "^4.0.518",
+    "server-only": "^0.0.1",
     "stripe": "^18.5.0",
     "zod": "^4.4.3",
     "zustand": "^5.0.15"
