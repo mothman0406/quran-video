@@ -56,6 +56,8 @@ export type CompletedExport = LocalExportResult & {
   height: number;
   durationMs: number;
   quality: ExportQuality;
+  /** Effective watermark state from the server authorization for this exact render. */
+  watermarkRequired: boolean;
   completedAt: string;
   projectFingerprint: string;
 };

@@ -3,9 +3,9 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { getSupabaseClient, sendMagicLink, signInWithGoogle, signOut } from "@/lib/cloud-sync";
-import { accountPlanForAuthenticatedUser } from "@/lib/auth-flow";
+import { accountEntitlementsForPlan, type AccountEntitlements } from "@/lib/entitlements";
 
-type AccountPanelProps = { session: Session | null; onClose: () => void; onBeforeAuthenticate?: () => Promise<void>; authReturnPath?: "/editor" | "/projects" };
+type AccountPanelProps = { session: Session | null; entitlements?: AccountEntitlements; onClose: () => void; onBeforeAuthenticate?: () => Promise<void>; authReturnPath?: "/editor" | "/projects" };
 
 function displayName(user: User): string {
   const metadata = user.user_metadata;
@@ -32,7 +32,7 @@ function friendlyAuthError(error: unknown): string {
   return message;
 }
 
-export default function AccountPanel({ session, onClose, onBeforeAuthenticate, authReturnPath = "/editor" }: AccountPanelProps) {
+export default function AccountPanel({ session, entitlements = accountEntitlementsForPlan("free"), onClose, onBeforeAuthenticate, authReturnPath = "/editor" }: AccountPanelProps) {
   const configured = getSupabaseClient() !== null;
   const [email, setEmail] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -79,7 +79,7 @@ export default function AccountPanel({ session, onClose, onBeforeAuthenticate, a
     const avatar = avatarUrl(user);
     return <div className="editor-account-menu" role="menu" aria-label="Account menu">
       <div className="editor-account-identity">{avatar ? <span aria-label="Account avatar" style={{ backgroundImage: `url(${avatar})` }} /> : <span aria-hidden="true">{displayName(user).slice(0, 1).toUpperCase()}</span>}<div><strong>{displayName(user)}</strong><small>{user.email}</small></div></div>
-      <div className="editor-account-plan"><span>Current plan</span><strong>{accountPlanForAuthenticatedUser().replace(/^./, (letter) => letter.toUpperCase())}</strong></div>
+      <div className="editor-account-plan"><span>Current plan</span><strong>{entitlements.plan.replace(/^./, (letter) => letter.toUpperCase())}</strong></div>
       <a role="menuitem" className="editor-account-menu-item" href="/projects">Projects</a>
       <button type="button" role="menuitem" className="editor-account-menu-item editor-account-signout" onClick={() => void signOut().then(onClose).catch((error: unknown) => setMessage(friendlyAuthError(error)))}>Sign out</button>
       {message && <p className="editor-auth-message editor-auth-error" role="alert">{message}</p>}

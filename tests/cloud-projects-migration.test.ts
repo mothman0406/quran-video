@@ -4,6 +4,7 @@ import test from "node:test";
 
 const migration = readFileSync(new URL("../supabase/migrations/20260908000000_production_cloud_projects.sql", import.meta.url), "utf8");
 const storageCleanupMigration = readFileSync(new URL("../supabase/migrations/20260908000001_storage_api_cloud_media_cleanup.sql", import.meta.url), "utf8");
+const entitlementsMigration = readFileSync(new URL("../supabase/migrations/20260908000002_account_entitlements.sql", import.meta.url), "utf8");
 const sync = readFileSync(new URL("../src/lib/cloud-sync.ts", import.meta.url), "utf8");
 
 test("cloud-project migration keeps project media private and owner-scoped", () => {
@@ -13,10 +14,11 @@ test("cloud-project migration keeps project media private and owner-scoped", () 
   assert.match(migration, /security definer/gi);
 });
 
-test("Free project creation is locked and atomically limited to three", () => {
-  assert.match(migration, /pg_advisory_xact_lock/);
-  assert.match(migration, /count\(\*\) from public\.projects where user_id = v_user\) >= 3/);
-  assert.match(migration, /begin_cloud_project_save/);
+test("Free project creation is locked and atomically limited to three while paid quota stays TBD", () => {
+  assert.match(entitlementsMigration, /pg_advisory_xact_lock/);
+  assert.match(entitlementsMigration, /cloud_project_limit_for_current_user/);
+  assert.match(entitlementsMigration, /v_limit is not null/);
+  assert.match(entitlementsMigration, /begin_cloud_project_save/);
   assert.match(migration, /delete_cloud_project/);
 });
 

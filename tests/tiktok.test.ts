@@ -9,10 +9,9 @@ import { TIKTOK_STATUS_POLL_INTERVAL_MS, isTikTokStatusFinal, tiktokStatusMessag
 
 const segment = { id: "18:57#1", contentKind: "ayah", verseKeys: ["18:57"], startMs: 0, endMs: 4_000, arabic: "وَمَنْ أَظْلَمُ", translation: "And who is more unjust than one who is reminded of the verses of his Lord but turns away from them and forgets what his hands have put forth?", transliteration: null, wordStart: 0, wordEnd: 1, wordCount: 1, timingEvidence: { start: { timestampMs: 0, source: "direct-asr-word" }, end: { timestampMs: 4_000, source: "chunk-text-alignment" }, derived: false } } as never;
 
-test("Basic is blocked for TikTok while Standard and Ultra remain eligible", () => {
-  assert.equal(isTikTokExportEligible("basic"), false);
-  assert.equal(isTikTokExportEligible("standard"), true);
-  assert.equal(isTikTokExportEligible("ultra"), true);
+test("only actually watermarked exports are blocked for TikTok", () => {
+  assert.equal(isTikTokExportEligible({ watermarkRequired: true }), false);
+  assert.equal(isTikTokExportEligible({ watermarkRequired: false }), true);
 });
 
 test("TikTok media limits are centralized before initialization", () => {

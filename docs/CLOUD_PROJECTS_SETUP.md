@@ -7,8 +7,9 @@ The reported PostgREST 400 means the live `public.projects` table does not have 
 1. `supabase/migrations/20260828000000_create_projects.sql`
 2. `supabase/migrations/20260908000000_production_cloud_projects.sql`
 3. `supabase/migrations/20260908000001_storage_api_cloud_media_cleanup.sql`
+4. `supabase/migrations/20260908000002_account_entitlements.sql`
 
-Do not create a second `projects` table and do not remove the `save_complete=eq.true` REST filter. If the first two migrations are already present, apply the third migration; it replaces the affected RPC bodies without recreating tables or policies.
+Do not create a second `projects` table and do not remove the `save_complete=eq.true` REST filter. If the first three migrations are already present, apply `20260908000002_account_entitlements.sql`; it adds the canonical account-plan table and replaces only the project-reservation quota policy.
 
 The first migration creates `public.projects` with `id`, `user_id`, `name`, `created_at`, `updated_at`, `source_filename`, `source_metadata`, `project_data`, and `schema_version`.
 
@@ -16,7 +17,7 @@ The production migration adds the authoritative cloud-project columns: `auto_tit
 
 Quran fields and `auto_title` are nullable. An undetected project is valid; the app stores `auto_title`, `surah_start`, `ayah_start`, `surah_end`, and `ayah_end` as `null` until detection succeeds. `name` remains user-controlled. Only an untouched default name falls back to `My project`; detection never overwrites a custom name.
 
-The second migration creates these RPCs:
+The production migrations create these RPCs:
 
 - `begin_cloud_project_save`
 - `complete_cloud_project_save`
@@ -28,6 +29,8 @@ The second migration creates these RPCs:
 - internal helper `cloud_project_path_is_owned`
 
 `begin_cloud_project_save` inserts `save_complete = false`, takes the per-user quota lock, and reserves the project before browser uploads. `complete_cloud_project_save` writes media metadata and sets `save_complete = true`. The project library and single-project read both filter for completed rows. Failed first saves are cancelled and therefore never become valid project cards.
+
+The entitlement migration keeps the database-safe Free limit at three saved cloud projects. Existing project updates do not consume a new slot and deletion frees a slot. Pro/Premium storage/project limits are intentionally TBD, so that RPC does not apply the Free three-project restriction to paid plan rows.
 
 The migration creates (or makes private) the exact Storage bucket `project-media` with `public = false`. It adds these Storage policies on `storage.objects`, each scoped to `<auth.uid()>/<project-id>/…`:
 

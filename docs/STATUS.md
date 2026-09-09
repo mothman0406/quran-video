@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Production Free / Pro / Premium entitlement engine
+
+Complete:
+
+- Replaced the incompatible historical `Free/Creator/Pro` client entitlement layer with one canonical lowercase `free | pro | premium` model. Server-side resolution reads the new RLS-protected `account_entitlements` table, treats missing/unknown records as Free, and reauthorizes every supported new local render by exact requested quality.
+- Free can render only Basic 720p and the existing export canvas watermark is forced into its immutable render snapshot. Pro can render unwatermarked Basic/Standard; Premium can additionally render Ultra 4K. The UI keeps all quality choices visible with restrained lock/Requires Pro/Requires Premium states, normalizes an unavailable selection after refresh, and defaults Free to Basic and paid accounts to Standard.
+- Completed exports remain downloadable. TikTok now checks the actual completed export watermark state, keeping Free Basic blocked while allowing a paid Basic export without falsely treating it as watermarked.
+- Added additive migration `20260908000002_account_entitlements.sql` with read-only user RLS, plan source/timestamps, historical active-subscription migration, and Free-only three-cloud-project RPC enforcement. Paid cloud/project policy is explicitly TBD rather than presented as unlimited.
+- Retired the inactive historical Stripe checkout/portal/webhook and `/api/usage` paths so they cannot remain a competing authority or produce normal-workflow monthly-quota requests. Recognition and exports have no monthly count quota. `docs/ENTITLEMENTS.md` records the production matrix, local-render limitation, future Stripe boundary, and secure admin SQL tier-testing steps.
+
+Verification: `npm test` (287 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes the production invariant probes; its optional local real-audio benchmark fails in this workspace, with generated evidence at `docs/regression/results/20260909.md`. The existing non-fatal VAD ONNX Runtime dynamic-require warning remains. Live validation requires applying the new Supabase migration and testing an authenticated account at each plan.
+
 ## Current milestone: Cloud project media cleanup and source restore
 
 Complete:

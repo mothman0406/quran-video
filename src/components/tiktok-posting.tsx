@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CompletedExport } from "@/lib/export/types";
-import { createTikTokUploadPlan, tiktokMediaDescriptor, validateTikTokMedia } from "@/lib/tiktok/media";
+import { createTikTokUploadPlan, isTikTokExportEligible, tiktokMediaDescriptor, validateTikTokMedia } from "@/lib/tiktok/media";
 import { connectTikTokOAuth, getTikTokConnection, getTikTokCreatorInfo, getTikTokPostStatus, initializeTikTokPost, uploadTikTokVideo } from "@/lib/tiktok/client";
 import { TIKTOK_STATUS_POLL_INTERVAL_MS, isTikTokStatusFinal, tiktokStatusMessage } from "@/lib/tiktok/status";
 import type { TikTokConnectionState, TikTokCreatorInfo, TikTokPostInitialization, TikTokPostMode, TikTokPrivacyLevel, TikTokPublishStatus } from "@/lib/tiktok/types";
@@ -29,7 +29,7 @@ export default function TikTokPosting({ exported, generatedCaption, onExportStan
   const uploadAbort = useRef<AbortController | null>(null);
   const media = useMemo(() => tiktokMediaDescriptor(exported), [exported]);
   const localErrors = useMemo(() => validateTikTokMedia(media, creator?.maxVideoPostDurationSeconds), [creator?.maxVideoPostDurationSeconds, media]);
-  const watermarkBlocked = exported.quality === "basic";
+  const watermarkBlocked = !isTikTokExportEligible(exported);
   const captionTooLong = caption.length > 2200;
 
   useEffect(() => () => uploadAbort.current?.abort(), []);

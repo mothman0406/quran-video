@@ -15,7 +15,7 @@ import { applyPlaybackRate } from "../src/lib/editor/playback-rate.ts";
 
 const segment = { id: "93:1#1", contentKind: "ayah" as const, verseKeys: ["93:1"], startMs: 1_000, endMs: 2_000, arabic: "وَالضُّحَى", translation: "By the morning brightness", transliteration: "Wa ad-duha", wordStart: 0, wordEnd: 1, wordCount: 1, timingEvidence: { start: { timestampMs: 1_000, source: "direct-asr-word" as const }, end: { timestampMs: 2_000, source: "chunk-text-alignment" as const }, derived: false } };
 
-function config(overrides = {}) { return createLocalExportConfiguration({ format: DEFAULT_PROJECT_FORMAT, segments: [segment], typography: DEFAULT_TYPOGRAPHY, captionBackground: DEFAULT_CAPTION_BACKGROUND, positioning: DEFAULT_CAPTION_POSITIONING, transitionSettings: DEFAULT_TRANSITION_SETTINGS, showVerseNumber: false, ...overrides }); }
+function config(overrides = {}) { return createLocalExportConfiguration({ format: DEFAULT_PROJECT_FORMAT, segments: [segment], typography: DEFAULT_TYPOGRAPHY, captionBackground: DEFAULT_CAPTION_BACKGROUND, positioning: DEFAULT_CAPTION_POSITIONING, transitionSettings: DEFAULT_TRANSITION_SETTINGS, showVerseNumber: false, watermarkRequired: false, ...overrides }); }
 
 test("export mapping keeps project render state and excludes editor-only safe areas", () => {
   const value = config();
@@ -25,9 +25,10 @@ test("export mapping keeps project render state and excludes editor-only safe ar
   assert.deepEqual(SAFE_AREA_OVERLAY_METADATA, { editorOnly: true, exportable: false });
 });
 
-test("quality, rather than commercial entitlements, controls dimensions and watermarking", () => {
+test("quality controls dimensions while the server authorization controls watermarking", () => {
   assert.deepEqual(config({ quality: "basic" }).format, { preset: "vertical", width: 720, height: 1280 });
-  assert.equal(config({ quality: "basic" }).watermarkRequired, true);
+  assert.equal(config({ quality: "basic", watermarkRequired: true }).watermarkRequired, true);
+  assert.equal(config({ quality: "basic", watermarkRequired: false }).watermarkRequired, false);
   assert.deepEqual(config({ quality: "ultra" }).format, { preset: "vertical", width: 2160, height: 3840 });
   assert.equal(config({ quality: "ultra" }).watermarkRequired, false);
 });

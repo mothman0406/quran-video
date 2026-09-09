@@ -7,15 +7,14 @@ export type ExportQualityPreset = {
   label: string;
   description: string;
   resolutionLabel: "720p" | "1080p" | "4K";
-  watermarkRequired: boolean;
   videoBitrate: number;
   audioBitrate: number;
 };
 
 export const EXPORT_QUALITY_PRESETS: Record<ExportQuality, ExportQualityPreset> = {
-  basic: { id: "basic", label: "Basic", description: "720p · Watermark", resolutionLabel: "720p", watermarkRequired: true, videoBitrate: 4_000_000, audioBitrate: 96_000 },
-  standard: { id: "standard", label: "Standard", description: "1080p · Recommended", resolutionLabel: "1080p", watermarkRequired: false, videoBitrate: 8_000_000, audioBitrate: 160_000 },
-  ultra: { id: "ultra", label: "Ultra", description: "4K", resolutionLabel: "4K", watermarkRequired: false, videoBitrate: 32_000_000, audioBitrate: 256_000 },
+  basic: { id: "basic", label: "Basic", description: "720p", resolutionLabel: "720p", videoBitrate: 4_000_000, audioBitrate: 96_000 },
+  standard: { id: "standard", label: "Standard", description: "1080p · Recommended", resolutionLabel: "1080p", videoBitrate: 8_000_000, audioBitrate: 160_000 },
+  ultra: { id: "ultra", label: "Ultra", description: "4K", resolutionLabel: "4K", videoBitrate: 32_000_000, audioBitrate: 256_000 },
 };
 
 export const DEFAULT_EXPORT_QUALITY: ExportQuality = "standard";

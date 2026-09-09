@@ -78,6 +78,7 @@ test("preflight and renderer share accepted export configuration rules", () => {
     showVerseNumber: value.showVerseNumber,
     mediaTrim: value.mediaTrim,
     playbackRate: value.playbackRate,
+    watermarkRequired: false,
   });
   assert.equal(configuration.format.width, 1080, "Standard is the default 9:16 export");
   assert.equal(runExportPreflight(value, { ...runtime, exportConfiguration: configuration, exportQuality: "standard" }).status, "ready");

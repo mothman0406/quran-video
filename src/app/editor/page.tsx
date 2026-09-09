@@ -132,8 +132,8 @@ import {
 } from "@/lib/cloud-sync";
 import { exportAuthIntent, rememberAuthContinuation, rememberAuthResumeProject, takeAuthContinuation, takeAuthResumeProject } from "@/lib/auth-flow";
 import type { Session } from "@supabase/supabase-js";
-import { recordAuthenticatedUsage } from "@/lib/usage/client";
-import { getCustomStyleLimit, isBuiltInStyleAvailable, isFontAvailable, resolveClientPlan } from "@/lib/entitlements";
+import { accountEntitlementsForPlan, canExportQuality, defaultExportQualityForPlan, getCustomStyleLimit, isBuiltInStyleAvailable, isFontAvailable, type AccountEntitlements } from "@/lib/entitlements";
+import { authorizeAccountExport, getAccountEntitlements } from "@/lib/entitlements/client";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
 import { clampMediaTrim, clampTimelineViewport, createMediaTrim, createTimelineViewport, mediaKindForFile, mediaSourceFromFile, panTimelineViewport, pinchTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, snapCaptionBoundaryToPlayhead, timelineContentPosition, viewportPositionToTime, zoomTimelineViewport, type MediaSource, type MediaTrim, type TimelineViewport } from "@/lib/editor/media";
 import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
@@ -332,13 +332,13 @@ export default function Home() {
   const [cloudProjects, setCloudProjects] = useState<SavedProject[]>([]);
   const [cloudProjectsOpen, setCloudProjectsOpen] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
-  const [subscriptionPlan, setSubscriptionPlan] = useState<"Free" | "Creator" | "Pro">("Free");
+  const [accountEntitlements, setAccountEntitlements] = useState<AccountEntitlements>(() => accountEntitlementsForPlan("free"));
   const [pendingOpenProject, setPendingOpenProject] =
     useState<SavedProject | null>(null);
   const [cloudSourceRestoreRetry, setCloudSourceRestoreRetry] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [automaticRecognitionRequest, setAutomaticRecognitionRequest] = useState<AutomaticRecognitionRequest | null>(null);
-  const plan = resolveClientPlan(Boolean(session), subscriptionPlan);
+  const plan = accountEntitlements.plan;
   const repository = useRef<ProjectRepository | null>(null);
   const savedSignature = useRef<string | null>(null);
   const cloudBaselineUpdatedAt = useRef<string | null>(null);
@@ -559,9 +559,15 @@ export default function Home() {
     setSession(next);
     if (!next) {
       setCloudProjects([]);
-      setSubscriptionPlan("Free");
+      setAccountEntitlements(accountEntitlementsForPlan("free"));
       return;
     }
+    void getAccountEntitlements(next)
+      .then((entitlements) => {
+        setAccountEntitlements(entitlements);
+        setExportQuality((current) => canExportQuality(entitlements, current) ? current : defaultExportQualityForPlan(entitlements.plan));
+      })
+      .catch(() => setAccountEntitlements(accountEntitlementsForPlan("free")));
     void listCloudProjects()
       .then(setCloudProjects)
       .catch((error: unknown) =>
@@ -1038,7 +1044,6 @@ export default function Home() {
       cloudMedia.current = { sourcePath: row.source_media_path, thumbnailPath: row.thumbnail_path, thumbnailSize: row.thumbnail_size_bytes, sourceFingerprint: snapshot.sourceMedia?.fingerprint ?? null };
       savedSignature.current = JSON.stringify({ projectName: row.name, sourceMedia: snapshot.sourceMedia, projectAssets: snapshot.projectAssets, activeMediaAssetId: snapshot.activeMediaAssetId, mediaTrim: snapshot.mediaTrim, format: snapshot.format, verseAlignments: snapshot.verseAlignments, captionSegments: snapshot.captionSegments, captions: snapshot.captions, positioning: snapshot.positioning, captionBackground: snapshot.captionBackground, typography: snapshot.typography, transitionSettings: snapshot.transitionSettings, playbackRate: snapshot.playbackRate, showVerseNumber: snapshot.showVerseNumber });
       setCloudProjectId(row.id); setSavedProject(saved); setProjectName(row.name); setCloudSaveOpen(false); setCloudSaveStatus(null); setDirty(false);
-      void recordAuthenticatedUsage("cloud_project_saved", `${saved.id}:${saved.updatedAt}`).catch(() => undefined);
       setCloudProjects(await listCloudProjects()); setErrorMessage(null);
     } catch (error) {
       if (uploaded.length) void removePrivateProjectObjects(id, uploaded).catch(() => undefined);
@@ -2257,7 +2262,7 @@ export default function Home() {
     updateProjectHistory((current) => ({ ...current, segments: resolveCaptionTranslationSegments(mergeCaptionWithNext(current.segments, selectedIndex)) }));
     setSelectedSegmentId(null);
   }
-  async function checkExportPreflight() {
+  async function checkExportPreflight(watermarkRequired: boolean) {
     const configuration = snapshotLocalExportConfiguration({
       format: projectFormat,
       segments,
@@ -2269,6 +2274,7 @@ export default function Home() {
       mediaTrim,
       playbackRate,
       quality: exportQuality,
+      watermarkRequired,
     });
     const capability = offlineWebCodecsSupport();
     let outputProfileAvailable: boolean | null = null;
@@ -2323,7 +2329,7 @@ export default function Home() {
       setErrorMessage("Relink the active source in Project assets before exporting.");
     }
   }
-  async function exportVideo(preflight = exportPreflight) {
+  async function exportVideo(watermarkRequired: boolean, preflight = exportPreflight) {
     if (!preflight || preflight.status === "blocked") return;
     if (!videoFile || exportAbort.current || !exportCoordinator.current.start())
       return;
@@ -2346,6 +2352,7 @@ export default function Home() {
       mediaTrim,
       playbackRate,
       quality: exportQuality,
+      watermarkRequired,
     });
     const validationErrors = validateLocalExportInputs(videoFile, snapshot);
     if (validationErrors.length) {
@@ -2395,7 +2402,6 @@ export default function Home() {
         signal: controller.signal,
         onProgress: setExportState,
       });
-      void recordAuthenticatedUsage("export_completed", crypto.randomUUID()).catch(() => undefined);
       replaceCompletedExport({
         ...output,
         objectUrl: URL.createObjectURL(output.blob),
@@ -2403,6 +2409,7 @@ export default function Home() {
         height: snapshot.format.height,
         durationMs: Math.round(output.outputDurationSeconds * 1_000),
         quality: snapshot.quality,
+        watermarkRequired: snapshot.watermarkRequired,
         completedAt: new Date().toISOString(),
         projectFingerprint,
       });
@@ -2438,10 +2445,18 @@ export default function Home() {
     exportStarting.current = true;
     setExportState({ phase: "preparing", fraction: 0, elapsedSeconds: 0 });
     try {
-      const preflight = await checkExportPreflight();
+      const authorization = await authorizeAccountExport(session, exportQuality);
+      setAccountEntitlements(authorization.entitlements);
+      if (!authorization.allowed) {
+        setExportError(authorization.message);
+        setExportState(exportResult ? "complete" : null);
+        setExportOpen(true);
+        return;
+      }
+      const preflight = await checkExportPreflight(authorization.watermarkRequired);
       if (preflight.status === "ready") {
         setExportOpen(false);
-        await exportVideo(preflight);
+        await exportVideo(authorization.watermarkRequired, preflight);
       } else {
         setExportState(exportResult ? "complete" : null);
         setExportOpen(true);
@@ -2457,6 +2472,12 @@ export default function Home() {
     setExportOpen(true);
     setExportPreflight(null);
     setExportError(null);
+    if (session) {
+      void getAccountEntitlements(session).then((next) => {
+        setAccountEntitlements(next);
+        setExportQuality((current) => canExportQuality(next, current) ? current : defaultExportQualityForPlan(next.plan));
+      }).catch(() => undefined);
+    }
     if (exportState === "error") setExportState(exportResult ? "complete" : null);
   }
   function requestExportSettings() {
@@ -2522,6 +2543,7 @@ export default function Home() {
         projectName={projectName}
         dirty={dirty}
         session={session}
+        accountEntitlements={accountEntitlements}
         canUndo={projectHistory.current.canUndo}
         canRedo={projectHistory.current.canRedo}
         busy={busy}
@@ -2619,7 +2641,7 @@ export default function Home() {
         onExportPreflightAction={handleExportPreflightAction}
         onCancelExport={cancelExport}
         onDownloadExport={downloadExport}
-        onSetExportQuality={(quality) => { setExportQuality(quality); setOutputPlan(null); setExportPreflight(null); }}
+        onSetExportQuality={(quality) => { if (!canExportQuality(accountEntitlements, quality)) return; setExportQuality(quality); setOutputPlan(null); setExportPreflight(null); }}
         onSetExportOpen={(open) => { setExportOpen(open); if (!open) { setExportPreflight(null); if (exportState === "error") { setExportError(null); setExportState(exportResult ? "complete" : null); } } }}
         onTypographyChange={updateTypography}
         onBackgroundChange={updateCaptionBackground}

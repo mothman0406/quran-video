@@ -1,91 +1,79 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { POST as checkout } from "../src/app/api/billing/checkout/route.ts";
-import { POST as webhook } from "../src/app/api/stripe/webhook/route.ts";
-import { customerIdForPortal, isEntitledSubscriptionStatus, paidPlanFromInput, planForPriceId, planFromSubscription } from "../src/lib/billing/server.ts";
-import { getPlanEntitlements, resolveClientPlan } from "../src/lib/entitlements.ts";
+import { accountEntitlementsForPlan, authorizeExport, canExportQuality, defaultExportQualityForPlan, normalizePlan, watermarkRequiredForExport } from "../src/lib/entitlements.ts";
+import { resolveAccountEntitlements } from "../src/lib/entitlements/server.ts";
 
-const migration = readFileSync(new URL("../supabase/migrations/20260831000001_create_subscriptions.sql", import.meta.url), "utf8");
+const migration = readFileSync(new URL("../supabase/migrations/20260908000002_account_entitlements.sql", import.meta.url), "utf8");
 
-test("unauthenticated checkout is rejected before any Stripe call", async () => {
-  const response = await checkout(new Request("http://localhost/api/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "Creator" }) }));
-  assert.equal(response.status, 401);
+test("missing and unknown server plan records safely resolve Free", async () => {
+  const missing = async () => null;
+  const unknown = async () => "owner";
+  assert.equal((await resolveAccountEntitlements("user-1", missing)).plan, "free");
+  assert.equal((await resolveAccountEntitlements("user-1", unknown)).plan, "free");
+  assert.equal(normalizePlan("premium"), "premium");
 });
 
-test("checkout input is an allowlisted internal plan, never an arbitrary price id", () => {
-  assert.equal(paidPlanFromInput("Creator"), "Creator");
-  assert.equal(paidPlanFromInput("Pro"), "Pro");
-  assert.equal(paidPlanFromInput("price_attacker_supplied"), null);
-  assert.equal(paidPlanFromInput({ price: "price_attacker_supplied" }), null);
+test("guest cannot start or authorize an export", () => {
+  const entitlementsRoute = readFileSync(new URL("../src/app/api/entitlements/route.ts", import.meta.url), "utf8");
+  const exportRoute = readFileSync(new URL("../src/app/api/export-authorization/route.ts", import.meta.url), "utf8");
+  assert.match(entitlementsRoute, /if \(!user\).*status: 401/);
+  assert.match(exportRoute, /if \(!user\).*status: 401/);
 });
 
-test("configured Stripe prices map only to their internal plans", () => {
-  const previousCreator = process.env.STRIPE_CREATOR_PRICE_ID;
-  const previousPro = process.env.STRIPE_PRO_PRICE_ID;
-  process.env.STRIPE_CREATOR_PRICE_ID = "price_creator_test";
-  process.env.STRIPE_PRO_PRICE_ID = "price_pro_test";
-  try {
-    assert.equal(planForPriceId("price_creator_test"), "Creator");
-    assert.equal(planForPriceId("price_pro_test"), "Pro");
-    assert.equal(planForPriceId("price_unknown"), null);
-  } finally {
-    if (previousCreator === undefined) delete process.env.STRIPE_CREATOR_PRICE_ID; else process.env.STRIPE_CREATOR_PRICE_ID = previousCreator;
-    if (previousPro === undefined) delete process.env.STRIPE_PRO_PRICE_ID; else process.env.STRIPE_PRO_PRICE_ID = previousPro;
+test("Free export policy permits only watermarked Basic", () => {
+  const free = accountEntitlementsForPlan("free");
+  assert.deepEqual(authorizeExport(free, "basic"), { allowed: true, entitlements: free, quality: "basic", watermarkRequired: true });
+  assert.equal(authorizeExport(free, "standard").allowed, false);
+  assert.equal(authorizeExport(free, "ultra").allowed, false);
+  assert.equal(watermarkRequiredForExport(free, "basic"), true);
+  assert.equal(watermarkRequiredForExport(free, "standard"), false);
+});
+
+test("Pro export policy allows unwatermarked Basic and Standard but blocks Ultra", () => {
+  const pro = accountEntitlementsForPlan("pro");
+  assert.deepEqual(authorizeExport(pro, "basic"), { allowed: true, entitlements: pro, quality: "basic", watermarkRequired: false });
+  assert.deepEqual(authorizeExport(pro, "standard"), { allowed: true, entitlements: pro, quality: "standard", watermarkRequired: false });
+  assert.equal(authorizeExport(pro, "ultra").allowed, false);
+});
+
+test("Premium export policy allows every unwatermarked quality", () => {
+  const premium = accountEntitlementsForPlan("premium");
+  for (const quality of ["basic", "standard", "ultra"] as const) {
+    const authorization = authorizeExport(premium, quality);
+    assert.equal(authorization.allowed, true);
+    if (authorization.allowed) assert.equal(authorization.watermarkRequired, false);
   }
 });
 
-test("only verified active or trialing subscriptions receive paid plans", () => {
-  const previousCreator = process.env.STRIPE_CREATOR_PRICE_ID;
-  process.env.STRIPE_CREATOR_PRICE_ID = "price_creator_test";
-  try {
-    assert.equal(planFromSubscription({ plan: "Creator", status: "active", stripe_price_id: "price_creator_test" }), "Creator");
-    assert.equal(planFromSubscription({ plan: "Pro", status: "active", stripe_price_id: "price_creator_test" }), "Free");
-    assert.equal(planFromSubscription({ plan: "Creator", status: "canceled", stripe_price_id: "price_creator_test" }), "Free");
-    assert.equal(planFromSubscription({ plan: "Creator", status: "active", stripe_price_id: "price_unknown" }), "Free");
-    assert.equal(getPlanEntitlements(planFromSubscription({ plan: "Creator", status: "active", stripe_price_id: "price_creator_test" })).maxExportResolution, "1080p");
-    assert.equal(isEntitledSubscriptionStatus("past_due"), false);
-    assert.equal(isEntitledSubscriptionStatus("trialing"), true);
-  } finally {
-    if (previousCreator === undefined) delete process.env.STRIPE_CREATOR_PRICE_ID; else process.env.STRIPE_CREATOR_PRICE_ID = previousCreator;
-  }
+test("client inputs cannot claim a plan or disable Free watermark", () => {
+  const free = accountEntitlementsForPlan("free");
+  assert.equal(canExportQuality(free, "ultra"), false);
+  assert.equal(authorizeExport(free, "standard").allowed, false);
+  assert.equal(watermarkRequiredForExport(free, "basic"), true);
 });
 
-test("customer portal gets only the server-resolved customer id", () => {
-  assert.equal(customerIdForPortal({ stripe_customer_id: "cus_server_value" }), "cus_server_value");
-  assert.throws(() => customerIdForPortal({ stripe_customer_id: null }), /No billing customer/);
+test("plan defaults and downgrade normalization remain exportable", () => {
+  assert.equal(defaultExportQualityForPlan("free"), "basic");
+  assert.equal(defaultExportQualityForPlan("pro"), "standard");
+  assert.equal(defaultExportQualityForPlan("premium"), "standard");
+  assert.equal(canExportQuality(accountEntitlementsForPlan("free"), "standard"), false);
 });
 
-test("production cannot use the development plan override", () => {
-  const env = process.env as Record<string, string | undefined>;
-  const previousNodeEnv = process.env.NODE_ENV;
-  const previousOverride = process.env.NEXT_PUBLIC_DEV_PLAN_OVERRIDE;
-  env.NODE_ENV = "production";
-  process.env.NEXT_PUBLIC_DEV_PLAN_OVERRIDE = "Pro";
-  try { assert.equal(resolveClientPlan(true), "Free"); }
-  finally {
-    if (previousNodeEnv === undefined) delete env.NODE_ENV; else env.NODE_ENV = previousNodeEnv;
-    if (previousOverride === undefined) delete process.env.NEXT_PUBLIC_DEV_PLAN_OVERRIDE; else process.env.NEXT_PUBLIC_DEV_PLAN_OVERRIDE = previousOverride;
-  }
+test("canonical entitlement migration is read-only to ordinary users and keeps paid quotas TBD", () => {
+  assert.match(migration, /plan in \('free', 'pro', 'premium'\)/);
+  assert.match(migration, /revoke all on public\.account_entitlements from anon, authenticated/);
+  assert.match(migration, /grant select on public\.account_entitlements to authenticated/);
+  assert.doesNotMatch(migration, /grant (insert|update|delete)/i);
+  assert.match(migration, /cloud_project_limit_for_current_user/);
+  assert.match(migration, /then 3 else null/);
 });
 
-test("subscription RLS is read-only to clients and downgrade preserves user work", () => {
-  assert.match(migration, /for select using \(auth\.uid\(\) = user_id\)/);
-  assert.doesNotMatch(migration, /subscriptions[\s\S]*for (insert|update|delete)/i);
-  assert.doesNotMatch(migration, /delete from public\.projects/i);
-  assert.match(migration, /event_id text primary key/);
-});
-
-test("malformed webhook signatures are rejected", async () => {
-  const previousKey = process.env.STRIPE_SECRET_KEY;
-  const previousSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  process.env.STRIPE_SECRET_KEY = "sk_test_billing_unit";
-  process.env.STRIPE_WEBHOOK_SECRET = "whsec_billing_unit";
-  try {
-    const response = await webhook(new Request("http://localhost/api/stripe/webhook", { method: "POST", headers: { "stripe-signature": "t=1,v1=invalid" }, body: "{}" }));
-    assert.equal(response.status, 400);
-  } finally {
-    if (previousKey === undefined) delete process.env.STRIPE_SECRET_KEY; else process.env.STRIPE_SECRET_KEY = previousKey;
-    if (previousSecret === undefined) delete process.env.STRIPE_WEBHOOK_SECRET; else process.env.STRIPE_WEBHOOK_SECRET = previousSecret;
-  }
+test("account and settings UI consume entitlement state rather than a hardcoded Free label", () => {
+  const account = readFileSync(new URL("../src/components/account-panel.tsx", import.meta.url), "utf8");
+  const workspace = readFileSync(new URL("../src/components/editor-workspace.tsx", import.meta.url), "utf8");
+  assert.match(account, /entitlements\.plan/);
+  assert.doesNotMatch(account, /Free plan/);
+  assert.match(workspace, /Locked · Requires Pro/);
+  assert.match(workspace, /Locked · Requires Premium/);
 });

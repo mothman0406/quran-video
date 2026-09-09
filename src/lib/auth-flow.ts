@@ -1,6 +1,4 @@
 export type AuthContinuation = "export" | "save";
-export const ACCOUNT_PLANS = ["free", "pro", "premium"] as const;
-export type AccountPlan = (typeof ACCOUNT_PLANS)[number];
 
 export const AUTH_CONTINUATION_STORAGE_KEY = "quran-video.auth-continuation";
 export const AUTH_RESUME_PROJECT_STORAGE_KEY = "quran-video.auth-resume-project";
@@ -13,11 +11,6 @@ export function exportAuthIntent(authenticated: boolean): AuthIntent {
   return authenticated
     ? { kind: "open-export-settings" }
     : { kind: "authenticate", continuation: "export" };
-}
-
-/** Billing is intentionally not consulted during the authentication milestone. */
-export function accountPlanForAuthenticatedUser(): AccountPlan {
-  return "free";
 }
 
 /** OAuth and email links may only return to public, first-party application routes. */

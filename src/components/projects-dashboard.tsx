@@ -5,7 +5,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import AccountPanel from "@/components/account-panel";
 import { deleteCloudProject, getAuthSession, getPrivateThumbnailUrl, getSupabaseClient, listCloudProjectRecords, renameCloudProject, signOut, type CloudProjectRecord } from "@/lib/cloud-sync";
-import { FREE_CLOUD_PROJECT_LIMIT, quranProjectMetadata } from "@/lib/cloud-projects";
+import { quranProjectMetadata } from "@/lib/cloud-projects";
+import { accountEntitlementsForPlan, type AccountEntitlements } from "@/lib/entitlements";
+import { getAccountEntitlements } from "@/lib/entitlements/client";
 
 type ProjectCard = CloudProjectRecord & { thumbnailUrl: string | null };
 
@@ -29,6 +31,7 @@ export default function ProjectsDashboard() {
   const [loading, setLoading] = useState(() => getSupabaseClient() !== null);
   const [error, setError] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(() => getSupabaseClient() === null);
+  const [accountEntitlements, setAccountEntitlements] = useState<AccountEntitlements>(() => accountEntitlementsForPlan("free"));
 
   const refresh = useCallback(async () => {
     setLoading(true); setError(null);
@@ -44,8 +47,8 @@ export default function ProjectsDashboard() {
     const supabase = getSupabaseClient();
     if (!supabase) return;
     let active = true;
-    void getAuthSession().then((next) => { if (!active) return; setSession(next); if (next) void refresh(); else { setLoading(false); setAuthOpen(true); } }).catch((caught: unknown) => { if (active) { setError(caught instanceof Error ? caught.message : "Could not read your session."); setLoading(false); } });
-    const subscription = supabase.auth.onAuthStateChange((_event, next) => { if (!active) return; setSession(next); if (next) { setAuthOpen(false); void refresh(); } else { setProjects([]); setAuthOpen(true); } });
+    void getAuthSession().then((next) => { if (!active) return; setSession(next); if (next) { void refresh(); void getAccountEntitlements(next).then(setAccountEntitlements).catch(() => setAccountEntitlements(accountEntitlementsForPlan("free"))); } else { setLoading(false); setAuthOpen(true); setAccountEntitlements(accountEntitlementsForPlan("free")); } }).catch((caught: unknown) => { if (active) { setError(caught instanceof Error ? caught.message : "Could not read your session."); setLoading(false); } });
+    const subscription = supabase.auth.onAuthStateChange((_event, next) => { if (!active) return; setSession(next); if (next) { setAuthOpen(false); void refresh(); void getAccountEntitlements(next).then(setAccountEntitlements).catch(() => setAccountEntitlements(accountEntitlementsForPlan("free"))); } else { setProjects([]); setAuthOpen(true); setAccountEntitlements(accountEntitlementsForPlan("free")); } });
     return () => { active = false; subscription.data.subscription.unsubscribe(); };
   }, [refresh]);
 
@@ -70,10 +73,10 @@ export default function ProjectsDashboard() {
       <Link className="projects-brand" href="/"><span>۝</span>Quran Video</Link>
       <Link className="projects-new projects-new-side" href="/editor">＋ New project</Link>
       <nav><span>Library</span><Link className="is-active" href="/projects">Projects</Link></nav>
-      <div className="projects-account">{session ? <><span className="projects-avatar">{(session.user.email ?? "Q").slice(0, 1).toUpperCase()}</span><div><strong>{session.user.user_metadata.full_name ?? session.user.email ?? "Quran Video member"}</strong><small>Free plan</small></div><button type="button" onClick={() => void signOut()}>Sign out</button></> : <span>Sign in to save projects</span>}</div>
+      <div className="projects-account">{session ? <><span className="projects-avatar">{(session.user.email ?? "Q").slice(0, 1).toUpperCase()}</span><div><strong>{session.user.user_metadata.full_name ?? session.user.email ?? "Quran Video member"}</strong><small>{accountEntitlements.plan.replace(/^./, (letter) => letter.toUpperCase())} plan</small></div><button type="button" onClick={() => void signOut()}>Sign out</button></> : <span>Sign in to save projects</span>}</div>
     </aside>
     <section className="projects-main">
-      <header className="projects-heading"><div><p>PROJECT LIBRARY</p><h1>Your projects</h1><span>{projects.length} projects saved / {FREE_CLOUD_PROJECT_LIMIT} project limit</span></div><Link className="projects-new" href="/editor">＋ New project</Link></header>
+      <header className="projects-heading"><div><p>PROJECT LIBRARY</p><h1>Your projects</h1><span>{projects.length} projects saved{accountEntitlements.cloudProjectLimit === null ? " · paid storage quota to be announced" : ` / ${accountEntitlements.cloudProjectLimit} project limit`}</span></div><Link className="projects-new" href="/editor">＋ New project</Link></header>
       {session && <input className="projects-search" aria-label="Search projects" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search projects…" />}
       {error && <p className="projects-error" role="alert">{error}</p>}
       {loading ? <p className="projects-empty">Loading your projects…</p> : !session ? <p className="projects-empty">Sign in to view the projects saved to your account.</p> : visibleProjects.length === 0 ? <div className="projects-empty"><h2>{projects.length ? "No matching projects" : "Save your first Quran video project and continue editing it anywhere."}</h2>{!projects.length && <Link className="projects-new" href="/editor">New project</Link>}</div> : <div className="projects-grid">{visibleProjects.map((item) => {

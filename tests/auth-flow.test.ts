@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { accountPlanForAuthenticatedUser, exportAuthIntent, rememberAuthContinuation, rememberAuthResumeProject, safeAuthReturnPath, takeAuthContinuation, takeAuthResumeProject } from "../src/lib/auth-flow.ts";
+import { exportAuthIntent, rememberAuthContinuation, rememberAuthResumeProject, safeAuthReturnPath, takeAuthContinuation, takeAuthResumeProject } from "../src/lib/auth-flow.ts";
 
 function storage() {
   const values = new Map<string, string>();
@@ -22,10 +22,6 @@ test("public landing and editor routes remain safe auth return destinations", ()
 test("guest export asks for authentication while authenticated export opens settings", () => {
   assert.deepEqual(exportAuthIntent(false), { kind: "authenticate", continuation: "export" });
   assert.deepEqual(exportAuthIntent(true), { kind: "open-export-settings" });
-});
-
-test("authenticated accounts resolve to Free until the later entitlement milestone", () => {
-  assert.equal(accountPlanForAuthenticatedUser(), "free");
 });
 
 test("auth continuation and local resume identity are minimal, one-time browser state", () => {

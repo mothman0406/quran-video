@@ -1,5 +1,4 @@
 import type { CompletedExport } from "../export/types.ts";
-import { exportQualityPreset, type ExportQuality } from "../export/quality.ts";
 import type { TikTokMediaDescriptor, TikTokUploadPlan } from "./types";
 
 export const TIKTOK_MAX_VIDEO_BYTES = 4 * 1024 * 1024 * 1024;
@@ -8,9 +7,9 @@ const MIN_CHUNK_BYTES = 5 * 1024 * 1024;
 const DEFAULT_CHUNK_BYTES = 10 * 1024 * 1024;
 const MAX_CHUNK_BYTES = 64 * 1024 * 1024;
 
-/** TikTok content cannot carry Quran Video's Basic product watermark. */
-export function isTikTokExportEligible(quality: ExportQuality): boolean {
-  return !exportQualityPreset(quality).watermarkRequired;
+/** TikTok content cannot carry a Quran Video product watermark. */
+export function isTikTokExportEligible(exported: Pick<CompletedExport, "watermarkRequired">): boolean {
+  return !exported.watermarkRequired;
 }
 
 export function tiktokMediaDescriptor(exported: CompletedExport): TikTokMediaDescriptor {
