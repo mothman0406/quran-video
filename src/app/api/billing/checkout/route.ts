@@ -1,5 +1,5 @@
 import { authenticatedEntitlementUser } from "@/lib/entitlements/server";
-import { assertStripePricesMatchEnvironment, getBillingSubscription, getOrCreateCustomer, getStripeClient, hasPaidSubscription, isBillingInterval, isPaidPlan, priceIdForPlan, safeApplicationOrigin, stripeCheckoutConfigured } from "@/lib/billing/server";
+import { assertStripePricesMatchEnvironment, getBillingCustomer, getBillingSubscription, getOrCreateCustomer, getStripeClient, hasPaidSubscription, isBillingInterval, isPaidPlan, logCheckoutFailure, priceIdForPlan, safeApplicationOrigin, stripeBillingEnvironment, stripeCheckoutConfigured } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,13 +13,17 @@ export async function POST(request: Request) {
   if (!stripeCheckoutConfigured()) return Response.json({ error: "Stripe billing is not configured for this environment yet." }, { status: 503 });
   const origin = safeApplicationOrigin(request);
   if (!origin) return Response.json({ error: "The application URL is not configured safely for billing." }, { status: 503 });
+  const billingEnvironment = stripeBillingEnvironment();
+  let customerMappingExisted = false;
   try {
     if (hasPaidSubscription(await getBillingSubscription(user.id))) return Response.json({ error: "You already have a paid subscription. Use Manage plan instead." }, { status: 409 });
     const price = priceIdForPlan(body.plan, body.interval);
     if (!price) return Response.json({ error: "That billing option is not configured." }, { status: 503 });
     const stripe = getStripeClient();
     await assertStripePricesMatchEnvironment(stripe);
-    const customer = await getOrCreateCustomer(user, { stripe });
+    const customerMapping = await getBillingCustomer(user.id);
+    customerMappingExisted = Boolean(customerMapping);
+    const customer = customerMapping?.stripe_customer_id ?? await getOrCreateCustomer(user, { stripe, billingEnvironment });
     const session = await stripe.checkout.sessions.create({
       mode: "subscription", customer, line_items: [{ price, quantity: 1 }], client_reference_id: user.id,
       success_url: `${origin}/editor?billing=success`, cancel_url: `${origin}/editor?billing=cancelled`,
@@ -27,7 +31,8 @@ export async function POST(request: Request) {
     });
     if (!session.url) throw new Error("Stripe did not return a Checkout URL.");
     return Response.json({ url: session.url });
-  } catch {
+  } catch (error) {
+    logCheckoutFailure(error, { billingEnvironment, customerMappingExisted });
     return Response.json({ error: "Checkout is temporarily unavailable. Your plan has not changed." }, { status: 503 });
   }
 }

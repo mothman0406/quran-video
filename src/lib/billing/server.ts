@@ -10,7 +10,7 @@ export type BillingInterval = (typeof BILLING_INTERVALS)[number];
 export type PaidPlan = Exclude<Plan, "free">;
 export type StripeSubscriptionStatus = "active" | "trialing" | "past_due" | "unpaid" | "canceled" | "incomplete" | "incomplete_expired" | "paused" | string;
 
-export type BillingCustomer = { user_id: string; stripe_customer_id: string };
+export type BillingCustomer = { user_id: string; stripe_customer_id: string; billing_environment: StripeBillingEnvironment };
 export type BillingSubscription = {
   user_id: string;
   stripe_customer_id: string;
@@ -60,6 +60,13 @@ function keyBillingEnvironment(key: string | undefined): StripeBillingEnvironmen
   if (key?.startsWith("sk_test_")) return "sandbox";
   if (key?.startsWith("sk_live_")) return "live";
   return null;
+}
+
+/** Returns the Stripe mode derived from the configured secret only after the mode safety checks pass. */
+export function stripeBillingEnvironment(env: NodeJS.ProcessEnv = process.env): StripeBillingEnvironment {
+  const mode = keyBillingEnvironment(env.STRIPE_SECRET_KEY);
+  if (!mode || !stripeEnvironmentIsSafe(env)) throw new Error("Stripe billing is not configured.");
+  return mode;
 }
 
 function deploymentIsPreview(env: NodeJS.ProcessEnv): boolean {
@@ -120,8 +127,8 @@ export function safeApplicationOrigin(request: Request): string | null {
   return applicationOrigin(process.env.NEXT_PUBLIC_APP_URL, request.url);
 }
 
-export async function getBillingCustomer(userId: string, admin: BillingAdmin = billingAdminClient()): Promise<BillingCustomer | null> {
-  const { data, error } = await admin.from("billing_customers").select("user_id,stripe_customer_id").eq("user_id", userId).maybeSingle();
+export async function getBillingCustomer(userId: string, admin: BillingAdmin = billingAdminClient(), billingEnvironment: StripeBillingEnvironment = stripeBillingEnvironment()): Promise<BillingCustomer | null> {
+  const { data, error } = await admin.from("billing_customers").select("user_id,stripe_customer_id,billing_environment").eq("user_id", userId).eq("billing_environment", billingEnvironment).maybeSingle();
   if (error) throw error;
   return data as BillingCustomer | null;
 }
@@ -142,20 +149,21 @@ export function subscriptionUpdateTarget(subscription: BillingSubscription | nul
   return subscription.stripe_subscription_id;
 }
 
-async function persistCustomerMapping(userId: string, customerId: string, admin: BillingAdmin = billingAdminClient()): Promise<void> {
-  const { error } = await admin.from("billing_customers").upsert({ user_id: userId, stripe_customer_id: customerId, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+async function persistCustomerMapping(userId: string, customerId: string, billingEnvironment: StripeBillingEnvironment, admin: BillingAdmin = billingAdminClient()): Promise<void> {
+  const { error } = await admin.from("billing_customers").upsert({ user_id: userId, stripe_customer_id: customerId, billing_environment: billingEnvironment, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
   if (error) throw error;
 }
 
 /** Uses a stable Stripe idempotency key so retried Checkout starts cannot create more than one Stripe Customer. */
-export async function getOrCreateCustomer(user: User, dependencies: { admin?: BillingAdmin; stripe?: Stripe } = {}): Promise<string> {
+export async function getOrCreateCustomer(user: User, dependencies: { admin?: BillingAdmin; stripe?: Stripe; billingEnvironment?: StripeBillingEnvironment } = {}): Promise<string> {
   const admin = dependencies.admin ?? billingAdminClient();
-  const existing = await getBillingCustomer(user.id, admin);
+  const billingEnvironment = dependencies.billingEnvironment ?? stripeBillingEnvironment();
+  const existing = await getBillingCustomer(user.id, admin, billingEnvironment);
   if (existing) return existing.stripe_customer_id;
   const stripe = dependencies.stripe ?? getStripeClient();
   const name = ["full_name", "name", "display_name"].map((key) => user.user_metadata[key]).find((value): value is string => typeof value === "string" && Boolean(value.trim()));
-  const customer = await stripe.customers.create({ email: user.email ?? undefined, name, metadata: { user_id: user.id } }, { idempotencyKey: `quran-video-customer:${user.id}` });
-  await persistCustomerMapping(user.id, customer.id, admin);
+  const customer = await stripe.customers.create({ email: user.email ?? undefined, name, metadata: { user_id: user.id } }, { idempotencyKey: `quran-video-customer:${billingEnvironment}:${user.id}` });
+  await persistCustomerMapping(user.id, customer.id, billingEnvironment, admin);
   return customer.id;
 }
 
@@ -164,14 +172,15 @@ function isoTimestamp(seconds: number | undefined): string | null { return typeo
 
 async function userIdForSubscription(subscription: Stripe.Subscription, admin: BillingAdmin): Promise<string> {
   const stripeCustomerId = customerId(subscription.customer);
-  const { data, error } = await admin.from("billing_customers").select("user_id").eq("stripe_customer_id", stripeCustomerId).maybeSingle();
+  const billingEnvironment = stripeBillingEnvironment();
+  const { data, error } = await admin.from("billing_customers").select("user_id").eq("stripe_customer_id", stripeCustomerId).eq("billing_environment", billingEnvironment).maybeSingle();
   if (error) throw error;
   const mappedUserId = (data as { user_id?: string } | null)?.user_id;
   const metadataUserId = subscription.metadata.user_id;
   if (mappedUserId && metadataUserId && mappedUserId !== metadataUserId) throw new Error("Stripe subscription identity does not match the customer mapping.");
   if (mappedUserId) return mappedUserId;
   if (!metadataUserId) throw new Error("Stripe subscription has no verified application user identity.");
-  await persistCustomerMapping(metadataUserId, stripeCustomerId, admin);
+  await persistCustomerMapping(metadataUserId, stripeCustomerId, billingEnvironment, admin);
   return metadataUserId;
 }
 
@@ -203,7 +212,29 @@ export async function ensureCheckoutCustomerMapping(session: Stripe.Checkout.Ses
   const userId = session.client_reference_id ?? session.metadata?.user_id;
   const stripeCustomerId = session.customer ? customerId(session.customer) : null;
   if (!userId || !stripeCustomerId) throw new Error("Checkout session has no verified application customer identity.");
-  await persistCustomerMapping(userId, stripeCustomerId, admin);
+  await persistCustomerMapping(userId, stripeCustomerId, stripeBillingEnvironment(), admin);
+}
+
+function safeStripeLabel(value: unknown): string | null {
+  if (typeof value !== "string" || !/^[a-z][a-z0-9_]{0,63}$/.test(value)) return null;
+  return /(?:^|_)(?:sk|rk|pk|whsec|bearer)(?:_|$)/i.test(value) ? null : value;
+}
+
+function safeStripeRequestId(value: unknown): string | null {
+  return typeof value === "string" && /^req_[A-Za-z0-9]{1,128}$/.test(value) ? value : null;
+}
+
+/** Logs a fixed, secret-safe diagnostic shape for a Checkout failure. Never log the error message or raw Stripe response. */
+export function logCheckoutFailure(error: unknown, context: { billingEnvironment: StripeBillingEnvironment; customerMappingExisted: boolean }): void {
+  const stripeError = error && typeof error === "object" ? error as { type?: unknown; code?: unknown; statusCode?: unknown; requestId?: unknown } : {};
+  console.error("Stripe Checkout creation failed.", {
+    stripeErrorType: safeStripeLabel(stripeError.type),
+    stripeErrorCode: safeStripeLabel(stripeError.code),
+    httpStatus: typeof stripeError.statusCode === "number" && Number.isInteger(stripeError.statusCode) && stripeError.statusCode >= 100 && stripeError.statusCode <= 599 ? stripeError.statusCode : null,
+    stripeRequestId: safeStripeRequestId(stripeError.requestId),
+    billingEnvironment: context.billingEnvironment,
+    customerMappingExisted: context.customerMappingExisted,
+  });
 }
 
 /** Database-backed webhook claim. A duplicate is ignored only after a successful prior processing pass. */

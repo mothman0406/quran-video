@@ -4,6 +4,8 @@
 
 Complete:
 
+- Restored live Stripe Checkout after the sandbox-to-live switch by mode-tagging `billing_customers` mappings. Existing mappings are explicitly sandbox; Checkout reuses a Customer only when it matches the configured key mode, otherwise Stripe creates the live Customer through the normal idempotent flow.
+- Added secret-safe Checkout failure diagnostics (Stripe error type/code, status, request ID, billing mode, and mapping presence only), plus regression coverage for cross-mode customer rejection, same-mode reuse, live Price validation, entitlement safety, and log redaction.
 - Added authenticated `/account` settings with identity, effective plan, available project usage, Stripe Customer Portal, sign-out, and an explicit `DELETE` confirmation flow.
 - Added server-only account deletion ordered for recovery: cancel nonterminal Stripe subscriptions, persist a minimal Stripe-customer webhook tombstone, remove private media through Supabase Storage API, remove application data, then delete Supabase Auth last. Failures leave the account intact for a safe retry.
 - Added `/privacy`, `/terms`, a production-safe route error boundary, a minimal 404 page, and `/api/health` readiness booleans. Legal pages identify Quran AutoCaption as operated by Mohammad Othman and provide the public privacy, Terms, and support contact email.
