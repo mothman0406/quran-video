@@ -1,5 +1,8 @@
 import { createServerClient } from "@supabase/ssr";
 import type { CookieOptions } from "@supabase/ssr";
+import { supabaseCookieOptions } from "./cookies";
+
+type SupabaseCookie = { name: string; value: string; options: CookieOptions };
 
 export function supabaseServerConfigured(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
@@ -7,10 +10,16 @@ export function supabaseServerConfigured(): boolean {
 
 export function createSupabaseServerClient(cookieStore: {
   getAll: () => { name: string; value: string }[];
-  set: (name: string, value: string, options: CookieOptions) => void;
+  setAll: (cookies: SupabaseCookie[], headers: Record<string, string>) => void;
 }) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!url || !key) throw new Error("Supabase authentication is not configured.");
-  return createServerClient(url, key, { cookies: { getAll: cookieStore.getAll, setAll: (cookies) => cookies.forEach(({ name, value, options }) => cookieStore.set(name, value, options)) } });
+  return createServerClient(url, key, {
+    cookieOptions: supabaseCookieOptions(),
+    cookies: {
+      getAll: cookieStore.getAll,
+      setAll: cookieStore.setAll,
+    },
+  });
 }

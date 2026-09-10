@@ -1,6 +1,7 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { authCallbackUrl as configuredAuthCallbackUrl } from "./application-url.ts";
+import { supabaseCookieOptions } from "./supabase/cookies.ts";
 import { cloudProjectName, mediaExtension, PROJECT_MEDIA_BUCKET, projectMediaPath, quranProjectMetadata } from "./cloud-projects.ts";
 import { loadSavedProject, serializeSavedProject } from "./project-storage.ts";
 import type { SavedProject } from "./schemas/project.ts";
@@ -81,7 +82,7 @@ export function getSupabaseClient(): SupabaseClient | null {
   if (client !== undefined) return client;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  client = url && anonKey ? createBrowserClient(url, anonKey) : null;
+  client = url && anonKey ? createBrowserClient(url, anonKey, { cookieOptions: supabaseCookieOptions() }) : null;
   return client;
 }
 

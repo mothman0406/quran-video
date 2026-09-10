@@ -15,9 +15,14 @@ export async function GET(request: NextRequest) {
 
   const supabase = createSupabaseServerClient({
     getAll: () => request.cookies.getAll(),
-    set: (name, value, options) => {
-      request.cookies.set({ name, value, ...options });
-      response.cookies.set({ name, value, ...options });
+    setAll: (cookiesToSet, headers) => {
+      cookiesToSet.forEach(({ name, value, options }) => {
+        request.cookies.set({ name, value, ...options });
+        response.cookies.set({ name, value, ...options });
+      });
+      Object.entries(headers).forEach(([name, value]) => {
+        response.headers.set(name, value);
+      });
     },
   });
   await supabase.auth.exchangeCodeForSession(code);

@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Netlify Supabase Google session persistence
+
+Complete:
+
+- Audited the deployed SSR flow: browser OAuth uses Supabase's cookie-backed PKCE client, `/auth/callback` exchanges the code on its redirect response, and `proxy.ts` refreshes cookie sessions. Safe continuation remains `/editor` for Account, with existing export/save one-time continuations restored from browser session storage.
+- Updated both server adapters to the current `@supabase/ssr` `getAll`/`setAll(cookies, headers)` contract. Cookie writes and the library's no-store cache headers now attach to the same response that Next.js returns; the proxy also recreates its pass-through response after updating request cookies.
+- Made the shared browser/server cookie policy explicit: HTTPS production cookies are Secure, SameSite=Lax, Path=/, browser-readable for the SSR client, and host-only (no Domain override). Supabase retains its managed session lifetime.
+- Added targeted regression coverage for shared cookie policy, PKCE code exchange, response cookie persistence, cache headers, and the proxy response handoff.
+- A live header probe on 2026-09-10 established that the currently deployed canonical callback is stale: `quran-autocaption.netlify.app/auth/callback?next=/editor` returns `307 Location: https://quran-video.netlify.app/editor?next=%2Feditor`. This old-host redirect is outside the current source and proves the hosted build/config has not yet adopted the canonical origin. Because Supabase session cookies are intentionally host-only, cookies written on the old host cannot persist on the canonical host.
+
+Verification: focused auth/production tests and TypeScript checks pass. Before live verification, deploy this commit to Netlify with `NEXT_PUBLIC_APP_URL=https://quran-autocaption.netlify.app` available at build time and make that hostname the production/primary hostname. Confirm the callback's no-code response has `Location: https://quran-autocaption.netlify.app/editor` (no old-host redirect), then complete a real Google sign-in and confirm the returned `Set-Cookie` headers persist through refresh, `/projects`, Save, and Export.
+
 ## Current milestone: Netlify server-handler deployment repair
 
 Complete:

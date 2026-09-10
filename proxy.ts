@@ -3,13 +3,21 @@ import { createSupabaseServerClient, supabaseServerConfigured } from "@/lib/supa
 
 /** Refreshes Supabase's cookie session without restricting public editor routes. */
 export async function proxy(request: NextRequest) {
-  const response = NextResponse.next({ request });
+  let response = NextResponse.next({ request });
   if (!supabaseServerConfigured()) return response;
   const supabase = createSupabaseServerClient({
     getAll: () => request.cookies.getAll(),
-    set: (name, value, options) => {
-      request.cookies.set({ name, value, ...options });
-      response.cookies.set({ name, value, ...options });
+    setAll: (cookiesToSet, headers) => {
+      cookiesToSet.forEach(({ name, value, options }) => {
+        request.cookies.set({ name, value, ...options });
+      });
+      response = NextResponse.next({ request });
+      cookiesToSet.forEach(({ name, value, options }) => {
+        response.cookies.set({ name, value, ...options });
+      });
+      Object.entries(headers).forEach(([name, value]) => {
+        response.headers.set(name, value);
+      });
     },
   });
   await supabase.auth.getUser();
