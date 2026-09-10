@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Frame-responsive basmalah preview highlighting
+
+Complete:
+
+- Traced the authoritative preview path as `HTMLMediaElement.currentTime` → `MediaPlaybackClock` → `CaptionPreview` → shared active-segment and word-highlight evaluators → React DOM. The clock samples the real media time with one `requestAnimationFrame` loop while playing; play, pause, ended, source replacement, seeks, and `timeupdate` still synchronize from that same media element.
+- Isolated animation-frame presentation updates to the composed `CaptionPreview` subtree. Timeline, sidebars, inspectors, and editor state now follow ordinary media events, so their rendering cannot consume the short final-word interval. Fullscreen uses that exact same sole caption component and subscription.
+- Kept the authoritative 2926 ms final-word onset and 3006 ms prelude end unchanged. No Quran timing, caption timing, source-time mapping, playback-rate behavior, or read-so-far predicate was changed.
+- Audited export separately: it has no media-event/playback callback path. `offline-webcodecs` evaluates the shared caption and word presentation functions at each explicit output-frame timestamp after deterministic output-to-source-time mapping, so this was a live-preview presentation scheduling issue; export behavior is unchanged.
+- Added coverage that a focused subscriber receives real samples spanning the 2926–3006 ms interval and detaches cleanly, while the fullscreen composed renderer continues to use the same responsive clock.
+
+Verification: `npm test` (344 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes its production invariant probes; its optional real Quran alignment benchmark remains unavailable/failing in this workspace and its generated evidence was not retained. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and optional TikTok configuration reminder.
+
 ## Current milestone: Production basmalah timing diagnostics
 
 Complete:

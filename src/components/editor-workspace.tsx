@@ -33,6 +33,7 @@ import { waveformPeaksForViewport, type WaveformData } from "@/lib/editor/wavefo
 import type { CaptionCanvasBounds, PlatformCollision, SocialPlatformId } from "@/lib/editor/social-platform-guides";
 import { WORKSPACE_LAYOUT_DEFAULTS, clampWorkspacePanelWidth, clampWorkspaceTimelineHeight } from "@/lib/editor/workspace-layout";
 import { canFullscreenComposedPreview, isComposedPreviewFullscreen, toggleComposedPreviewFullscreen } from "@/lib/editor/fullscreen";
+import type { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage = "idle" | "preparing" | "detecting-speech" | "loading-model" | "transcribing" | "matching" | "captions" | "complete" | "error";
@@ -56,6 +57,7 @@ type EditorWorkspaceProps = {
   alignments: { surahNumber: number; ayahNumber: number; confidence: number }[];
   content: Readonly<Record<string, QuranContentResponse>>;
   currentTimeMs: number;
+  playbackClock: MediaPlaybackClock | null;
   segments: CaptionSegment[];
   selectedSegmentId: string | null;
   selectedSegment: CaptionSegment | null;
@@ -270,7 +272,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const panelResizeStart = useRef<{ panel: "left" | "right"; x: number; width: number } | null>(null);
   const {
     videoFile, videoUrl, videoMetadata, mediaSource, projectAssets, activeMediaAssetId, mediaTrim, videoRef, previewRef, timelineRef, stage, progress, support,
-    alignments, content, currentTimeMs, segments, selectedSegmentId, selectedSegment, selectedIndex,
+    alignments, content, currentTimeMs, playbackClock, segments, selectedSegmentId, selectedSegment, selectedIndex,
     selectedObject, rightInspectorMode, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, playbackRate, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, session, accountEntitlements, onRefreshEntitlements, canUndo, canRedo, busy, localStyles, localStyleName, authOpen, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportPreflight, exportQuality, exportFormat, outputPlan, exportResult, exportIsStale, exportState, exportError, exportDiagnostics, tiktokCaption, errorMessage, onRetrySourceRestore, timingWarning,
@@ -563,7 +565,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
               {mediaSource?.hasVideo ? <video ref={setPreviewMediaRef} className="h-full w-full object-contain" playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onPointerDown={onSelectMedia} onLoadStart={() => setIsPreviewPlaying(false)} onLoadedMetadata={(event) => { onLoadedMetadata(event); syncPreviewVolume(event); }} onTimeUpdate={onVideoTimeUpdate} onPlay={(event) => { setIsPreviewPlaying(true); onMediaPlay(event); }} onPause={(event) => { setIsPreviewPlaying(false); onMediaPause(event); }} onEnded={(event) => { setIsPreviewPlaying(false); onMediaEnded(event); }} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onVolumeChange={syncPreviewVolume} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={setPreviewMediaRef} className="editor-audio-element" preload="metadata" src={videoUrl} onPointerDown={onSelectMedia} onLoadStart={() => setIsPreviewPlaying(false)} onLoadedMetadata={(event) => { onLoadedMetadata(event); syncPreviewVolume(event); }} onTimeUpdate={onVideoTimeUpdate} onPlay={(event) => { setIsPreviewPlaying(true); onMediaPlay(event); }} onPause={(event) => { setIsPreviewPlaying(false); onMediaPause(event); }} onEnded={(event) => { setIsPreviewPlaying(false); onMediaEnded(event); }} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onVolumeChange={syncPreviewVolume} onError={onVideoError}>Your browser does not support audio playback.</audio>}
               {showSafeArea && <SafeAreaOverlay format={projectFormat} />}
               <SocialPlatformGuideOverlay platform={platformPreview} />
-              <CaptionPreview currentTimeMs={currentTimeMs} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedSegmentId={selectedSegmentId} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} onCaptionBoundsChange={onCaptionBoundsChange} />
+              <CaptionPreview currentTimeMs={currentTimeMs} playbackClock={playbackClock} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedSegmentId={selectedSegmentId} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} onCaptionBoundsChange={onCaptionBoundsChange} />
             </div>
             <div className="editor-player-controls" aria-label="Preview controls">
               <button className="editor-player-button" type="button" data-player-control="playback" aria-label={isPreviewPlaying ? "Pause" : "Play"} title={isPreviewPlaying ? "Pause" : "Play"} onClick={onTogglePreviewPlayback}>{isPreviewPlaying ? <Pause aria-hidden="true" size={16} strokeWidth={2.25} /> : <Play aria-hidden="true" size={16} strokeWidth={2.25} fill="currentColor" />}</button>

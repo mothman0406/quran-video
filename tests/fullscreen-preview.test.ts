@@ -81,6 +81,8 @@ test("the sole caption renderer remains inside the fullscreen preview subtree", 
   assert.match(captions, /data-caption-object="translation"/);
   assert.match(captions, /data-caption-word-highlighted/);
   assert.match(captions, /contentKind === "ayah"/);
+  assert.match(captions, /playbackClock\.subscribe/);
+  assert.match(workspace, /<CaptionPreview currentTimeMs=\{currentTimeMs\} playbackClock=\{playbackClock\}/);
 });
 
 test("the product-owned player exposes one fullscreen control and no native fullscreen affordance", () => {

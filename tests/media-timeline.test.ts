@@ -187,6 +187,36 @@ test("audio playback samples the media clock on animation frames instead of rely
   assert.equal(frames.size, 1, "the loop remains singular while audio is playing");
 });
 
+test("a focused presentation subscriber receives every authoritative animation-frame sample", () => {
+  const frames = animationFrames();
+  const audio = { currentTime: 2.925, paused: false, ended: false };
+  const presentationSamples: Array<[number, string]> = [];
+  const clock = new MediaPlaybackClock({
+    onSample: () => undefined,
+    requestFrame: frames.requestFrame,
+    cancelFrame: frames.cancelFrame,
+  });
+
+  const unsubscribe = clock.subscribe((timeMs, source) => presentationSamples.push([timeMs, source]));
+  clock.setMedia(audio);
+  clock.start();
+  for (const time of [2.926, 2.966, 3.005]) {
+    audio.currentTime = time;
+    frames.runNext();
+  }
+  assert.deepEqual(presentationSamples, [
+    [2_925, "play"],
+    [2_926, "animation-frame"],
+    [2_966, "animation-frame"],
+    [3_005, "animation-frame"],
+  ], "an 80 ms final-word interval receives the real media samples that span it");
+
+  unsubscribe();
+  audio.currentTime = 3.006;
+  frames.runNext();
+  assert.equal(presentationSamples.length, 4, "unmounting a presentation subtree detaches it from the media clock");
+});
+
 test("playback clock synchronizes immediately on seeks and stops on pause, ended, replacement, and unmount", () => {
   const frames = animationFrames();
   const audio = { currentTime: 2, paused: false, ended: false };

@@ -402,6 +402,7 @@ export default function Home() {
   const exportCoordinator = useRef(new ExportCoordinator());
   const exportPreflightOverride = useRef(new ExportPreflightOverride<AuthorizedExportRequest>());
   const playbackClock = useRef<MediaPlaybackClock | null>(null);
+  const [captionPlaybackClock, setCaptionPlaybackClock] = useState<MediaPlaybackClock | null>(null);
   const projectHistory = useRef(new EditorHistory<EditorProjectHistoryState>(sameEditorProjectHistoryState));
   const [, setHistoryVersion] = useState(0);
   const projectHistoryStateRef = useRef<EditorProjectHistoryState>({
@@ -488,7 +489,7 @@ export default function Home() {
 
   useEffect(() => {
     const clock = new MediaPlaybackClock({
-      onSample: (timeMs) => {
+      onSample: (timeMs, source) => {
         const trim = mediaTrimRef.current;
         const media = videoRef.current;
         if (media && !media.paused && trim.endMs > trim.startMs && timeMs >= trim.endMs) {
@@ -497,13 +498,19 @@ export default function Home() {
           setCurrentTimeMs(trim.endMs);
           return;
         }
+        // The CaptionPreview subscribes to every animation-frame sample. The
+        // editor playhead, timeline, and inspectors retain media-event
+        // updates so they do not force a full editor render every frame.
+        if (source === "animation-frame") return;
         setCurrentTimeMs((current) => current === timeMs ? current : timeMs);
       },
     });
     playbackClock.current = clock;
+    setCaptionPlaybackClock(clock);
     return () => {
       clock.dispose();
       if (playbackClock.current === clock) playbackClock.current = null;
+      setCaptionPlaybackClock((current) => current === clock ? null : current);
     };
   }, []);
 
@@ -2609,6 +2616,7 @@ export default function Home() {
         alignments={alignments}
         content={content}
         currentTimeMs={currentTimeMs}
+        playbackClock={captionPlaybackClock}
         segments={segments}
         selectedSegmentId={selectedSegmentId}
         selectedSegment={selectedSegment}

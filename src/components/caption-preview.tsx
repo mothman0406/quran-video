@@ -7,12 +7,14 @@ import { quranFontDefinitions } from "@/lib/quran/content";
 import type { ProjectFormat } from "@/lib/schemas/project";
 import { captionStyleFromState, resolveCaptionLayerStyle } from "@/lib/editor/styles";
 import type { CaptionCanvasBounds } from "@/lib/editor/social-platform-guides";
+import type { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 
 export type CaptionObject = "arabic" | "translation" | "transliteration";
 export type CaptionResizeEdge = "left" | "right";
 
 type CaptionPreviewProps = {
   currentTimeMs: number;
+  playbackClock: MediaPlaybackClock | null;
   segments: readonly CaptionSegment[];
   content: Readonly<Record<string, QuranContentResponse>>;
   typography: Typography;
@@ -33,6 +35,7 @@ type CaptionPreviewProps = {
 
 function CaptionPreview({
   currentTimeMs,
+  playbackClock,
   segments,
   content,
   typography,
@@ -53,6 +56,10 @@ function CaptionPreview({
   const layerRefs = useRef(new Map<string, HTMLDivElement>());
   const linkedStackRefs = useRef(new Map<string, HTMLDivElement>());
   const [linkedStackCenters, setLinkedStackCenters] = useState<Record<string, number>>({});
+  // The rest of the editor can follow ordinary media events. This focused
+  // state is the only subtree that consumes every authoritative animation
+  // frame, which keeps short word intervals visible without a synthetic clock.
+  const [presentationTimeMs, setPresentationTimeMs] = useState(currentTimeMs);
   const registerLayer = useCallback((id: string) => (node: HTMLDivElement | null) => {
     if (node) layerRefs.current.set(id, node);
     else layerRefs.current.delete(id);
@@ -61,6 +68,13 @@ function CaptionPreview({
     if (node) linkedStackRefs.current.set(id, node);
     else linkedStackRefs.current.delete(id);
   }, []);
+
+  useEffect(() => {
+    if (!playbackClock) return;
+    return playbackClock.subscribe((timeMs) => {
+      setPresentationTimeMs((current) => current === timeMs ? current : timeMs);
+    });
+  }, [playbackClock]);
 
   useLayoutEffect(() => {
     if (!positioning.translationPositionLinked) return;
@@ -88,8 +102,8 @@ function CaptionPreview({
   useEffect(() => {
     const applyVisualState = () => {
       // This exact selector is the shared preview/timeline/test authority.
-      const active = getActiveCaptionSegment(segments, currentTimeMs);
-      const states = active ? captionVisualStatesAtTime(segments, currentTimeMs, transitionSettings) : [];
+      const active = getActiveCaptionSegment(segments, presentationTimeMs);
+      const states = active ? captionVisualStatesAtTime(segments, presentationTimeMs, transitionSettings) : [];
       const stateById = new Map(states.map((state) => [state.segment.id, state]));
       layerRefs.current.forEach((layer, id) => {
         const state = stateById.get(id);
@@ -104,7 +118,7 @@ function CaptionPreview({
       });
     };
     applyVisualState();
-  }, [currentTimeMs, segments, transitionSettings]);
+  }, [presentationTimeMs, segments, transitionSettings]);
 
   useLayoutEffect(() => {
     if (!onCaptionBoundsChange) return;
@@ -171,7 +185,7 @@ function CaptionPreview({
       const translation = translationDisplayText(segment) ?? (item?.status === "ready" ? item.verse.translation : null);
       const hasTranslation = translationStyleState.typography.translationVisible && Boolean(translation);
       const hasTransliteration = segmentTypography.transliterationVisible && Boolean(segment.transliteration);
-      const arabicWords = arabicCaptionPresentationWords(segment, showVerseNumber, currentTimeMs, segmentTypography.wordHighlightMode);
+      const arabicWords = arabicCaptionPresentationWords(segment, showVerseNumber, presentationTimeMs, segmentTypography.wordHighlightMode);
       const background = captionBackgroundStyle(segmentBackground);
       const arabicWidth = `${segmentPositioning.maxWidthPercent * 100}%`;
       const translationWidth = `${(translationStyleState.positioning.translationMaxWidthPercent ?? translationStyleState.positioning.maxWidthPercent) * 100}%`;

@@ -15,6 +15,8 @@ type PlaybackClockOptions = {
   cancelFrame?: (requestId: number) => void;
 };
 
+export type PlaybackSampleListener = (currentTimeMs: number, source: PlaybackUpdateSource) => void;
+
 /**
  * Samples the active media element without ever advancing a synthetic clock.
  * Both audio and video therefore expose the same authoritative media time to
@@ -26,6 +28,7 @@ export class MediaPlaybackClock {
   private readonly requestFrame: (callback: FrameRequestCallback) => number;
   private readonly cancelFrame: (requestId: number) => void;
   private readonly onSample: PlaybackClockOptions["onSample"];
+  private readonly listeners = new Set<PlaybackSampleListener>();
 
   constructor(options: PlaybackClockOptions) {
     this.onSample = options.onSample;
@@ -62,6 +65,15 @@ export class MediaPlaybackClock {
     this.sample(source);
   }
 
+  /**
+   * Lets a focused presentation subtree follow the already-authoritative media
+   * sampling loop without creating another clock or advancing wall time.
+   */
+  subscribe(listener: PlaybackSampleListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
   dispose(): void {
     if (this.frameId !== null) {
       this.cancelFrame(this.frameId);
@@ -81,6 +93,8 @@ export class MediaPlaybackClock {
 
   private sample(source: PlaybackUpdateSource): void {
     if (!this.media || !Number.isFinite(this.media.currentTime)) return;
-    this.onSample(this.media.currentTime * 1_000, source);
+    const currentTimeMs = this.media.currentTime * 1_000;
+    this.onSample(currentTimeMs, source);
+    this.listeners.forEach((listener) => listener(currentTimeMs, source));
   }
 }
