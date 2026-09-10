@@ -7,6 +7,10 @@ import { MockTikTokService } from "../src/lib/tiktok/mock.ts";
 import { oauthStatesMatch } from "../src/lib/tiktok/oauth.ts";
 import { TIKTOK_STATUS_POLL_INTERVAL_MS, isTikTokStatusFinal, tiktokStatusMessage } from "../src/lib/tiktok/status.ts";
 
+const postingUi = readFileSync("src/components/tiktok-posting.tsx", "utf8");
+const tiktokServer = readFileSync("src/lib/tiktok/server.ts", "utf8");
+const tiktokClient = readFileSync("src/lib/tiktok/client.ts", "utf8");
+
 const segment = { id: "18:57#1", contentKind: "ayah", verseKeys: ["18:57"], startMs: 0, endMs: 4_000, arabic: "وَمَنْ أَظْلَمُ", translation: "And who is more unjust than one who is reminded of the verses of his Lord but turns away from them and forgets what his hands have put forth?", transliteration: null, wordStart: 0, wordEnd: 1, wordCount: 1, timingEvidence: { start: { timestampMs: 0, source: "direct-asr-word" }, end: { timestampMs: 4_000, source: "chunk-text-alignment" }, derived: false } } as never;
 
 test("only actually watermarked exports are blocked for TikTok", () => {
@@ -50,15 +54,16 @@ test("OAuth state validation accepts only the exact state", () => {
   assert.equal(oauthStatesMatch(undefined, "fixed-state"), false);
 });
 
-test("mock service is deterministic and direct/draft outcomes stay distinct", () => {
+test("post status distinguishes upload processing, completion, and failure", () => {
   const mock = new MockTikTokService();
   assert.equal(mock.creator.username, "test_creator");
   assert.equal(mock.initialize().publishId, "mock-publish-1");
   assert.equal(mock.nextStatus().status, "PROCESSING_UPLOAD");
   const complete = mock.nextStatus();
   assert.equal(isTikTokStatusFinal(complete), true);
-  assert.equal(tiktokStatusMessage({ ...complete, status: "SEND_TO_USER_INBOX" }, "draft"), "Sent to TikTok. Open TikTok to finish editing and publish.");
-  assert.equal(tiktokStatusMessage(complete, "direct"), "Posted to TikTok");
+  assert.equal(tiktokStatusMessage({ ...complete, status: "PROCESSING_DOWNLOAD" }), "Processing on TikTok");
+  assert.equal(tiktokStatusMessage(complete), "Posted to TikTok");
+  assert.match(tiktokStatusMessage({ ...complete, status: "FAILED", failureReason: "invalid_video" }), /TikTok could not process this video/);
 });
 
 test("status polling interval remains below TikTok's documented 30 calls/minute limit", () => {
@@ -70,4 +75,42 @@ test("TikTok boundary excludes recognition models and browser code contains no s
   assert.doesNotMatch(files, /recognition\//u);
   assert.doesNotMatch(files, /TIKTOK_CLIENT_SECRET|refreshToken|accessToken/u);
   assert.match(readFileSync("src/components/editor-workspace.tsx", "utf8"), /TikTokPosting/);
+});
+
+test("Direct Post requires a fresh creator-info query, FILE_UPLOAD, and explicit consent before transfer", () => {
+  assert.match(tiktokServer, /await creatorInfo\(\)/);
+  assert.match(tiktokServer, /source: "FILE_UPLOAD"/);
+  assert.match(tiktokServer, /if \(!request\.userConsent\)/);
+  assert.match(postingUi, /getTikTokCreatorInfo/);
+  assert.match(postingUi, /checked=\{userConsent\}/);
+  assert.match(postingUi, /disabled=\{Boolean\(localErrors\.length \|\| captionTooLong \|\| !privacy \|\| !userConsent/);
+  assert.match(tiktokClient, /uploadTikTokVideo/);
+  assert.match(tiktokClient, /Content-Range/);
+});
+
+test("creator capabilities, commercial disclosure, and unaudited privacy restrictions drive the UI", () => {
+  assert.match(postingUi, /creator\.privacyLevelOptions/);
+  assert.match(postingUi, /Select privacy…/);
+  assert.match(postingUi, /directPostAudited/);
+  assert.match(postingUi, /Commercial content/);
+  assert.match(tiktokServer, /brand_content_toggle/);
+  assert.match(tiktokServer, /brand_organic_toggle/);
+  assert.match(tiktokServer, /privacyLevelOptions\.includes\("SELF_ONLY"\)/);
+  assert.match(tiktokServer, /const privacy = config\.directPostAudited \? request\.privacyLevel : "SELF_ONLY"/);
+});
+
+test("failure preserves the completed local export and expired authorization clears the protected connection", () => {
+  assert.match(postingUi, /exported\.blob/);
+  assert.match(postingUi, /Your completed export is still available for download/);
+  assert.match(tiktokServer, /Connect TikTok again/);
+  assert.match(tiktokServer, /requireVideoPublishScope/);
+  assert.match(readFileSync("src/app/api/tiktok/post/init/route.ts", "utf8"), /clearTikTokConnection/);
+});
+
+test("user-facing unavailable state and OAuth callback do not expose setup instructions or callback credentials", () => {
+  assert.match(postingUi, /TikTok posting is unavailable right now/);
+  assert.doesNotMatch(postingUi, /docs\/TIKTOK_SETUP\.md|TIKTOK_CLIENT_SECRET|TIKTOK_REDIRECT_URI/u);
+  const callback = readFileSync("src/app/api/tiktok/oauth/callback/route.ts", "utf8");
+  assert.match(callback, /history\.replaceState/);
+  assert.match(callback, /window\.location\.origin/);
 });

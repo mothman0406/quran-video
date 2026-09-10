@@ -17,8 +17,6 @@ Use a known, non-private Quran video with audible recitation and keep one short 
    - PASS: a neutral canvas, waveform, playback, and caption-generation controls are available.
 3. Generate captions for the known Quran clip, then review the identified passage.
    - PASS: no confident wrong passage is accepted; Arabic is canonical, captions begin at recitation onset, and the final caption survives through recitation completion.
-4. If local YouTube tooling is configured, import one permitted test URL.
-   - PASS: the import follows the same source workflow. If `yt-dlp` is unavailable, the app explains the local-tool dependency without claiming success.
 
 ## 3. Captions, workspace, and playback — 5 minutes
 
@@ -37,7 +35,7 @@ Use a known, non-private Quran video with audible recitation and keep one short 
 
 ## 4. Safe zones and export — 5 minutes
 
-1. Switch among None, TikTok, Instagram Reels, and YouTube Shorts guides; use **Move to safe area**, undo, and redo.
+1. Switch among None, TikTok, and Instagram Reels guides; use **Move to safe area**, undo, and redo.
    - PASS: guides are preview-only, the linked Arabic/translation footprint moves safely, and exported output has no guides.
 2. Choose **Export**.
    - PASS: **Export Settings** opens first; Basic is 720p/watermarked, Standard is 1080p, and Ultra is 4K. Check the displayed dimensions for the chosen project format.
@@ -54,7 +52,7 @@ Use a known, non-private Quran video with audible recitation and keep one short 
    - PASS: posting is blocked and offers **Export Standard version**; no watermark is silently removed.
 2. From Standard or Ultra, open **Post to TikTok** with credentials absent.
    - PASS: an understandable configuration state appears; editor/export/download remain usable.
-3. In the approved sandbox/mock environment, exercise Direct and Draft posting through connect, creator settings, editable social caption, explicit confirmation, transfer, and status.
+3. In the approved sandbox/mock environment, exercise Direct Post through connect, fresh creator settings, editable social caption, commercial disclosure where applicable, explicit confirmation, transfer, and status.
    - PASS: media transfer progress and outcomes are clear; expired auth, upload failure, processing failure, retry, and cancel preserve the completed export and its download.
 
 Record the browser/device, source fixture identity, observed result, and any console error for every failure. Do not treat unavailable local media, TikTok credentials, or browser encoder capability as a pass.

@@ -1,21 +1,51 @@
-# TikTok Content Posting setup
+# TikTok Direct Post setup
 
-This integration uses TikTok's current **Content Posting API**. It does not use the deprecated Share Video API.
+Quran Video uses TikTok's current **Content Posting API — Direct Post** with browser-direct `FILE_UPLOAD`. It does not use the deprecated Share Video API or upload completed exports to Supabase.
 
-1. Register a Web app in the [TikTok for Developers portal](https://developers.tiktok.com/docs/en/getting-started-create-an-app). Add both Login Kit and the Content Posting API product.
-2. In Login Kit, register the exact HTTPS callback URL used as `TIKTOK_REDIRECT_URI`, for example `https://your-domain.example/api/tiktok/oauth/callback`. TikTok's Web redirect URIs are absolute, static HTTPS URLs; do not append query parameters or fragments.
-3. Request the Content Posting scopes needed by this application: `video.publish` for Direct Post and `video.upload` for Send to TikTok drafts. The creator must also grant the relevant scope during OAuth.
-4. Add the server-only environment values from `.env.example`: `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, and `TIKTOK_REDIRECT_URI`. Optionally supply `TIKTOK_TOKEN_ENCRYPTION_KEY` to encrypt the HttpOnly connection cookie independently of the client secret. Do not use `NEXT_PUBLIC_` names for any of these values.
-5. Test in TikTok Sandbox as appropriate. TikTok documents that Content Posting API URL properties must be verified even for Sandbox use; follow the current portal's URL-property verification instructions for the website/redirect setup.
-6. Submit the app and requested scopes for TikTok review/audit before production release. TikTok requires an audit to lift the Direct Post visibility restriction. Leave `TIKTOK_DIRECT_POST_AUDITED=false` until that approval is complete.
+## Required Developer Portal configuration
+
+1. Create a Web app in the [TikTok for Developers portal](https://developers.tiktok.com/docs/en/getting-started-create-an-app).
+2. Add **Login Kit** and **Content Posting API**, then enable **Direct Post** in the Content Posting API configuration.
+3. Apply for and enable the `video.publish` scope. The OAuth connection requests this scope and each creator must grant it. Login Kit's baseline `user.info.basic` is added by TikTok to the app configuration; Quran Video does not request unnecessary Display or Upload scopes.
+4. In Login Kit, register this exact production redirect URI:
+
+   `https://quran-autocaption.netlify.app/api/tiktok/oauth/callback`
+
+   It must exactly match `TIKTOK_REDIRECT_URI`: absolute HTTPS, static, with no query string or fragment. The server rejects a production callback that is not the `/api/tiktok/oauth/callback` path. A custom canonical production domain requires registering its corresponding fixed callback and updating the environment value together.
+5. Add the app's client key and client secret from the portal to Netlify. Keep the secret server-only.
+6. Verify the current portal's required website/URL properties, test the complete OAuth and Direct Post flow with an eligible TikTok account, then submit the Direct Post client for TikTok audit.
+
+## Netlify environment variables
+
+Set these values for the production site, then redeploy:
+
+| Variable | Value |
+| --- | --- |
+| `TIKTOK_CLIENT_KEY` | TikTok Developer Portal client key |
+| `TIKTOK_CLIENT_SECRET` | TikTok Developer Portal client secret; never `NEXT_PUBLIC_` |
+| `TIKTOK_REDIRECT_URI` | `https://quran-autocaption.netlify.app/api/tiktok/oauth/callback` |
+| `TIKTOK_TOKEN_ENCRYPTION_KEY` | Strong, deployment-stable secret used to encrypt the HttpOnly connection cookie |
+| `TIKTOK_DIRECT_POST_AUDITED` | `false` until TikTok confirms audit approval; then set to `true` |
+
+`TIKTOK_TOKEN_ENCRYPTION_KEY` is optional in development, where the server can derive a key from the client secret, but it should be independently set in production. Do not expose any of these variables in client code or build-time `NEXT_PUBLIC_` values.
 
 ## Current product and compliance behavior
 
-- TikTok's Content Sharing Guidelines prohibit branding, logos, watermarks, links, and promotional material superimposed on content shared through integrations. Quran Video therefore blocks the Basic 720p watermarked export from posting. Users can select Standard 1080p or Ultra 4K and render a new non-watermarked file; the existing Basic blob is never altered.
-- The creator explicitly starts the final Direct Post or draft transfer. Opening the dialog, connecting TikTok, and editing the caption never transfers media.
-- The dialog shows the connected TikTok account and asks TikTok for fresh creator info before presenting posting controls. Privacy and interaction controls are created only from the capabilities TikTok returns.
-- Until the Direct Post client is audited, Quran Video labels Direct Post as private/Only you and the server enforces `SELF_ONLY`; it does not imply that a public post occurred. Draft uploads are labelled separately: they notify the creator in TikTok so they can edit and publish there.
-- Completed video bytes transfer directly from the browser to TikTok's returned `FILE_UPLOAD` URL in documented sequential chunks. The Quran Video server only handles OAuth, token refresh, creator-info, initialization, status, and cancellation requests; it does not store or proxy rendered media.
+- The OAuth callback exchanges the code and refreshes tokens server-side. Tokens are kept in an encrypted, HttpOnly, same-site connection cookie and are never returned to the browser application, URL, or logs. A failed or expired authorization clears the connection so the creator can reconnect cleanly.
+- Opening the dialog or connecting TikTok transfers no video. Quran Video queries Creator Info when rendering the connected posting form and again immediately before initialization. The creator nickname, privacy choices, interaction availability, and maximum duration come from TikTok's response.
+- Creators manually choose a returned privacy value and opt into each available interaction. The form also supports TikTok's required commercial-content disclosure and asks for explicit agreement to TikTok's Music Usage Confirmation before video transfer.
+- An unaudited Direct Post client is limited by TikTok to `SELF_ONLY` and private creator accounts, with a five-user/24-hour cap. Quran Video communicates that restriction and enforces `SELF_ONLY`; it does not claim public posting is available. Keep `TIKTOK_DIRECT_POST_AUDITED=false` until TikTok audit approval, then verify Creator Info exposes the appropriate choices before enabling the audited flag.
+- TikTok's Content Sharing Guidelines prohibit product logos, branding, links, and promotional watermarks in shared content. Quran Video therefore blocks Basic 720p exports that contain the Quran Video watermark. The source Basic blob stays downloadable and unchanged; a paid non-watermarked export is required for TikTok eligibility.
+- Completed MP4 bytes go directly from the browser to TikTok's returned `upload_url` in sequential documented chunks. The server handles only OAuth, token refresh, Creator Info, Direct Post initialization, and status; it does not store or proxy video bytes, which keeps the flow compatible with Netlify function limits.
+- A finished upload is not reported as published until TikTok status reaches `PUBLISH_COMPLETE`. The UI distinguishes uploading, processing, completion, and failure, while retaining the completed local export for download and retry.
+
+## Production verification
+
+1. Confirm the production callback shown above is registered verbatim in Login Kit and the three required credentials are present in Netlify.
+2. Connect a TikTok account and confirm the posted form identifies that creator, has only Creator Info privacy options, starts interaction checkboxes unchecked, and asks for final consent.
+3. With `TIKTOK_DIRECT_POST_AUDITED=false`, verify only `Only you` is offered and that the creator account is private.
+4. Post a paid, non-watermarked MP4. Confirm `FILE_UPLOAD` proceeds browser-to-TikTok, then wait for TikTok's processing status rather than treating byte upload as completion.
+5. Confirm Basic watermarked exports remain downloadable but cannot initialize a post. Test denied scope, expired connection, and upload failure; each must preserve the local export.
 
 ## Official references
 

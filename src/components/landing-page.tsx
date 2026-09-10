@@ -13,12 +13,12 @@ const features = [
   ["Read-so-far highlighting", "Guide viewers through each word as the recitation progresses."],
   ["Long-ayah handling", "Keep lengthy ayat clear with Quran-aware display splitting."],
   ["Visual subtitle editor", "Refine typography, placement, timing, and layout in one workspace."],
-  ["Local & YouTube import", "Start with media from your device or a supported YouTube link."],
+  ["Local media import", "Start with video or audio from your device."],
   ["Export up to 4K", "Render a finished video in 720p, 1080p, or 4K."],
 ] as const;
 
 const workflow = [
-  ["01", "Upload", "Bring in a video, an audio file, or a YouTube link."],
+  ["01", "Upload", "Bring in a video or audio file from your device."],
   ["02", "Quran detected", "Identify the passage and align canonical words to the recitation."],
   ["03", "Customize", "Tune styling, translation, word highlighting, timing, and layout."],
   ["04", "Export", "Choose 720p, 1080p, or 4K and download the finished video."],

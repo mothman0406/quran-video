@@ -54,13 +54,12 @@ test("service-role clients remain server-only and webhook stays on raw Node.js r
   assert.doesNotMatch(cloud, /SUPABASE_SERVICE_ROLE_KEY/);
 });
 
-test("cloud media stays browser-direct and production does not expose local yt-dlp controls", () => {
+test("cloud media stays browser-direct and production editor has no YouTube import action", () => {
   assert.match(cloud, /storage\.from\(PROJECT_MEDIA_BUCKET\)\.upload/);
   assert.match(cloud, /storage\.from\(PROJECT_MEDIA_BUCKET\)\.download/);
   assert.doesNotMatch(cloud, /\/api\/.*project-media/);
-  assert.match(editor, /const youtubeImportAvailable = process\.env\.NODE_ENV !== "production"/);
-  assert.match(workspace, /youtubeImportAvailable \? <>/);
-  assert.match(workspace, /YouTube import is available only in local development/);
+  assert.doesNotMatch(editor, /local-youtube-import|importYouTube|youtubeImport/iu);
+  assert.doesNotMatch(workspace, /YouTube URL|Import YouTube|youtubeImport|YouTube import is available only/iu);
 });
 
 test("production headers cover baseline browser hardening without a speculative CSP", () => {

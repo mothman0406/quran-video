@@ -38,7 +38,6 @@ import type { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage = "idle" | "preparing" | "detecting-speech" | "loading-model" | "transcribing" | "matching" | "captions" | "complete" | "error";
 type ExportState = { phase: ExportPhase; fraction: number; elapsedSeconds: number; estimatedRemainingSeconds?: number } | "complete" | "error" | null;
-type YouTubeImportStatus = "idle" | "validating" | "fetching-metadata" | "downloading" | "preparing-media" | "ready" | "failed";
 
 type EditorWorkspaceProps = {
   videoFile: File | null;
@@ -112,21 +111,12 @@ type EditorWorkspaceProps = {
   surah: number;
   startAyah: number;
   endAyah: number;
-  youtubeImportAvailable: boolean;
-  youtubeUrl: string;
-  youtubeMode: "video" | "audio";
-  youtubeImportStatus: YouTubeImportStatus;
-  youtubeImportError: string | null;
   selectedFormatDefinition: ReturnType<typeof projectFormatDefinition>;
   onProjectNameChange: (name: string) => void;
   onVideoSelect: (event: ChangeEvent<HTMLInputElement>) => void;
   onRelinkAsset: (assetId: string, event: ChangeEvent<HTMLInputElement>) => void;
   onActivateAsset: (assetId: string) => void;
   onRemoveAsset: (assetId: string) => void;
-  onYoutubeUrlChange: (value: string) => void;
-  onYoutubeModeChange: (value: "video" | "audio") => void;
-  onImportYouTube: () => void;
-  onCancelYouTubeImport: () => void;
   onLoadedMetadata: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onVideoTimeUpdate: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onMediaPlay: (event: SyntheticEvent<HTMLMediaElement>) => void;
@@ -251,7 +241,6 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const [billingReturn, setBillingReturn] = useState<"checkout" | "plan-update" | null>(null);
   const accountWrapRef = useRef<HTMLDivElement>(null);
   const [assetsExpanded, setAssetsExpanded] = useState(false);
-  const [youtubeChoicesOpen, setYoutubeChoicesOpen] = useState(false);
   const [timelineWidth, setTimelineWidth] = useState(600);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [rightCollapsed, setRightCollapsed] = useState(false);
@@ -276,8 +265,8 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     selectedObject, rightInspectorMode, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, playbackRate, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, session, accountEntitlements, onRefreshEntitlements, canUndo, canRedo, busy, localStyles, localStyleName, authOpen, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportPreflight, exportQuality, exportFormat, outputPlan, exportResult, exportIsStale, exportState, exportError, exportDiagnostics, tiktokCaption, errorMessage, onRetrySourceRestore, timingWarning,
-    showCorrection, surah, startAyah, endAyah, youtubeImportAvailable, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
-    onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onTogglePreviewPlayback, onSeekPreview, onVideoError, onSelectObject,
+    showCorrection, surah, startAyah, endAyah, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
+    onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onTogglePreviewPlayback, onSeekPreview, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown, onSetRightInspectorMode, onSelectMedia,
     onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onTimelinePointerEnd, onEdgeDown, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug, showBasmalahDiagnostics, onCopyBasmalahDiagnostics,
     onCorrectDetection, onToggleCorrection, onSurahChange, onStartAyahChange, onEndAyahChange, onClearVideo, onSaveProject, onUndo, onRedo, onHistoryTransactionStart, onHistoryTransactionCommit, onSaveToAccount, onOpenProjects,
@@ -513,18 +502,6 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
             {stage === "complete" && alignments.length > 0 && <button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onToggleCorrection}>Correct detection</button>}
             <button className="editor-text-button" type="button" onClick={onClearVideo}>Clear active source</button>
           </>}
-          <div className="editor-youtube-import" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setYoutubeChoicesOpen(false); }} onKeyDown={(event) => { if (event.key === "Escape") { setYoutubeChoicesOpen(false); (event.target as HTMLElement).blur(); } }}>
-            <SectionLabel>YouTube</SectionLabel>
-            {youtubeImportAvailable ? <>
-              <div className="editor-youtube-row"><input aria-label="YouTube URL" type="url" placeholder="Paste YouTube link…" value={youtubeUrl} disabled={!['idle', 'failed', 'ready'].includes(youtubeImportStatus)} onFocus={() => setYoutubeChoicesOpen(true)} onPointerDown={() => setYoutubeChoicesOpen(true)} onChange={(event) => onYoutubeUrlChange(event.target.value)} /><button className="editor-button editor-button-primary" type="button" disabled={!youtubeUrl.trim() || !['idle', 'failed', 'ready'].includes(youtubeImportStatus)} onClick={() => { setYoutubeChoicesOpen(false); onImportYouTube(); }}>Import</button></div>
-              {youtubeChoicesOpen && <div className="editor-youtube-choices" aria-label="YouTube import type"><button type="button" className={youtubeMode === "video" ? "is-active" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => onYoutubeModeChange("video")}>Video</button><button type="button" className={youtubeMode === "audio" ? "is-active" : ""} onPointerDown={(event) => event.preventDefault()} onClick={() => onYoutubeModeChange("audio")}>Audio only</button></div>}
-              {!['idle', 'failed', 'ready'].includes(youtubeImportStatus) && <div className="editor-youtube-progress" role="status"><span>{youtubeImportStatus === "validating" ? "Validating URL" : youtubeImportStatus === "fetching-metadata" ? "Fetching metadata" : youtubeImportStatus === "downloading" ? "Downloading" : "Preparing media"}…</span><button className="editor-text-button" type="button" onClick={onCancelYouTubeImport}>Cancel</button></div>}
-              {youtubeImportStatus === "ready" && <p className="editor-youtube-help">Added to Project Assets for this browser session.</p>}
-              {youtubeImportError && <p className="editor-alert">{youtubeImportError}</p>}
-              {youtubeImportStatus !== "ready" && <p className="editor-youtube-help">Imports are local and temporary.</p>}
-            </> : <p className="editor-youtube-help">YouTube import is available only in local development. Upload a media file to edit in this deployment.</p>}
-          </div>
-
           <div className="editor-divider" />
           <section className="editor-project-assets">
             <button className="editor-project-assets-toggle" type="button" aria-expanded={assetsExpanded} onClick={() => setAssetsExpanded((value) => !value)}><span>Project Assets <b>· {displayedAssets.length}</b></span><span aria-hidden="true">{assetsExpanded ? "⌄" : "›"}</span></button>
@@ -618,10 +595,10 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
               </select>
             </label>
             <label className="editor-toggle"><input checked={showSafeArea} type="checkbox" onChange={(event) => onSetShowSafeArea(event.target.checked)} /><span />Safe area guides</label>
-            <div className="editor-platform-preview"><SectionLabel>Platform preview</SectionLabel><Segmented label="Platform preview" value={platformPreview} options={[["none", "None"], ["tiktok", "TikTok"], ["instagram-reels", "Instagram Reels"], ["youtube-shorts", "YouTube Shorts"]]} onChange={(value) => onSetPlatformPreview(value as SocialPlatformId)} />
+            <div className="editor-platform-preview"><SectionLabel>Platform preview</SectionLabel><Segmented label="Platform preview" value={platformPreview} options={[["none", "None"], ["tiktok", "TikTok"], ["instagram-reels", "Instagram Reels"]]} onChange={(value) => onSetPlatformPreview(value as SocialPlatformId)} />
               {platformPreview !== "none" && projectFormat.preset !== "vertical" && <p className="editor-muted">Platform safe-zone guides are optimized for 9:16 video.</p>}
               {platformPreview !== "none" && <p className="editor-platform-guide-note">Approximate safe-zone guide · platform interfaces can change.</p>}
-              {contextualPlatformCollisions.length > 0 && <div className="editor-platform-warning" role="status"><strong>{contextualPlatformCollisions.map((collision) => `${collision.kind === "arabic" ? "Arabic" : collision.kind === "translation" ? "Translation" : "Transliteration"} may be covered by ${platformPreview === "instagram-reels" ? "Reels" : platformPreview === "youtube-shorts" ? "Shorts" : "TikTok"} ${collision.obstructionLabel}`).at(0)}</strong><button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onMoveToSafeArea}>Move to safe area</button></div>}
+              {contextualPlatformCollisions.length > 0 && <div className="editor-platform-warning" role="status"><strong>{contextualPlatformCollisions.map((collision) => `${collision.kind === "arabic" ? "Arabic" : collision.kind === "translation" ? "Translation" : "Transliteration"} may be covered by ${platformPreview === "instagram-reels" ? "Reels" : "TikTok"} ${collision.obstructionLabel}`).at(0)}</strong><button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onMoveToSafeArea}>Move to safe area</button></div>}
             </div>
             {selectedSegment ? <div className="editor-inspector-context"><SectionLabel>Selected subtitle</SectionLabel><strong>{captionSegmentLabel(selectedSegment)} · {objectLabel}</strong><p className="editor-muted">Its caption controls remain available in Subtitles.</p></div> : <div className="editor-inspector-context"><SectionLabel>Selected object</SectionLabel><strong>{mediaSource?.hasVideo ? "Video" : mediaSource ? "Audio" : "Canvas"}</strong><p className="editor-muted">Select caption text or a timeline caption to edit subtitle styling and timing.</p></div>}
           </div> : <>

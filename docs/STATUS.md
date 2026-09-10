@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Prepare TikTok production posting
+
+Complete:
+
+- Removed customer-facing YouTube import controls and related landing/guide copy. The editor now focuses on local media and existing project assets; historical local-only importer code remains isolated from the production editor bundle.
+- Audited the TikTok flow end-to-end: completed local export Blob → explicit Direct Post consent → Creator Info → Direct Post `FILE_UPLOAD` initialization → browser-direct sequential upload → TikTok processing status. Tokens remain server-only behind encrypted HttpOnly cookies, callback state is verified, tokens refresh before API calls, and expired authorization clears the protected connection.
+- Hardened the Direct Post UI for current TikTok requirements: fresh creator-driven identity/privacy/interaction controls, no preselected privacy or interaction options, commercial-content disclosure, explicit Music Usage Confirmation consent, unaudited `SELF_ONLY` enforcement, product-watermark rejection, and clear uploading/processing/completion/failure states. The completed local export stays downloadable through every TikTok failure.
+- Set the documented current production callback to `https://quran-autocaption.netlify.app/api/tiktok/oauth/callback`; production callback URLs must be HTTPS, static, query-free, and use the fixed callback path.
+- Updated `docs/TIKTOK_SETUP.md` with portal products, `video.publish`, Netlify variables, audit posture, and production verification. TikTok requires the remaining portal configuration and audit approval; no claim of public Direct Post availability is made before that approval.
+
+Verification: `npm run regression:quran` passes its production invariant probes (the optional real `quran-align`/EveryAyah benchmark remains unavailable in this workspace); `npm test` (353 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and reports TikTok's optional credentials as absent in this environment.
+
 ## Current milestone: Keep caption generation responsive
 
 Complete:

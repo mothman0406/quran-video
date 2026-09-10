@@ -175,8 +175,6 @@ type ExportState =
   | "complete"
   | "error"
   | null;
-type YouTubeImportStatus = "idle" | "validating" | "fetching-metadata" | "downloading" | "preparing-media" | "ready" | "failed";
-type YouTubeImportResponse = { sessionId: string; sourceUrl: string; fileName: string; mimeType: string; title?: string; durationMs?: number; width?: number; height?: number; hasVideo: boolean; mediaUrl: string };
 type AutomaticRecognitionRequest = { identity: string; file: File; sourceUrl: string | null; restoredCompletedRecognition: boolean };
 type EditorProjectHistoryState = {
   segments: CaptionSegment[];
@@ -200,17 +198,6 @@ type AuthorizedExportRequest = {
 
 function sameEditorProjectHistoryState(left: EditorProjectHistoryState, right: EditorProjectHistoryState) {
   return JSON.stringify(left) === JSON.stringify(right);
-}
-function validateYouTubeImportUrl(value: string): boolean {
-  if (/[^\x20-\x7e]/.test(value) || /[\r\n]/.test(value)) return false;
-  try {
-    const parsed = new URL(value.trim());
-    const host = parsed.hostname.toLowerCase().replace(/^www\./, "");
-    if (!(["youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"].includes(host)) || !["https:", "http:"].includes(parsed.protocol)) return false;
-    return host === "youtu.be" ? parsed.pathname.length > 1 : parsed.pathname === "/watch" ? Boolean(parsed.searchParams.get("v")) : /^\/(shorts|live|embed)\/[^/]+/.test(parsed.pathname);
-  } catch {
-    return false;
-  }
 }
 const busyStages: Stage[] = [
   "preparing",
@@ -252,7 +239,6 @@ type AlignmentDebug = {
 };
 
 export default function Home() {
-  const youtubeImportAvailable = process.env.NODE_ENV !== "production";
   const basmalahDiagnosticCaptureEnabled = typeof window !== "undefined" && basmalahDiagnosticsEnabled(window.location.search);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -281,10 +267,6 @@ export default function Home() {
   const [timelineTooltip, setTimelineTooltip] = useState<{ label: string; position: number } | null>(null);
   const [timelineViewport, setTimelineViewport] = useState<TimelineViewport>({ zoom: 1, visibleStartMs: 0, visibleEndMs: 0 });
   const [waveformData, setWaveformData] = useState<WaveformData | null>(null);
-  const [youtubeUrl, setYoutubeUrl] = useState("");
-  const [youtubeMode, setYoutubeMode] = useState<"video" | "audio">("video");
-  const [youtubeImportStatus, setYoutubeImportStatus] = useState<YouTubeImportStatus>("idle");
-  const [youtubeImportError, setYoutubeImportError] = useState<string | null>(null);
   const [segments, setSegments] = useState<CaptionSegment[]>([]);
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(
     null,
@@ -401,10 +383,7 @@ export default function Home() {
   const exportAbort = useRef<AbortController | null>(null);
   const completedExport = useRef<CompletedExport | null>(null);
   const exportStarting = useRef(false);
-  const youtubeImportAbort = useRef<AbortController | null>(null);
-  const youtubeImportSession = useRef<string | null>(null);
   const assetFiles = useRef(new Map<string, { file: File; source: MediaSource }>());
-  const assetYouTubeSessions = useRef(new Map<string, string>());
   const exportCoordinator = useRef(new ExportCoordinator());
   const exportPreflightOverride = useRef(new ExportPreflightOverride<AuthorizedExportRequest>());
   const playbackClock = useRef<MediaPlaybackClock | null>(null);
@@ -683,12 +662,8 @@ export default function Home() {
   );
   useEffect(() => () => {
     exportAbort.current?.abort();
-    youtubeImportAbort.current?.abort();
     const previous = completedExport.current;
     if (previous) URL.revokeObjectURL(previous.objectUrl);
-    for (const sessionId of assetYouTubeSessions.current.values()) {
-      void fetch(`/api/local-youtube-import?sessionId=${encodeURIComponent(sessionId)}`, { method: "DELETE" });
-    }
   }, []);
   useEffect(() => {
     const font = quranFontDefinitions[typography.quranStyle];
@@ -818,11 +793,6 @@ export default function Home() {
       /* Arabic remains available when translation enrichment fails. */
     }
   }
-  function releaseYouTubeImport(sessionId: string | null | undefined) {
-    if (!sessionId) return;
-    if (youtubeImportSession.current === sessionId) youtubeImportSession.current = null;
-    void fetch(`/api/local-youtube-import?sessionId=${encodeURIComponent(sessionId)}`, { method: "DELETE" }).catch(() => undefined);
-  }
   function loadSelectedSource(next: File, nextSource: MediaSource, options?: { preserveCaptions?: boolean; restoredCompletedRecognition?: boolean }) {
     exportAbort.current?.abort();
     clearCompletedExport();
@@ -897,11 +867,7 @@ export default function Home() {
     invalidateRecognitionForSourceChange();
     waveformGeneration.current += 1;
     if (videoUrl) URL.revokeObjectURL(videoUrl);
-    for (const sessionId of assetYouTubeSessions.current.values()) releaseYouTubeImport(sessionId);
-    assetYouTubeSessions.current.clear();
     assetFiles.current.clear();
-    setYoutubeImportStatus("idle");
-    setYoutubeImportError(null);
     setVideoFile(null);
     setVideoUrl(null);
     setVideoMetadata(null);
@@ -1122,7 +1088,6 @@ export default function Home() {
     setProjectAssets(project.projectAssets.map((asset) => asset.type === "text" ? asset : { ...asset, availability: "needs-relink" }));
     setActiveMediaAssetId(project.activeMediaAssetId);
     assetFiles.current.clear();
-    assetYouTubeSessions.current.clear();
     setPendingOpenProject(project);
     setProjectName(project.title);
     setProjectFormat(project.format);
@@ -1140,9 +1105,6 @@ export default function Home() {
     setSelectedSegmentId(null);
     setSelectedObject(null);
     setContent({});
-    if (project.sourceMedia?.origin === "youtube-import") {
-      setErrorMessage("This YouTube source was temporary. Re-import or relink it before editing; it will not download automatically.");
-    }
     cloudBaselineUpdatedAt.current = fromCloud ? project.updatedAt : null;
     savedSignature.current = JSON.stringify({
       projectName: project.title,
@@ -1182,9 +1144,6 @@ export default function Home() {
     )
       return;
     await repository.current.delete(project.id);
-    for (const asset of project.projectAssets) {
-      if (asset.sourceOrigin === "youtube-import" && asset.sourceSessionId) releaseYouTubeImport(asset.sourceSessionId);
-    }
     setProjects(await repository.current.list());
     if (savedProject?.id === project.id) resetEditorState();
   }
@@ -1242,8 +1201,6 @@ export default function Home() {
       setErrorMessage("Choose browser-supported video or audio to start a local editing session.");
       return;
     }
-    setYoutubeImportStatus("idle");
-    setYoutubeImportError(null);
     const assetId = crypto.randomUUID();
     const source = mediaSourceFromFile(next, mediaKindForFile(next)!, { assetId });
     assetFiles.current.set(assetId, { file: next, source });
@@ -1275,9 +1232,6 @@ export default function Home() {
   function removeProjectAsset(assetId: string) {
     const asset = projectAssets.find((candidate) => candidate.id === assetId);
     if (!asset || !window.confirm(`Remove “${asset.name}” from this project?`)) return;
-    const sessionId = assetYouTubeSessions.current.get(assetId);
-    if (sessionId) releaseYouTubeImport(sessionId);
-    assetYouTubeSessions.current.delete(assetId);
     assetFiles.current.delete(assetId);
     setProjectAssets((current) => current.filter((candidate) => candidate.id !== assetId));
     if (activeMediaAssetId === assetId) {
@@ -1286,59 +1240,6 @@ export default function Home() {
       if (videoUrl) URL.revokeObjectURL(videoUrl);
       setVideoFile(null); setVideoUrl(null); setVideoMetadata(null); setMediaSource(null); setMediaTrim(createMediaTrim(0)); setWaveformData(null); setTimelineViewport(createTimelineViewport(0));
     }
-  }
-  async function importYouTube() {
-    if (!["idle", "failed", "ready"].includes(youtubeImportStatus)) return;
-    const sessionId = crypto.randomUUID();
-    const controller = new AbortController();
-    youtubeImportAbort.current = controller;
-    setYoutubeImportError(null);
-    setYoutubeImportStatus("validating");
-    try {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      if (!validateYouTubeImportUrl(youtubeUrl)) throw new Error("Enter a youtube.com, youtu.be, or YouTube Shorts link.");
-      setYoutubeImportStatus("fetching-metadata");
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-      setYoutubeImportStatus("downloading");
-      const response = await fetch("/api/local-youtube-import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sessionId, url: youtubeUrl, mode: youtubeMode }),
-        signal: controller.signal,
-      });
-      const payload = await response.json() as YouTubeImportResponse & { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "Could not import this YouTube video.");
-      setYoutubeImportStatus("preparing-media");
-      const mediaResponse = await fetch(payload.mediaUrl, { signal: controller.signal });
-      if (!mediaResponse.ok) throw new Error("The temporary imported media is no longer available. Please import it again.");
-      const file = new File([await mediaResponse.blob()], payload.fileName, { type: payload.mimeType });
-      const assetId = crypto.randomUUID();
-      const nextSource = mediaSourceFromFile(file, payload.hasVideo ? "video" : "audio", {
-        assetId,
-        durationMs: payload.durationMs,
-        width: payload.width,
-        height: payload.height,
-        origin: "youtube-import",
-        sourceUrl: payload.sourceUrl,
-        displayName: payload.title,
-      });
-      youtubeImportSession.current = sessionId;
-      assetFiles.current.set(assetId, { file, source: nextSource });
-      assetYouTubeSessions.current.set(assetId, sessionId);
-      setProjectAssets((current) => [...current, projectAssetFromMediaSource(nextSource, assetId, new Date().toISOString(), sessionId)]);
-      setActiveMediaAssetId(assetId);
-      loadSelectedSource(file, nextSource);
-      setYoutubeImportStatus("ready");
-    } catch (error) {
-      releaseYouTubeImport(sessionId);
-      setYoutubeImportError(error instanceof DOMException && error.name === "AbortError" ? "YouTube import cancelled. Your current source was kept." : error instanceof Error ? error.message : "Could not import this YouTube video.");
-      setYoutubeImportStatus("failed");
-    } finally {
-      if (youtubeImportAbort.current === controller) youtubeImportAbort.current = null;
-    }
-  }
-  function cancelYouTubeImport() {
-    youtubeImportAbort.current?.abort();
   }
   function loadedVideoMetadata(event: SyntheticEvent<HTMLMediaElement>) {
     const target = event.currentTarget;
@@ -1750,8 +1651,6 @@ export default function Home() {
     setWaveformData(null);
     setTimelineViewport(createTimelineViewport(0));
     if (videoUrl) URL.revokeObjectURL(videoUrl);
-    setYoutubeImportStatus("idle");
-    setYoutubeImportError(null);
     setVideoFile(null);
     setVideoUrl(null);
     setVideoMetadata(null);
@@ -2721,21 +2620,12 @@ export default function Home() {
         surah={surah}
         startAyah={startAyah}
         endAyah={endAyah}
-        youtubeImportAvailable={youtubeImportAvailable}
-        youtubeUrl={youtubeUrl}
-        youtubeMode={youtubeMode}
-        youtubeImportStatus={youtubeImportStatus}
-        youtubeImportError={youtubeImportError}
         selectedFormatDefinition={selectedFormatDefinition}
         onProjectNameChange={setProjectName}
         onVideoSelect={selectVideo}
         onRelinkAsset={relinkProjectAsset}
         onActivateAsset={activateProjectAsset}
         onRemoveAsset={removeProjectAsset}
-        onYoutubeUrlChange={setYoutubeUrl}
-        onYoutubeModeChange={setYoutubeMode}
-        onImportYouTube={() => void importYouTube()}
-        onCancelYouTubeImport={cancelYouTubeImport}
         onLoadedMetadata={loadedVideoMetadata}
         onVideoTimeUpdate={updateTime}
         onMediaPlay={startPlaybackClock}

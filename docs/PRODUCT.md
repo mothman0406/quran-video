@@ -2,8 +2,7 @@
 
 ## Editor assets and timeline interaction
 
-The compact left sidebar exposes Media import, a contextual YouTube URL import
-mode selector, a collapsed Project Assets bin, and Canvas controls. Project
+The compact left sidebar exposes local Media import, a collapsed Project Assets bin, and Canvas controls. Project
 Assets lists imported project media and logical Quran text sources without
 turning caption segments into individual files. The desktop timeline is taller
 for waveform and timing inspection and supports pointer-anchored trackpad
@@ -35,4 +34,4 @@ V1 is Hafs only. Recognition, canonical content, rendering, accounts, billing, a
 
 ## Current media timeline
 
-The timeline is the shared time-navigation surface, in Text / Video / Audio order. Video sources populate both media rows without decoding or duplicating the source; audio-only sources leave Video empty and populate Audio. There is one non-destructive, persisted source-time trim range with linked Video/Audio handles for video sources and Audio handles for audio-only sources. Handle snapping uses the stationary playhead’s 8 CSS-pixel screen-space threshold; trimming never changes Quran caption timing or waveform data. Normal play/export use the selected range, while timeline scrubbing can still inspect the full source. YouTube import, cloud media saving, and multiple clips remain out of scope. Audio-only playback and recognition are supported; audio-only export is clearly unavailable for now.
+The timeline is the shared time-navigation surface, in Text / Video / Audio order. Video sources populate both media rows without decoding or duplicating the source; audio-only sources leave Video empty and populate Audio. There is one non-destructive, persisted source-time trim range with linked Video/Audio handles for video sources and Audio handles for audio-only sources. Handle snapping uses the stationary playhead’s 8 CSS-pixel screen-space threshold; trimming never changes Quran caption timing or waveform data. Normal play/export use the selected range, while timeline scrubbing can still inspect the full source. Production intentionally does not offer YouTube import; cloud media saving and multiple clips remain out of scope. Audio-only playback and recognition are supported; audio-only export is clearly unavailable for now.

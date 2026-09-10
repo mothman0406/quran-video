@@ -3,7 +3,7 @@ import { clearOAuthState, exchangeTikTokAuthorizationCode, setTikTokConnection, 
 
 function finishPopup(success: boolean, message?: string) {
   const payload = JSON.stringify({ type: "quran-video:tiktok-oauth", success, message }).replace(/[<>&]/gu, (character) => ({ "<": "\\u003c", ">": "\\u003e", "&": "\\u0026" })[character]!);
-  return `<!doctype html><html><body><script>window.opener?.postMessage(${payload}, window.location.origin);window.close();</script><p>${success ? "TikTok connected. You may close this window." : "TikTok connection failed. You may close this window."}</p></body></html>`;
+  return `<!doctype html><html><body><script>window.history.replaceState(null,"","/api/tiktok/oauth/callback");window.opener?.postMessage(${payload}, window.location.origin);window.close();</script><p>${success ? "TikTok connected. You may close this window." : "TikTok connection failed. You may close this window."}</p></body></html>`;
 }
 
 export async function GET(request: Request) {

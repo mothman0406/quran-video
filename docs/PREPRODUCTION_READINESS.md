@@ -11,7 +11,7 @@ Assessment date: 2026-09-08. This is a code and local-runtime readiness assessme
 | Recognition and timing | Regression invariants pass. The full fixed real-audio set measured 242/242 canonical words, starts median/p90 79/275ms, and transition-derived ends median/p90 92/461ms. |
 | Translation and highlighting | Canonical ownership, long-ayah pieces, reviewed translation fragments, ornaments, basmalah separation, and read-so-far highlighting pass deterministic coverage. |
 | Export and download | Export configuration, preflight, renderer contracts, completed-export retention, repeated download, replacement failure behavior, and quality/watermark mappings pass. |
-| TikTok boundary | Mock Direct/Draft flow, media limits, Basic-watermark block, deterministic social captions, OAuth-state handling, polling limits, and server-secret boundary pass. |
+| TikTok boundary | Direct Post flow, media limits, Basic-watermark block, deterministic social captions, OAuth-state handling, polling limits, and server-secret boundary pass. |
 | Security/configuration | Server-only TikTok routes and browser secret-boundary tests pass; no secrets were added. |
 | Quality gates | `npm test` (264 passing), TypeScript, lint, production build, route smoke checks, and diff check pass. |
 
@@ -20,8 +20,8 @@ Assessment date: 2026-09-08. This is a code and local-runtime readiness assessme
 - Use the checklist in `docs/FINAL_PREPRODUCTION_QA.md` with real video and audio-only fixtures: actual source containment, waveform, browser playback, pitch preservation, safe-zone rendering, 1080p/4K rendering, MP4 playback, and repeated browser download.
 - Verify landing layouts at 1440×900, 1366×768, 1024×768, 768px, 430×932, and 390×844, including reduced motion.
 - Retest retained historical continuous recordings for 6:74–77, 69:19–32, 93:1–5, 3:33–35, noisy Surah 74, and Al-Ma'arij; original recordings are intentionally not committed.
-- Verify local YouTube import only where `yt-dlp` is installed and a permitted test URL is available.
-- Run a live TikTok Sandbox/approved-flow check only with configured credentials; test credential absence, expired auth, failure/retry/cancel, Direct, and Draft.
+- Confirm the production editor offers only local media import and existing project assets; YouTube import is intentionally not offered.
+- Run a live TikTok Sandbox/approved-flow check only with configured credentials; test credential absence, expired auth, failure/retry/cancel, and Direct Post.
 
 ## PRODUCTION WORK REQUIRED
 

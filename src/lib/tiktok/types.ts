@@ -1,5 +1,3 @@
-export type TikTokPostMode = "direct" | "draft";
-
 export type TikTokCreatorInfo = {
   username: string;
   nickname: string;
@@ -51,12 +49,14 @@ export type TikTokConnectionState = {
 };
 
 export type TikTokInitRequest = {
-  mode: TikTokPostMode;
   title: string;
-  privacyLevel?: TikTokPrivacyLevel;
+  privacyLevel: TikTokPrivacyLevel;
   disableComment?: boolean;
   disableDuet?: boolean;
   disableStitch?: boolean;
+  brandContentToggle: boolean;
+  brandOrganicToggle: boolean;
+  userConsent: boolean;
   media: TikTokMediaDescriptor;
   upload: TikTokUploadPlan;
 };

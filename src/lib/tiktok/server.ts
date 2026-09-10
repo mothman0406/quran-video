@@ -26,11 +26,12 @@ function requireConfig() {
   const clientKey = process.env.TIKTOK_CLIENT_KEY;
   const clientSecret = process.env.TIKTOK_CLIENT_SECRET;
   const redirectUri = process.env.TIKTOK_REDIRECT_URI;
-  if (!clientKey || !clientSecret || !redirectUri) throw new TikTokServerError(503, "TikTok is not configured for this environment.");
+  if (!clientKey || !clientSecret || !redirectUri) throw new TikTokServerError(503, "TikTok posting is not available right now.");
   try {
     const parsed = new URL(redirectUri);
-    if (parsed.protocol !== "https:" && parsed.hostname !== "localhost" && parsed.hostname !== "127.0.0.1") throw new Error();
-  } catch { throw new TikTokServerError(503, "TIKTOK_REDIRECT_URI must be a registered absolute callback URL."); }
+    const localDevelopmentCallback = process.env.NODE_ENV !== "production" && (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") && parsed.protocol === "http:";
+    if ((!localDevelopmentCallback && parsed.protocol !== "https:") || parsed.pathname !== "/api/tiktok/oauth/callback" || parsed.search || parsed.hash || parsed.username || parsed.password) throw new Error();
+  } catch { throw new TikTokServerError(503, "TikTok posting is not available right now."); }
   return { clientKey, clientSecret, redirectUri };
 }
 
@@ -87,10 +88,15 @@ function storedToken(body: TokenResponse, previous?: StoredConnection): StoredCo
   return { accessToken: body.access_token, refreshToken: body.refresh_token, accessTokenExpiresAt: Date.now() + body.expires_in * 1000, refreshTokenExpiresAt: Date.now() + body.refresh_expires_in * 1000, openId: body.open_id, scopes: body.scope?.split(",").filter(Boolean) ?? previous?.scopes ?? [] };
 }
 
+function requireVideoPublishScope(connection: StoredConnection) {
+  if (!connection.scopes.includes("video.publish")) throw new TikTokServerError(401, "TikTok did not grant the required posting permission. Connect TikTok again and approve it to continue.");
+  return connection;
+}
+
 export async function exchangeTikTokAuthorizationCode(code: string) {
   const { clientKey, clientSecret, redirectUri } = requireConfig();
   const body = await tokenRequest(new URLSearchParams({ client_key: clientKey, client_secret: clientSecret, code, grant_type: "authorization_code", redirect_uri: redirectUri }));
-  return storedToken(body);
+  return requireVideoPublishScope(storedToken(body));
 }
 
 async function getStoredConnection(): Promise<StoredConnection | null> {
@@ -106,11 +112,12 @@ export async function connectionStateForRequest() {
 async function accessToken() {
   const connection = await getStoredConnection();
   if (!connection) throw new TikTokServerError(401, "Connect TikTok before posting.");
+  requireVideoPublishScope(connection);
   if (connection.accessTokenExpiresAt > Date.now() + 60_000) return { token: connection.accessToken, refreshed: null as StoredConnection | null };
   if (connection.refreshTokenExpiresAt <= Date.now()) throw new TikTokServerError(401, "Your TikTok authorization expired. Connect TikTok again.");
   const { clientKey, clientSecret } = requireConfig();
   const body = await tokenRequest(new URLSearchParams({ client_key: clientKey, client_secret: clientSecret, grant_type: "refresh_token", refresh_token: connection.refreshToken }));
-  const refreshed = storedToken(body, connection);
+  const refreshed = requireVideoPublishScope(storedToken(body, connection));
   return { token: refreshed.accessToken, refreshed };
 }
 
@@ -135,6 +142,9 @@ export async function creatorInfo() {
 }
 
 export async function initializeTikTokPost(request: TikTokInitRequest) {
+  if (!request.userConsent) throw new TikTokServerError(400, "Confirm that you agree to TikTok's posting terms before transferring this video.");
+  if (typeof request.title !== "string" || !request.media || !request.upload || typeof request.brandContentToggle !== "boolean" || typeof request.brandOrganicToggle !== "boolean") throw new TikTokServerError(400, "The TikTok posting request is incomplete.");
+  if (request.brandContentToggle && request.privacyLevel === "SELF_ONLY") throw new TikTokServerError(400, "TikTok does not allow paid partnership content to be posted privately.");
   const expectedUpload = createTikTokUploadPlan(request.media.fileSizeBytes);
   if (request.upload.chunkSize !== expectedUpload.chunkSize || request.upload.totalChunkCount !== expectedUpload.totalChunkCount) throw new TikTokServerError(400, "The TikTok upload chunk plan is invalid.");
   const errors = validateTikTokMedia(request.media);
@@ -142,11 +152,6 @@ export async function initializeTikTokPost(request: TikTokInitRequest) {
   if (request.title.length > 2200) throw new TikTokServerError(400, "TikTok captions are limited to 2,200 characters.");
   const config = tiktokConnectionState();
   const sourceInfo = { source: "FILE_UPLOAD", video_size: request.media.fileSizeBytes, chunk_size: request.upload.chunkSize, total_chunk_count: request.upload.totalChunkCount };
-  if (request.mode === "draft") {
-    const result = await apiRequest<{ publish_id?: string; upload_url?: string }>("/v2/post/publish/inbox/video/init/", { source_info: sourceInfo });
-    if (!result.data.publish_id || !result.data.upload_url) throw new TikTokServerError(502, "TikTok did not return an upload destination.");
-    return { initialization: { publishId: result.data.publish_id, uploadUrl: result.data.upload_url } satisfies TikTokPostInitialization, refreshed: result.refreshed };
-  }
   if (!request.privacyLevel) throw new TikTokServerError(400, "Select a TikTok privacy setting before posting.");
   // Re-query here after the explicit final action so the API request remains
   // constrained by the creator's current capabilities, not stale browser UI.
@@ -154,8 +159,9 @@ export async function initializeTikTokPost(request: TikTokInitRequest) {
   const creatorMediaErrors = validateTikTokMedia(request.media, latestCreator.creator.maxVideoPostDurationSeconds);
   if (creatorMediaErrors.length) throw new TikTokServerError(400, creatorMediaErrors[0]!);
   if (!latestCreator.creator.privacyLevelOptions.includes(request.privacyLevel)) throw new TikTokServerError(400, "That TikTok privacy setting is no longer available for this account.");
+  if (!config.directPostAudited && !latestCreator.creator.privacyLevelOptions.includes("SELF_ONLY")) throw new TikTokServerError(400, "TikTok did not provide an eligible private visibility setting for this unaudited Direct Post app.");
   const privacy = config.directPostAudited ? request.privacyLevel : "SELF_ONLY";
-  const result = await apiRequest<{ publish_id?: string; upload_url?: string }>("/v2/post/publish/video/init/", { post_info: { title: request.title || undefined, privacy_level: privacy, disable_comment: latestCreator.creator.commentDisabled || Boolean(request.disableComment), disable_duet: latestCreator.creator.duetDisabled || Boolean(request.disableDuet), disable_stitch: latestCreator.creator.stitchDisabled || Boolean(request.disableStitch) }, source_info: sourceInfo });
+  const result = await apiRequest<{ publish_id?: string; upload_url?: string }>("/v2/post/publish/video/init/", { post_info: { title: request.title || undefined, privacy_level: privacy, disable_comment: latestCreator.creator.commentDisabled || Boolean(request.disableComment), disable_duet: latestCreator.creator.duetDisabled || Boolean(request.disableDuet), disable_stitch: latestCreator.creator.stitchDisabled || Boolean(request.disableStitch), brand_content_toggle: request.brandContentToggle, brand_organic_toggle: request.brandOrganicToggle }, source_info: sourceInfo });
   if (!result.data.publish_id || !result.data.upload_url) throw new TikTokServerError(502, "TikTok did not return an upload destination.");
   return { initialization: { publishId: result.data.publish_id, uploadUrl: result.data.upload_url } satisfies TikTokPostInitialization, refreshed: result.refreshed };
 }
@@ -178,7 +184,7 @@ export async function createOAuthRedirect() {
   const url = new URL(AUTH_BASE);
   url.searchParams.set("client_key", clientKey);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", "video.publish,video.upload");
+  url.searchParams.set("scope", "video.publish");
   url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("state", state);
   return { state, url: url.toString() };
