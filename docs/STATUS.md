@@ -1,5 +1,15 @@
 # Status
 
+## Current milestone: Highlight final detected basmalah word
+
+Complete:
+
+- Corrected the shared read-so-far predicate to use an authoritative word onset. A word's acoustic end remains required only for current-word mode, while all caption segments remain half-open.
+- Added a realistic Uthmani basmalah regression fixture whose final forced-aligned word ends exactly at the prelude segment end. It verifies every canonical word is retained, the final word is unhighlighted before its real start, becomes read at that start, remains read through the segment, and clears at the exact half-open end.
+- Preserved the numberless `basmalah-prelude` representation (`verseKeys: []`), canonical Quran text, ordinary ayah final-word highlighting, and ayah-end ornaments. Preview, composed fullscreen preview, and export all use this same presentation path.
+
+Verification: `npm run regression:quran` passes its production invariant probes; its optional local real Quran alignment benchmark remains unavailable/failing in this workspace and its generated report was not retained. `npm test` (330 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and the configuration reminder for optional TikTok posting credentials.
+
 ## Current milestone: Restore fullscreen control availability
 
 Complete:

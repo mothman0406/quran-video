@@ -45,7 +45,7 @@ function alignedBasmalahSegment() {
         { canonicalWordIndex: 1, startMs: 1_000, endMs: 1_110 },
         { canonicalWordIndex: 2, startMs: 1_120, endMs: 1_230 },
         { canonicalWordIndex: 3, startMs: 1_240, endMs: 1_350 },
-        { canonicalWordIndex: 4, startMs: 1_360, endMs: 1_470 },
+        { canonicalWordIndex: 4, startMs: 1_360, endMs: 1_500 },
       ],
     },
   )[0]!;
@@ -132,7 +132,7 @@ test("a real forced-aligned basmalah uses the shared read-so-far word model with
   assert.equal(prelude.arabic, "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "the canonical basmalah text is unchanged");
   assert.equal(prelude.showVerseNumberAtEnd, false);
   assert.deepEqual(prelude.wordTimings?.map((timing) => [timing.canonicalWordIndex, timing.sourceWordStart, timing.sourceWordEnd, timing.startMs, timing.endMs]), [
-    [1, 0, 1, 1_000, 1_110], [2, 1, 2, 1_120, 1_230], [3, 2, 3, 1_240, 1_350], [4, 3, 4, 1_360, 1_470],
+    [1, 0, 1, 1_000, 1_110], [2, 1, 2, 1_120, 1_230], [3, 2, 3, 1_240, 1_350], [4, 3, 4, 1_360, 1_500],
   ]);
   const highlighted = (timeMs: number) => arabicCaptionPresentationWords(prelude, true, timeMs, "read-so-far")
     .filter((word) => word.highlighted)
@@ -140,6 +140,9 @@ test("a real forced-aligned basmalah uses the shared read-so-far word model with
   assert.deepEqual(highlighted(999), []);
   assert.deepEqual(highlighted(1_120), ["بِسْمِ", "اللَّهِ"]);
   assert.deepEqual(highlighted(1_355), ["بِسْمِ", "اللَّهِ", "الرَّحْمَٰنِ"]);
-  assert.deepEqual(highlighted(1_480), ["بِسْمِ", "اللَّهِ", "الرَّحْمَٰنِ", "الرَّحِيمِ"]);
-  assert.equal(arabicCaptionPresentationWords(prelude, true, 1_480, "read-so-far").some((word) => word.kind === "verse-number"), false);
+  assert.deepEqual(highlighted(1_359), ["بِسْمِ", "اللَّهِ", "الرَّحْمَٰنِ"]);
+  assert.deepEqual(highlighted(1_360), ["بِسْمِ", "اللَّهِ", "الرَّحْمَٰنِ", "الرَّحِيمِ"]);
+  assert.deepEqual(highlighted(1_499), ["بِسْمِ", "اللَّهِ", "الرَّحْمَٰنِ", "الرَّحِيمِ"], "the terminal word remains read until the half-open segment boundary");
+  assert.deepEqual(highlighted(1_500), [], "the prelude stays half-open at its real aligned end");
+  assert.equal(arabicCaptionPresentationWords(prelude, true, 1_499, "read-so-far").some((word) => word.kind === "verse-number"), false);
 });

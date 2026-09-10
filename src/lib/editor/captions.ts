@@ -125,10 +125,13 @@ export function isCaptionWordHighlighted(
   mode: WordHighlightMode,
 ): boolean {
   if (mode === "off" || !Number.isFinite(timeMs) || timeMs < segment.startMs || timeMs >= segment.endMs) return false;
-  if (!Number.isFinite(timing.startMs) || !Number.isFinite(timing.endMs) || timing.startMs >= timing.endMs) return false;
-  return mode === "current-word"
-    ? timeMs >= timing.startMs && timeMs < timing.endMs
-    : timeMs >= timing.startMs;
+  // Read-so-far records the authoritative onset, not an acoustic interval.
+  // In particular, the terminal aligned word may end exactly at the display
+  // segment boundary, so it must not need a later timestamp to become read.
+  if (!Number.isFinite(timing.startMs)) return false;
+  if (mode === "read-so-far") return timeMs >= timing.startMs;
+  if (!Number.isFinite(timing.endMs) || timing.startMs >= timing.endMs) return false;
+  return timeMs >= timing.startMs && timeMs < timing.endMs;
 }
 
 function colorWithOpacity(color: string, opacity: number): string {
