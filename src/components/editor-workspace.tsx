@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Maximize2, Minimize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent, type SyntheticEvent } from "react";
 import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "@/lib/editor/captions";
 import type { ProjectAsset, ProjectFormat, ProjectFormatPreset } from "@/lib/schemas/project";
@@ -562,12 +563,12 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
               <CaptionPreview currentTimeMs={currentTimeMs} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedSegmentId={selectedSegmentId} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} onCaptionBoundsChange={onCaptionBoundsChange} />
             </div>
             <div className="editor-player-controls" aria-label="Preview controls">
-              <button className="editor-player-button" type="button" data-player-control="playback" aria-label={isPreviewPlaying ? "Pause" : "Play"} title={isPreviewPlaying ? "Pause" : "Play"} onClick={onTogglePreviewPlayback}>{isPreviewPlaying ? "❚❚" : "▶"}</button>
+              <button className="editor-player-button" type="button" data-player-control="playback" aria-label={isPreviewPlaying ? "Pause" : "Play"} title={isPreviewPlaying ? "Pause" : "Play"} onClick={onTogglePreviewPlayback}>{isPreviewPlaying ? <Pause aria-hidden="true" size={16} strokeWidth={2.25} /> : <Play aria-hidden="true" size={16} strokeWidth={2.25} fill="currentColor" />}</button>
               <span className="editor-player-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(durationMs / 1000)}</span>
               <input className="editor-player-seek" data-player-control="seek" aria-label="Seek preview" title="Seek" type="range" min="0" max={Math.max(0, durationMs / 1000)} step="0.01" value={Math.min(Math.max(0, currentTimeMs / 1000), Math.max(0, durationMs / 1000))} disabled={durationMs <= 0} onChange={(event) => onSeekPreview(Number(event.currentTarget.value) * 1000)} />
-              <button className="editor-player-button" type="button" data-player-control="mute" aria-label={isPreviewMuted ? "Unmute" : "Mute"} title={isPreviewMuted ? "Unmute" : "Mute"} onClick={setPreviewMuted}>{isPreviewMuted ? "🔇" : "🔊"}</button>
+              <button className="editor-player-button" type="button" data-player-control="mute" aria-label={isPreviewMuted ? "Unmute" : "Mute"} title={isPreviewMuted ? "Unmute" : "Mute"} onClick={setPreviewMuted}>{isPreviewMuted ? <VolumeX aria-hidden="true" size={16} strokeWidth={2.25} /> : <Volume2 aria-hidden="true" size={16} strokeWidth={2.25} />}</button>
               <input className="editor-player-volume" data-player-control="volume" aria-label="Preview volume" title="Volume" type="range" min="0" max="1" step="0.05" value={previewVolume} onChange={(event) => setPreviewVolumeFromControl(Number(event.currentTarget.value))} />
-              {fullscreenSupported && <button className="editor-player-button" type="button" data-player-control="fullscreen" aria-label={isPreviewFullscreen ? "Exit fullscreen" : "Enter fullscreen"} title={isPreviewFullscreen ? "Exit fullscreen" : "Enter fullscreen"} onClick={togglePreviewFullscreen}>{isPreviewFullscreen ? "↙" : "⛶"}</button>}
+              {fullscreenSupported && <button className="editor-player-button" type="button" data-player-control="fullscreen" aria-label={isPreviewFullscreen ? "Exit fullscreen" : "Enter fullscreen"} title={isPreviewFullscreen ? "Exit fullscreen" : "Enter fullscreen"} onClick={togglePreviewFullscreen}>{isPreviewFullscreen ? <Minimize2 aria-hidden="true" size={16} strokeWidth={2.25} /> : <Maximize2 aria-hidden="true" size={16} strokeWidth={2.25} />}</button>}
               {fullscreenError && <span className="editor-playback-fullscreen-error" role="status">{fullscreenError}</span>}
             </div>
           </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}

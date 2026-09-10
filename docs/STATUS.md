@@ -1,5 +1,15 @@
 # Status
 
+## Current milestone: Make composed preview controls discoverable
+
+Complete:
+
+- Moved the Quran detection result, confidence, and other existing status messages from the absolute notice overlay into the editor flow between the composed preview controls and timeline.
+- Refined the single always-visible composed-preview control bar with familiar play/pause, mute/unmute, and enter/exit fullscreen icons while retaining elapsed/total time, seek, volume, and composed-only fullscreen behavior.
+- Kept fullscreen capability-gated: unsupported browsers display no disabled or duplicate fullscreen affordance.
+
+Verification: targeted fullscreen/player tests (11 passing), `npm test` (333 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes its production invariant probes; its optional local real Quran alignment benchmark remains unavailable/failing in this workspace, and its generated report was not retained. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and the optional TikTok posting credential reminder.
+
 ## Current milestone: Fix fullscreen UX regression
 
 Complete:

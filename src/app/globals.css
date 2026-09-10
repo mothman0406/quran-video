@@ -81,6 +81,9 @@
 .editor-player-controls { display:grid; width:min(100%,760px); grid-template-columns:auto auto minmax(72px,1fr) auto minmax(58px,96px) auto; align-items:center; gap:8px; border:1px solid #3a434e; border-radius:5px; background:#11161c; box-shadow:0 8px 20px rgba(0,0,0,.22); padding:5px 7px; }
 .editor-player-button { display:grid; width:28px; height:26px; place-items:center; border:0; border-radius:4px; background:transparent; color:#d5e2ef; cursor:pointer; font-size:13px; line-height:1; }.editor-player-button:hover { background:#2a3948; color:#fff; }.editor-player-time { color:#bed7ee; font-size:10px; font-variant-numeric:tabular-nums; white-space:nowrap; }.editor-player-time i { color:#697380; font-style:normal; padding:0 2px; }.editor-player-seek,.editor-player-volume { min-width:0; accent-color:#89bce5; }.editor-player-seek { width:100%; }.editor-player-volume { width:100%; }
 .editor-playback-fullscreen-error { color:#e3aaa5; font-size:10px; }
+.editor-player-controls { grid-template-columns:auto auto minmax(44px,1fr) auto minmax(42px,72px) auto; gap:7px; border-color:#3a4651; border-radius:7px; background:linear-gradient(180deg,#182029,#10161c); padding:5px 7px; }
+.editor-player-button { width:30px; height:30px; border-radius:5px; color:#d8e6f3; }.editor-player-button:hover { background:#2b3d4e; color:#fff; }.editor-player-button:active { background:#354d62; }.editor-player-seek,.editor-player-volume { accent-color:#8ec4ee; cursor:pointer; }.editor-player-seek:disabled { cursor:not-allowed; opacity:.45; }
+.editor-main-stage > .editor-canvas-well { order:0; }.editor-main-stage > .editor-notices { position:static; z-index:auto; display:grid; width:min(100%,760px); max-height:min(184px,30%); flex:0 1 auto; align-self:center; order:1; overflow:auto; padding:0 0 8px; }.editor-main-stage > .editor-timeline-panel { order:2; }
 .editor-fullscreen-preview:fullscreen,.editor-fullscreen-preview:-webkit-full-screen { display:grid; width:100vw; height:100vh; max-width:none; max-height:none; grid-template-rows:minmax(0,1fr) auto; align-items:center; justify-items:center; gap:12px; background:#050607; padding:16px; }
 .editor-fullscreen-preview:fullscreen .project-preview-canvas,.editor-fullscreen-preview:-webkit-full-screen .project-preview-canvas { max-width:none; max-height:calc(100dvh - 66px); }
 .editor-fullscreen-preview:fullscreen .project-preview-canvas[data-project-format="vertical"],.editor-fullscreen-preview:-webkit-full-screen .project-preview-canvas[data-project-format="vertical"] { width:min(100vw,calc((100dvh - 66px) * .5625)); }
@@ -186,7 +189,7 @@
 }
 
 @media (max-width:680px) {
-  .editor-timeline-panel { position:fixed; display:block; width:auto; }
+  .editor-timeline-panel { position:relative; display:flex; width:100%; }
 }
 
 /* Public landing page. Kept separate from the editor so the marketing route stays lightweight. */

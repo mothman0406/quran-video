@@ -97,12 +97,23 @@ test("the product-owned player exposes one fullscreen control and no native full
 test("the custom preview player retains familiar playback, seek, volume, and fullscreen controls", () => {
   assert.match(workspace, /data-player-control="playback"/);
   assert.match(workspace, /onClick=\{onTogglePreviewPlayback\}/);
+  assert.match(workspace, /<Play aria-hidden="true"/);
+  assert.match(workspace, /<Pause aria-hidden="true"/);
   assert.match(workspace, /data-player-control="seek"/);
   assert.match(workspace, /onChange=\{\(event\) => onSeekPreview\(Number\(event\.currentTarget\.value\) \* 1000\)\}/);
   assert.match(workspace, /data-player-control="mute"/);
   assert.match(workspace, /data-player-control="volume"/);
+  assert.match(workspace, /<Volume2 aria-hidden="true"/);
+  assert.match(workspace, /<VolumeX aria-hidden="true"/);
   assert.match(workspace, /onVolumeChange=\{syncPreviewVolume\}/);
   assert.match(workspace, /editor-player-controls/);
+});
+
+test("status is placed between the visible player controls and timeline without an overlay", () => {
+  assert.match(styles, /\.editor-main-stage > \.editor-notices \{ position:static;/);
+  assert.match(styles, /\.editor-main-stage > \.editor-timeline-panel \{ order:2;/);
+  assert.match(styles, /width:min\(100%,760px\); max-height:min\(184px,30%\);/);
+  assert.match(styles, /@media \(max-width:680px\) \{\n  \.editor-timeline-panel \{ position:relative; display:flex; width:100%; \}/);
 });
 
 test("fullscreen remains composed-only with mounted capability detection and centered project ratios", () => {
