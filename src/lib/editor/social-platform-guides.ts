@@ -3,7 +3,7 @@
  * change regularly, so these normalized canvas coordinates intentionally do
  * not attempt to reproduce any platform's UI pixel-for-pixel.
  */
-export type SocialPlatformId = "none" | "tiktok" | "instagram-reels" | "youtube-shorts";
+export type SocialPlatformId = "none" | "tiktok" | "instagram-reels";
 
 export type NormalizedRect = { x: number; y: number; width: number; height: number };
 
@@ -50,18 +50,6 @@ export const SOCIAL_PLATFORM_GUIDES: Record<Exclude<SocialPlatformId, "none">, S
       { id: "actions", label: "Reels controls", x: 0.79, y: 0.34, width: 0.19, height: 0.38 },
       { id: "profile-caption", label: "caption area", x: 0.04, y: 0.69, width: 0.72, height: 0.17 },
       { id: "bottom-controls", label: "bottom controls", x: 0, y: 0.88, width: 1, height: 0.12 },
-    ],
-  },
-  "youtube-shorts": {
-    id: "youtube-shorts",
-    name: "YouTube Shorts",
-    recommendedAspectRatio: vertical,
-    safeArea: { x: 0.07, y: 0.1, width: 0.73, height: 0.56 },
-    obstructionZones: [
-      { id: "top-controls", label: "upper controls", x: 0.055, y: 0.015, width: 0.88, height: 0.075 },
-      { id: "actions", label: "Shorts controls", x: 0.79, y: 0.3, width: 0.19, height: 0.45 },
-      { id: "channel-title", label: "channel and title", x: 0.04, y: 0.68, width: 0.72, height: 0.18 },
-      { id: "bottom-interface", label: "bottom interface", x: 0, y: 0.89, width: 1, height: 0.11 },
     ],
   },
 };

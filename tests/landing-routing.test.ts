@@ -32,7 +32,7 @@ test("marketing Quran captions resolve exactly from the canonical local corpus",
 
 test("editor home affordance routes back to the public landing page", () => {
   const workspace = readFileSync(fromRoot("src/components/editor-workspace.tsx"), "utf8");
-  assert.match(workspace, /<Link className="editor-brand" href="\/" aria-label="Quran Video home"/);
+  assert.match(workspace, /<Link className="editor-brand" href="\/" aria-label="Quran AutoCaption home"/);
 });
 
 test("global document scrolling is available to the landing page while the editor owns its viewport lock", () => {
@@ -54,7 +54,7 @@ test("landing uses an optimized first-party editor image without importing the e
   assert.match(landing, /import Image from "next\/image"/);
   assert.match(landing, /src="\/landing\/editor-demo\.png"/);
   assert.match(landing, /width=\{1649\} height=\{954\}/);
-  assert.match(landing, /Quran Video Editor showing a vertical recitation video/);
+  assert.match(landing, /Quran AutoCaption editor showing a vertical recitation video/);
   assert.doesNotMatch(imports, /recognition|fastconformer|EditorWorkspace/i);
   assert.ok(editorImage.length > 100_000, "editor screenshot should be a real high-detail static image");
 });

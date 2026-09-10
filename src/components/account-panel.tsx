@@ -15,7 +15,7 @@ function displayName(user: User): string {
     const value = metadata[key];
     if (typeof value === "string" && value.trim()) return value.trim();
   }
-  return user.email ?? "Quran Video member";
+  return user.email ?? "Quran AutoCaption member";
 }
 
 function avatarUrl(user: User): string | null {
@@ -123,8 +123,8 @@ export default function AccountPanel({ session, entitlements = accountEntitlemen
   return <div className="editor-auth-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="editor-auth-modal" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="auth-title" aria-describedby="auth-description">
       <button className="editor-auth-close" type="button" aria-label="Close sign in" onClick={onClose}>×</button>
-      <div className="editor-auth-mark" aria-hidden="true">۞</div><p className="editor-auth-brand">Quran Video</p>
-      <h2 id="auth-title">Welcome to Quran Video</h2><p id="auth-description">Save your work and export your videos.</p>
+      <div className="editor-auth-mark" aria-hidden="true">۞</div><p className="editor-auth-brand">Quran AutoCaption</p>
+      <h2 id="auth-title">Welcome to Quran AutoCaption</h2><p id="auth-description">Save your work and export your videos.</p>
       {!configured ? <p className="editor-auth-message editor-auth-error" role="alert">Authentication is not configured in this environment. Add the Supabase public URL and key to enable sign-in.</p> : <>
         <button className="editor-auth-google" type="button" disabled={startingGoogle || checkingEmail} onClick={() => void continueWithGoogle()}><span aria-hidden="true">G</span>{startingGoogle ? "Opening Google…" : "Continue with Google"}</button>
         <div className="editor-auth-divider"><span>or</span></div>

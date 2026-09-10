@@ -74,7 +74,7 @@ test("the sole caption renderer remains inside the fullscreen preview subtree", 
   const fullscreenStart = workspace.indexOf('ref={setFullscreenPreviewRef} className="editor-fullscreen-preview"');
   const canvasStart = workspace.indexOf('ref={previewRef} className={`project-preview-canvas', fullscreenStart);
   const captionRenderer = workspace.indexOf("<CaptionPreview", canvasStart);
-  const fullscreenEnd = workspace.indexOf("</div> : <label className=\"editor-empty-canvas\"", captionRenderer);
+  const fullscreenEnd = workspace.indexOf("</div> : <label className={`editor-empty-canvas", captionRenderer);
   assert.ok(fullscreenStart >= 0 && canvasStart > fullscreenStart && captionRenderer > canvasStart && fullscreenEnd > captionRenderer);
   assert.equal((workspace.match(/<CaptionPreview/g) ?? []).length, 1);
   assert.match(captions, /data-caption-arabic-text/);

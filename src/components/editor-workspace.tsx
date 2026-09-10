@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Maximize2, Minimize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { Maximize2, Minimize2, Pause, Play, Upload, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent, type SyntheticEvent } from "react";
 import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "@/lib/editor/captions";
 import type { ProjectAsset, ProjectFormat, ProjectFormatPreset } from "@/lib/schemas/project";
@@ -100,7 +100,6 @@ type EditorWorkspaceProps = {
   exportState: ExportState;
   exportError: string | null;
   exportDiagnostics: LocalExportDiagnostics | null;
-  tiktokCaption: string;
   errorMessage: string | null;
   onRetrySourceRestore: (() => void) | null;
   timingWarning: string | null;
@@ -114,6 +113,7 @@ type EditorWorkspaceProps = {
   selectedFormatDefinition: ReturnType<typeof projectFormatDefinition>;
   onProjectNameChange: (name: string) => void;
   onVideoSelect: (event: ChangeEvent<HTMLInputElement>) => void;
+  onVideoDrop: (file: File) => void;
   onRelinkAsset: (assetId: string, event: ChangeEvent<HTMLInputElement>) => void;
   onActivateAsset: (assetId: string) => void;
   onRemoveAsset: (assetId: string) => void;
@@ -256,6 +256,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
   const [previewVolume, setPreviewVolume] = useState(1);
   const [isPreviewMuted, setIsPreviewMuted] = useState(false);
+  const [isDraggingMedia, setIsDraggingMedia] = useState(false);
   const fullscreenPreviewRef = useRef<HTMLDivElement>(null);
   const timelineResizeStart = useRef<{ y: number; height: number } | null>(null);
   const panelResizeStart = useRef<{ panel: "left" | "right"; x: number; width: number } | null>(null);
@@ -264,9 +265,9 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     alignments, content, currentTimeMs, playbackClock, segments, selectedSegmentId, selectedSegment, selectedIndex,
     selectedObject, rightInspectorMode, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
     transitionSettings, playbackRate, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, session, accountEntitlements, onRefreshEntitlements, canUndo, canRedo, busy, localStyles, localStyleName, authOpen, availableBuiltInStyles, availableQuranStyles,
-    exportOpen, exportPreflight, exportQuality, exportFormat, outputPlan, exportResult, exportIsStale, exportState, exportError, exportDiagnostics, tiktokCaption, errorMessage, onRetrySourceRestore, timingWarning,
+    exportOpen, exportPreflight, exportQuality, exportFormat, outputPlan, exportResult, exportIsStale, exportState, exportError, exportDiagnostics, errorMessage, onRetrySourceRestore, timingWarning,
     showCorrection, surah, startAyah, endAyah, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
-    onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onTogglePreviewPlayback, onSeekPreview, onVideoError, onSelectObject,
+    onProjectNameChange, onVideoSelect, onVideoDrop, onRelinkAsset, onActivateAsset, onRemoveAsset, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onTogglePreviewPlayback, onSeekPreview, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown, onSetRightInspectorMode, onSelectMedia,
     onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onTimelinePointerEnd, onEdgeDown, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug, showBasmalahDiagnostics, onCopyBasmalahDiagnostics,
     onCorrectDetection, onToggleCorrection, onSurahChange, onStartAyahChange, onEndAyahChange, onClearVideo, onSaveProject, onUndo, onRedo, onHistoryTransactionStart, onHistoryTransactionCommit, onSaveToAccount, onOpenProjects,
@@ -474,7 +475,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
 
   return <div className={`editor-shell ${layoutResizing ? "is-resizing-layout" : ""}`} style={{ "--timeline-height": `${timelineCollapsed ? 38 : timelineHeight}px`, "--left-panel-width": `${leftPanelWidth}px`, "--right-panel-width": `${rightPanelWidth}px` } as CSSProperties}>
     <header className="editor-topbar">
-      <Link className="editor-brand" href="/" aria-label="Quran Video home"><span className="editor-brand-mark">۝</span><div><p>Quran Video</p><span>Recitation editor</span></div></Link>
+      <Link className="editor-brand" href="/" aria-label="Quran AutoCaption home"><span className="editor-brand-mark">۝</span><div><p>Quran AutoCaption</p><span>Recitation editor</span></div></Link>
       <div className="editor-project-title"><input aria-label="Project name" value={projectName} onChange={(event) => onProjectNameChange(event.target.value)} /><span>{videoFile?.name ?? "No local source"}</span></div>
       <div className="editor-top-actions">
         <div className="editor-format-switcher" aria-label="Project format">{(Object.keys(PROJECT_FORMATS) as ProjectFormatPreset[]).map((preset) => <button key={preset} type="button" className={projectFormat.preset === preset ? "is-active" : ""} onClick={() => onChangeFormat(preset)}>{preset === "vertical" ? "9:16" : preset === "landscape" ? "16:9" : "1:1"}</button>)}</div>
@@ -553,7 +554,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
               {fullscreenSupported && <button className="editor-player-button" type="button" data-player-control="fullscreen" aria-label={isPreviewFullscreen ? "Exit fullscreen" : "Enter fullscreen"} title={isPreviewFullscreen ? "Exit fullscreen" : "Enter fullscreen"} onClick={togglePreviewFullscreen}>{isPreviewFullscreen ? <Minimize2 aria-hidden="true" size={16} strokeWidth={2.25} /> : <Maximize2 aria-hidden="true" size={16} strokeWidth={2.25} />}</button>}
               {fullscreenError && <span className="editor-playback-fullscreen-error" role="status">{fullscreenError}</span>}
             </div>
-          </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
+          </div> : <label className={`editor-empty-canvas ${isDraggingMedia ? "is-dragging" : ""}`} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.querySelector<HTMLInputElement>("input")?.click(); } }} onDragEnter={(event) => { event.preventDefault(); setIsDraggingMedia(true); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setIsDraggingMedia(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingMedia(false); }} onDrop={(event) => { event.preventDefault(); setIsDraggingMedia(false); const file = event.dataTransfer.files.item(0); if (file) onVideoDrop(file); }}><span className="editor-upload-icon"><Upload aria-hidden="true" size={24} strokeWidth={1.8} /></span><strong>Upload your recitation</strong><p>Add a Quran recitation and we&apos;ll detect the verses, sync the captions, and prepare them for editing.</p><b>Drop your recitation here</b><small>or click to choose a file</small><em>MP4, MOV, MP3, WAV, M4A · Up to 500 MB</em><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
         </div>
         {videoUrl && <div className="editor-timeline-panel"><button className="editor-timeline-resize" type="button" aria-label="Resize timeline" title="Drag to resize · double-click to reset" onPointerDown={onTimelineResizeDown} onPointerMove={onTimelineResizeMove} onPointerUp={onTimelineResizeUp} onDoubleClick={() => setTimelineHeight(WORKSPACE_LAYOUT_DEFAULTS.timelineHeight)} /><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><div className="editor-timeline-controls"><button type="button" aria-label={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} title={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} onClick={toggleTimeline}>{timelineCollapsed ? "↑" : "↓"}</button><button type="button" aria-label="Zoom out timeline" title="Zoom out" onClick={() => onTimelineZoom(timelineViewport.zoom / 2)}>−</button><input aria-label="Timeline zoom" title="Timeline zoom" type="range" min="1" max="128" step="1" value={timelineViewport.zoom} onChange={(event) => onTimelineZoom(Number(event.target.value))} /><button type="button" aria-label="Zoom in timeline" title="Zoom in" onClick={() => onTimelineZoom(timelineViewport.zoom * 2)}>+</button><button type="button" title="Fit the full project in the timeline" onClick={() => onTimelineZoom(1)}>Fit</button><button type="button" title="Reset media trim" onClick={onResetMediaTrim}>Reset trim</button></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
           <div className="editor-timeline-labels">{tracks.map((track) => <span className="editor-track-label" key={track.kind}>{track.label}</span>)}</div>
@@ -575,7 +576,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
           {timingWarning && <div className="editor-notice">{timingWarning}</div>}
           {showCorrection && <div className="editor-correction"><SectionLabel>Choose the Quran passage</SectionLabel><div><select aria-label="Surah" className="editor-select" value={surah} onChange={(event) => onSurahChange(Number(event.target.value))}><option value={0} disabled>Choose a Surah</option>{hafsSurahs.map((item) => <option key={item.number} value={item.number}>Surah {item.number} · {item.name}</option>)}</select><input aria-label="First ayah" type="number" min="1" value={startAyah} onChange={(event) => onStartAyahChange(Number(event.target.value))} /><input aria-label="Last ayah" type="number" min="1" value={endAyah} onChange={(event) => onEndAyahChange(Number(event.target.value))} /><button className="editor-button editor-button-primary" type="button" onClick={onCorrectDetection}>Use range</button></div></div>}
           {errorMessage && <div className="editor-notice editor-notice-error"><span>{errorMessage}</span>{(onRetrySourceRestore || videoFile) && <button className="editor-text-button" type="button" onClick={onRetrySourceRestore ?? onDetect}>Try again</button>}{videoFile && <button className="editor-text-button" type="button" onClick={onToggleCorrection}>Correct detection</button>}</div>}
-          {exportResult && exportState !== "error" ? <div className="editor-export-complete" role="status"><div><strong>✓ Export complete</strong><span>{exportQualityPreset(exportResult.quality).label} · {exportQualityPreset(exportResult.quality).resolutionLabel} · {exportResult.watermarkRequired ? "Watermark included" : "No watermark"}</span><span>{exportResult.width} × {exportResult.height} · {exportResult.mimeType.split(";")[0]?.replace("video/", "").toUpperCase()} · {playbackRateLabel(exportResult.playbackRate)} · {formatFileSize(exportResult.fileSizeBytes)}</span>{exportIsStale && <small>Project changed since this export.</small>}</div><div className="editor-export-complete-actions"><button className="editor-button editor-button-accent" type="button" onClick={onDownloadExport}>Download video</button><TikTokPosting exported={exportResult} generatedCaption={tiktokCaption} onExportStandardVersion={() => { onSetExportQuality("standard"); onExportOpen(); }} /><button className="editor-button editor-button-quiet" type="button" disabled={Boolean(exportState && typeof exportState === "object")} onClick={onExportOpen}>Export another version</button></div></div> : null}
+          {exportResult && exportState !== "error" ? <div className="editor-export-complete" role="status"><div><strong>✓ Export complete</strong><span>{exportQualityPreset(exportResult.quality).label} · {exportQualityPreset(exportResult.quality).resolutionLabel} · {exportResult.watermarkRequired ? "Watermark included" : "No watermark"}</span><span>{exportResult.width} × {exportResult.height} · {exportResult.mimeType.split(";")[0]?.replace("video/", "").toUpperCase()} · {playbackRateLabel(exportResult.playbackRate)} · {formatFileSize(exportResult.fileSizeBytes)}</span>{exportIsStale && <small>Project changed since this export.</small>}</div><div className="editor-export-complete-actions"><button className="editor-button editor-button-accent" type="button" onClick={onDownloadExport}>Download video</button><TikTokPosting /><button className="editor-button editor-button-quiet" type="button" disabled={Boolean(exportState && typeof exportState === "object")} onClick={onExportOpen}>Export another version</button></div></div> : null}
           {exportState && exportState !== "complete" && <div className="editor-notice"><strong>{exportState === "error" ? "Export stopped" : `Exporting · ${exportState.phase}`}</strong><span>{exportError ?? "Source media is processed locally."}</span></div>}
         </div>}
       </section>

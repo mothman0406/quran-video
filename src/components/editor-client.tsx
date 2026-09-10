@@ -142,7 +142,7 @@ import type { Session } from "@supabase/supabase-js";
 import { accountEntitlementsForPlan, canExportQuality, defaultExportQualityForPlan, getCustomStyleLimit, isBuiltInStyleAvailable, isFontAvailable, type AccountEntitlements, type ExportAuthorization } from "@/lib/entitlements";
 import { authorizeAccountExport, getAccountEntitlements } from "@/lib/entitlements/client";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
-import { clampMediaTrim, clampTimelineViewport, createMediaTrim, createTimelineViewport, mediaKindForFile, mediaSourceFromFile, panTimelineViewport, pinchTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, snapCaptionBoundaryToPlayhead, timelineContentPosition, viewportPositionToTime, zoomTimelineViewport, type MediaSource, type MediaTrim, type TimelineViewport } from "@/lib/editor/media";
+import { clampMediaTrim, clampTimelineViewport, createMediaTrim, createTimelineViewport, mediaFileError, mediaKindForFile, mediaSourceFromFile, panTimelineViewport, pinchTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, snapCaptionBoundaryToPlayhead, timelineContentPosition, viewportPositionToTime, zoomTimelineViewport, type MediaSource, type MediaTrim, type TimelineViewport } from "@/lib/editor/media";
 import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 import { waveformPeaksFromPcm, type WaveformData } from "@/lib/editor/waveform";
 import { projectAssetFromMediaSource } from "@/lib/editor/project-assets";
@@ -150,7 +150,6 @@ import { clearCaptionSelection, rightInspectorModeForSelection, selectCaptionLay
 import { EditorHistory } from "@/lib/editor/history";
 import { DEFAULT_SOCIAL_PLATFORM_PREVIEW, moveRectToSafeArea, platformCaptionCollisions, socialPlatformGuide, type CaptionCanvasBounds, type SocialPlatformId } from "@/lib/editor/social-platform-guides";
 import { applyPlaybackRate, DEFAULT_PLAYBACK_RATE, resolvePlaybackRate, type PlaybackRate } from "@/lib/editor/playback-rate";
-import { createTikTokCaption } from "@/lib/tiktok/caption";
 import { cloudProjectName, quranProjectMetadata } from "@/lib/cloud-projects";
 import { beginTimelineScrub, endTimelineScrub, isActiveTimelineScrubMove, type TimelineScrubSession } from "@/lib/editor/timeline-scrub";
 
@@ -1194,11 +1193,11 @@ export default function Home() {
       if (job === waveformGeneration.current) setWaveformData(null);
     }
   }
-  function selectVideo(event: ChangeEvent<HTMLInputElement>) {
-    const next = event.target.files?.[0];
+  function selectMediaFile(next: File | undefined) {
     if (!next) return;
-    if (!mediaKindForFile(next)) {
-      setErrorMessage("Choose browser-supported video or audio to start a local editing session.");
+    const validationError = mediaFileError(next);
+    if (validationError) {
+      setErrorMessage(validationError);
       return;
     }
     const assetId = crypto.randomUUID();
@@ -1207,6 +1206,10 @@ export default function Home() {
     setProjectAssets((current) => [...current, projectAssetFromMediaSource(source, assetId)]);
     setActiveMediaAssetId(assetId);
     loadSelectedSource(next, source);
+  }
+  function selectVideo(event: ChangeEvent<HTMLInputElement>) {
+    selectMediaFile(event.target.files?.[0]);
+    event.currentTarget.value = "";
   }
   function relinkProjectAsset(assetId: string, event: ChangeEvent<HTMLInputElement>) {
     const next = event.target.files?.[0];
@@ -2144,7 +2147,6 @@ export default function Home() {
     () => platformCaptionCollisions(platformPreview, captionCanvasBounds),
     [captionCanvasBounds, platformPreview],
   );
-  const tiktokCaption = useMemo(() => createTikTokCaption(segments, content), [content, segments]);
   const handleCaptionBoundsChange = useCallback((next: CaptionCanvasBounds[]) => {
     setCaptionCanvasBounds((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next);
   }, []);
@@ -2609,7 +2611,6 @@ export default function Home() {
         exportState={exportState}
         exportError={exportError}
         exportDiagnostics={exportDiagnostics}
-        tiktokCaption={tiktokCaption}
         errorMessage={errorMessage}
         onRetrySourceRestore={cloudSourceRestoreRetry ? retryCloudSourceRestore : null}
         timingWarning={timingWarning}
@@ -2623,6 +2624,7 @@ export default function Home() {
         selectedFormatDefinition={selectedFormatDefinition}
         onProjectNameChange={setProjectName}
         onVideoSelect={selectVideo}
+        onVideoDrop={selectMediaFile}
         onRelinkAsset={relinkProjectAsset}
         onActivateAsset={activateProjectAsset}
         onRemoveAsset={removeProjectAsset}
@@ -2722,7 +2724,7 @@ export default function Home() {
         <header className="flex items-center justify-between border-b border-[#d8d5cc] pb-5">
           <div>
             <p className="font-serif text-lg font-semibold text-[#173c32]">
-              Quran Video
+              Quran AutoCaption
             </p>
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7a8179]">
               Recitation editor
@@ -4218,7 +4220,7 @@ export default function Home() {
         <div className="editor-auth-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !cloudSaveStatus?.startsWith("Uploading")) setCloudSaveOpen(false); }}>
           <div className="editor-auth-modal cloud-save-modal" role="dialog" aria-modal="true" aria-labelledby="save-project-title">
             <button className="editor-auth-close" type="button" aria-label="Close save project" onClick={() => setCloudSaveOpen(false)}>×</button>
-            <p className="editor-auth-brand">Quran Video</p><h2 id="save-project-title">Save project</h2>
+            <p className="editor-auth-brand">Quran AutoCaption</p><h2 id="save-project-title">Save project</h2>
             <p id="save-project-description">Save this editable project privately to your account.</p>
             <label htmlFor="cloud-project-name">Project name</label>
             <input id="cloud-project-name" maxLength={200} value={cloudSaveName} onChange={(event) => setCloudSaveName(event.target.value)} disabled={Boolean(cloudSaveStatus?.startsWith("Uploading") || cloudSaveStatus?.startsWith("Saving"))} />

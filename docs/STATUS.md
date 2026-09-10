@@ -1,6 +1,17 @@
 # Status
 
-## Current milestone: Prepare TikTok production posting
+## Current milestone: Simplify media and sharing UI
+
+Complete:
+
+- Removed every customer-facing YouTube surface, including the editor’s historical Shorts safe-area preview. The isolated local-development importer remains unreachable from normal UI.
+- Replaced the completed-export TikTok action with a static, non-interactive **Post to TikTok · Coming soon** marker. It mounts no OAuth, posting, upload, or API client code; Download video remains available.
+- Reworked the no-media canvas into the Quran AutoCaption upload state: **Upload your recitation**, Quran-specific supporting copy, keyboard picker, drag/drop hover state, accepted-format metadata, and a shared enforced 500 MB local-file limit. Once a source loads, the compact Media panel and existing detection/correction controls return.
+- Updated customer-facing product names to Quran AutoCaption.
+
+Verification: `npm run regression:quran` passes production invariant probes (the optional real `quran-align`/EveryAyah benchmark remains unavailable in this workspace); `npm test`, `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass.
+
+## Previous milestone: Prepare TikTok production posting
 
 Complete:
 

@@ -57,7 +57,7 @@ function FinishedVideoExample({ example, arabic, asset }: { example: (typeof LAN
 }
 
 function EditorScreenshot({ priority = false, className = "" }: { priority?: boolean; className?: string }) {
-  return <Image className={className} src="/landing/editor-demo.png" alt="Quran Video Editor showing a vertical recitation video, synchronized Quran captions, timeline, waveform, and subtitle controls." width={1649} height={954} priority={priority} sizes="(max-width: 600px) 100vw, (max-width: 1180px) calc(100vw - 48px), 1180px" />;
+  return <Image className={className} src="/landing/editor-demo.png" alt="Quran AutoCaption editor showing a vertical recitation video, synchronized Quran captions, timeline, waveform, and subtitle controls." width={1649} height={954} priority={priority} sizes="(max-width: 600px) 100vw, (max-width: 1180px) calc(100vw - 48px), 1180px" />;
 }
 
 export default function LandingPage({ demos, showcaseAssets }: LandingPageProps) {
@@ -66,7 +66,7 @@ export default function LandingPage({ demos, showcaseAssets }: LandingPageProps)
 
   return <main className="landing-page">
     <header className="landing-header">
-      <Link className="landing-brand" href="/" aria-label="Quran Video home"><span>۝</span><b>Quran Video</b></Link>
+      <Link className="landing-brand" href="/" aria-label="Quran AutoCaption home"><span>۝</span><b>Quran AutoCaption</b></Link>
       <nav className="landing-nav" aria-label="Main navigation"><a href="#how-it-works">How it works</a><a href="#features">Features</a></nav>
       <Link className="landing-header-cta" href="/editor">Start creating <span aria-hidden="true">↗</span></Link>
     </header>
@@ -112,7 +112,7 @@ export default function LandingPage({ demos, showcaseAssets }: LandingPageProps)
 
     <section className="landing-section landing-compare" aria-labelledby="compare-title">
       <div className="landing-section-heading"><p className="landing-eyebrow">Why Quran-aware matters</p><h2 id="compare-title">More context at every caption decision.</h2></div>
-      <div className="landing-compare-table" role="table" aria-label="Generic captioning compared with Quran-aware editing"><div className="landing-compare-row landing-compare-head" role="row"><span role="columnheader">Workflow</span><span role="columnheader">Generic caption editor</span><span role="columnheader">Quran Video</span></div>{comparisons.map(([label, generic, quran]) => <div className="landing-compare-row" role="row" key={label}><b role="rowheader">{label}</b><span role="cell">{generic}</span><span role="cell">{quran}</span></div>)}</div>
+      <div className="landing-compare-table" role="table" aria-label="Generic captioning compared with Quran-aware editing"><div className="landing-compare-row landing-compare-head" role="row"><span role="columnheader">Workflow</span><span role="columnheader">Generic caption editor</span><span role="columnheader">Quran AutoCaption</span></div>{comparisons.map(([label, generic, quran]) => <div className="landing-compare-row" role="row" key={label}><b role="rowheader">{label}</b><span role="cell">{generic}</span><span role="cell">{quran}</span></div>)}</div>
     </section>
 
     <section className="landing-section landing-showcase" aria-labelledby="showcase-title">
@@ -122,6 +122,6 @@ export default function LandingPage({ demos, showcaseAssets }: LandingPageProps)
 
     <section className="landing-final-cta" aria-labelledby="final-title"><p className="landing-eyebrow">Ready when you are</p><h2 id="final-title">Turn your recitation into a finished Quran video.</h2><p>No sign-up required to start.</p><Link className="landing-primary-cta" href="/editor">Start creating free <span aria-hidden="true">→</span></Link></section>
 
-    <footer className="landing-footer"><Link className="landing-brand" href="/"><span>۝</span><b>Quran Video</b></Link><p>© {year} Quran Video</p><p>Built for Quran recitation.</p></footer>
+    <footer className="landing-footer"><Link className="landing-brand" href="/"><span>۝</span><b>Quran AutoCaption</b></Link><p>© {year} Quran AutoCaption</p><p>Built for Quran recitation.</p></footer>
   </main>;
 }
