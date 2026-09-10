@@ -105,6 +105,29 @@ export class CaptionGenerationProgressController {
     this.value = null;
     return this.value;
   }
+
+  snapshot() { return this.value; }
+}
+
+/** Coalesces visual-only updates without changing the authoritative job state. */
+export class CaptionGenerationProgressCoalescer {
+  private last: CaptionGenerationProgress | null = null;
+  private lastPublishedAt = 0;
+
+  reset() { this.last = null; this.lastPublishedAt = 0; }
+
+  shouldPublish(next: CaptionGenerationProgress | null, now = performance.now()) {
+    if (!next) return false;
+    const previous = this.last;
+    const phaseChanged = previous?.phase !== next.phase;
+    const meaningfulAdvance = !previous || next.progress - previous.progress >= 0.01;
+    const elapsed = now - this.lastPublishedAt >= 250;
+    const terminal = next.phase === "complete" || next.phase === "failed" || next.phase === "manual-correction";
+    if (!phaseChanged && !meaningfulAdvance && !elapsed && !terminal) return false;
+    this.last = next;
+    this.lastPublishedAt = now;
+    return true;
+  }
 }
 
 export function captionGenerationProgressForDownload(

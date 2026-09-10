@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Keep caption generation responsive
+
+Complete:
+
+- Moved PCM resampling, 10 ms audio analysis, Silero VAD, FastConformer WASM initialization/inference, Quran-wide candidate retrieval/reranking, and CTC forced alignment to one dedicated, reusable browser worker. Browser `AudioContext` decode stays on the UI thread because it is window-only; its copied channel buffers transfer once to the worker.
+- Kept the pinned FastConformer ONNX Runtime WASM backend and model/cache policy intact. The WebGPU-capable Whisper fallback remains a secondary window-thread path because worker WebGPU availability is not reliable across the supported browser set; it receives a PCM copy only when the FastConformer evidence gate requires fallback.
+- Added explicit job IDs/phases, source invalidation, FIFO worker work ownership, stale-completion rejection, bounded visual progress updates, and visibility reconciliation. Hidden/visible events neither cancel, reset, destroy, nor start recognition; a fully suspended page may pause and safely continue when scheduled again.
+- Added lifecycle, transferable-buffer, worker reuse/failure, and progress-coalescing regression coverage. Manual DevTools check: start detection, switch tabs during VAD/identification/alignment, return, and confirm the same progress/job completes without a second model load.
+
+Verification: `npm test` (349 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes production invariant probes; its optional real `quran-align`/EveryAyah benchmark remains unavailable/failing in this workspace, and its generated report was not retained. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and optional TikTok configuration reminder.
+
 ## Current milestone: Frame-responsive basmalah preview highlighting
 
 Complete:

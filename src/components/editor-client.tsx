@@ -17,9 +17,12 @@ import { comparePassageIdentification } from "@/lib/recognition/fastconformer-id
 import { decideFastConformerPassage } from "@/lib/recognition/passage-decision";
 import {
   CaptionGenerationProgressController,
+  CaptionGenerationProgressCoalescer,
   captionGenerationProgressForDownload,
   type CaptionGenerationProgress,
 } from "@/lib/editor/caption-generation-progress";
+import { RecognitionJobController } from "@/lib/editor/recognition-job";
+import { LocalRecognitionWorkerClient, RecognitionJobCancelledError } from "@/lib/recognition/recognition-worker-client";
 import {
   recognitionToVerseAlignments,
   AutomaticRecognitionController,
@@ -362,6 +365,9 @@ export default function Home() {
   const pendingCloudSourceRestore = useRef<CloudProjectRecord | null>(null);
   const localSafetyProjectId = useRef<string | null>(null);
   const generation = useRef(0);
+  const recognitionJobs = useRef(new RecognitionJobController());
+  const recognitionWorker = useRef<LocalRecognitionWorkerClient | null>(null);
+  const recognitionProgressCoalescer = useRef(new CaptionGenerationProgressCoalescer());
   const automaticRecognition = useRef(new AutomaticRecognitionController());
   const captionProgress = useRef(new CaptionGenerationProgressController());
   const alignmentDebug = useRef<AlignmentDebug | null>(null);
@@ -427,6 +433,13 @@ export default function Home() {
     if (previous) URL.revokeObjectURL(previous.objectUrl);
     completedExport.current = next;
     setExportResult(next);
+  }
+  function invalidateRecognitionForSourceChange() {
+    recognitionWorker.current?.cancel(generation.current);
+    recognitionJobs.current.invalidateSource();
+    generation.current += 1;
+    captionProgress.current.reset();
+    recognitionProgressCoalescer.current.reset();
   }
   projectHistoryStateRef.current = {
     segments,
@@ -545,6 +558,21 @@ export default function Home() {
       setSupport(localTranscriptionSupport()),
     );
     return () => cancelAnimationFrame(frame);
+  }, []);
+  useEffect(() => {
+    const reconcileRecognitionVisibility = () => {
+      // Visibility never cancels, recreates, or restarts work. This only puts
+      // the latest imperative progress back into React after a hidden tab.
+      recognitionJobs.current.reconcileVisibility();
+      const current = captionProgress.current.snapshot();
+      if (current) setProgress(current);
+    };
+    document.addEventListener("visibilitychange", reconcileRecognitionVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", reconcileRecognitionVisibility);
+      recognitionWorker.current?.terminate();
+      recognitionWorker.current = null;
+    };
   }, []);
   useEffect(() => {
     const frame = requestAnimationFrame(() =>
@@ -798,8 +826,7 @@ export default function Home() {
   function loadSelectedSource(next: File, nextSource: MediaSource, options?: { preserveCaptions?: boolean; restoredCompletedRecognition?: boolean }) {
     exportAbort.current?.abort();
     clearCompletedExport();
-    generation.current += 1;
-    captionProgress.current.reset();
+    invalidateRecognitionForSourceChange();
     const waveformJob = ++waveformGeneration.current;
     setWaveformData(null);
     if (videoUrl) URL.revokeObjectURL(videoUrl);
@@ -867,8 +894,7 @@ export default function Home() {
     exportAbort.current?.abort();
     clearCompletedExport();
     setProjectFormatExplicitlyChosen(false);
-    generation.current += 1;
-    captionProgress.current.reset();
+    invalidateRecognitionForSourceChange();
     waveformGeneration.current += 1;
     if (videoUrl) URL.revokeObjectURL(videoUrl);
     for (const sessionId of assetYouTubeSessions.current.values()) releaseYouTubeImport(sessionId);
@@ -1255,6 +1281,7 @@ export default function Home() {
     assetFiles.current.delete(assetId);
     setProjectAssets((current) => current.filter((candidate) => candidate.id !== assetId));
     if (activeMediaAssetId === assetId) {
+      invalidateRecognitionForSourceChange();
       setActiveMediaAssetId(null);
       if (videoUrl) URL.revokeObjectURL(videoUrl);
       setVideoFile(null); setVideoUrl(null); setVideoMetadata(null); setMediaSource(null); setMediaTrim(createMediaTrim(0)); setWaveformData(null); setTimelineViewport(createTimelineViewport(0));
@@ -1352,7 +1379,11 @@ export default function Home() {
     const sourceFile = request?.file ?? videoFile;
     const sourceUrl = request?.sourceUrl ?? videoUrl;
     if (!sourceFile || !support?.supported || busyStages.includes(stage)) return;
-    const job = ++generation.current;
+    const sourceIdentity = `${sourceFile.name}:${sourceFile.size}:${sourceFile.lastModified}`;
+    const ownership = recognitionJobs.current.start(sourceIdentity, true);
+    if (!ownership) return;
+    const job = ownership.id;
+    generation.current = job;
     setErrorMessage(null);
     setProgress(null);
     setAlignments([]);
@@ -1360,6 +1391,7 @@ export default function Home() {
     basmalahDiagnosticsPrelude.current = null;
     setContent({});
     setStage("preparing");
+    recognitionProgressCoalescer.current.reset();
     setProgress(captionProgress.current.start(job));
     const startedAt = performance.now();
     const reportProgress = (
@@ -1368,12 +1400,12 @@ export default function Home() {
       detail?: string,
     ) => {
       const next = captionProgress.current.report(job, phase, fraction, detail);
-      if (next) setProgress(next);
+      if (next && recognitionProgressCoalescer.current.shouldPublish(next)) setProgress(next);
     };
     const reportFastConformerProgress = (next: FastConformerProgress) => {
       if (next.phase === "downloading-model") {
         const update = captionGenerationProgressForDownload(captionProgress.current, job, next.bytesLoaded, next.bytesTotal);
-        if (update) setProgress(update);
+        if (update && recognitionProgressCoalescer.current.shouldPublish(update)) setProgress(update);
         return;
       }
       if (next.phase === "identifying-passage") {
@@ -1383,32 +1415,26 @@ export default function Home() {
       reportProgress("aligning-words", next.step === "forced-alignment" ? 0.5 : 0);
     };
     try {
-      const { localWhisperTranscriber } =
-        await import("@/lib/recognition/local-whisper");
-      const prepared = await localWhisperTranscriber.transcribe(
-        sourceFile,
-        (next) => {
-          if (job !== generation.current) return;
-          if (next.phase === "decoding") {
-            reportProgress("preparing-media");
-            setStage("preparing");
-          } else if (next.phase === "detecting-speech") {
-            reportProgress("analyzing-speech");
-            setStage("detecting-speech");
-          } else if (next.phase === "loading-model") {
-            setStage("loading-model");
-          } else {
-            setStage("transcribing");
-          }
-        },
-        { analysisRunId: crypto.randomUUID(), sourceIdentity: `${sourceFile.name}:${sourceFile.size}:${sourceFile.lastModified}`, sourceObjectUrl: sourceUrl, deferWhisper: true },
-      );
+      const { decodeAudioChannels } = await import("@/lib/recognition/local-audio-decode");
+      reportProgress("preparing-media");
+      const decoded = await decodeAudioChannels(sourceFile);
       if (job !== generation.current) return;
+      setStage("detecting-speech");
+      recognitionJobs.current.update(job, "processing");
+      reportProgress("analyzing-speech");
+      const worker = recognitionWorker.current ?? (recognitionWorker.current = new LocalRecognitionWorkerClient());
+      const workerPrepared = await worker.prepare(job, decoded.sampleRate, decoded.frameCount, decoded.channelBuffers);
+      if (!workerPrepared.speechRegions.length) throw new Error("No credible human speech was detected in this recording, so Quran captions were not timed from background audio.");
+      const prepared = {
+        run: { analysisRunId: crypto.randomUUID(), sourceIdentity, sourceObjectUrl: sourceUrl, sourceDurationMs: workerPrepared.durationMs, sampleRate: 16_000, pcmIdentity: crypto.randomUUID() },
+        chunks: [], rawTranscript: "", backend: "wasm" as const, timestampMode: "chunk-fallback" as const,
+        timestampValidation: { asrWordCount: 0, timestampedWordCount: 0, zeroDurationCount: 0, rangeMs: null },
+        modelLoadMs: 0, transcriptionMs: 0, durationMs: workerPrepared.durationMs,
+        audioAnalysis: workerPrepared.audioAnalysis, speechRegions: workerPrepared.speechRegions,
+      };
       setStage("matching");
       reportProgress("identifying-passage");
-      const fastConformerIdentification = prepared.runFastConformerIdentification
-        ? await prepared.runFastConformerIdentification(reportFastConformerProgress)
-        : null;
+      const fastConformerIdentification = await worker.identify(job, reportFastConformerProgress);
       if (job !== generation.current) return;
       const fastConformerSpan = canonicalSpanFromFastConformerIdentification(fastConformerIdentification?.canonicalSpan ?? null);
       const fastConformerDecision = decideFastConformerPassage(fastConformerIdentification, fastConformerSpan);
@@ -1416,7 +1442,15 @@ export default function Home() {
       // not pay Whisper's model/inference cost after accepted FC evidence.
       const runWhisperComparison = process.env.NODE_ENV !== "production";
       const result = !fastConformerDecision.accepted || runWhisperComparison
-        ? (await prepared.runWhisperFallback?.()) ?? prepared
+        ? await (async () => {
+          const { transcribePreparedPcm } = await import("@/lib/recognition/local-whisper");
+          setStage("loading-model");
+          const audio = await worker.copyPcm(job);
+          return transcribePreparedPcm(audio, prepared.audioAnalysis, prepared.speechRegions, prepared.run, (next) => {
+            if (job !== generation.current) return;
+            setStage(next.phase === "loading-model" ? "loading-model" : "transcribing");
+          });
+        })()
         : prepared;
       if (job !== generation.current) return;
       const primaryTranscript = createPrimaryTranscript(result.chunks, result.timestampMode);
@@ -1450,8 +1484,9 @@ export default function Home() {
       const speechEndMs = result.speechRegions.at(-1)?.endMs ?? result.audioAnalysis.durationMs;
       const alignmentMatches = selectedCanonicalSpan?.coveredVerseKeys.map((verseKey) => ({ verseKey, startMs: speechStartMs, endMs: speechEndMs })) ?? [];
       reportProgress("aligning-words");
-      const fastConformerAlignment = alignmentMatches.length && result.runFastConformer
-        ? await result.runFastConformer(hafsVerses.filter((verse) => selectedCanonicalSpan!.coveredVerseKeys.includes(verse.verseKey)), alignmentMatches, reportFastConformerProgress)
+      recognitionJobs.current.update(job, "aligning");
+      const fastConformerAlignment = alignmentMatches.length
+        ? await worker.align(job, hafsVerses.filter((verse) => selectedCanonicalSpan!.coveredVerseKeys.includes(verse.verseKey)), alignmentMatches, prepared.run.analysisRunId, reportFastConformerProgress)
         : null;
       const analysis = useFastConformer
         ? analyzeTranscript(primaryTranscript, { audioAnalysis: result.audioAnalysis, speechRegions: result.speechRegions, fastConformerResult: fastConformerAlignment, passageOverride: { canonicalSpan: fastConformerSpan, passageSource: "fastconformer-quran" } })
@@ -1627,6 +1662,7 @@ export default function Home() {
       await loadCanonical(keys, job);
       await loadTranslations(keys, job);
       if (job === generation.current) {
+        recognitionJobs.current.update(job, "finalizing");
         reportProgress("finalizing", 1);
         if (process.env.NODE_ENV !== "production") {
           console.debug("Caption generation timing", {
@@ -1639,17 +1675,22 @@ export default function Home() {
         }
         setProgress(captionProgress.current.complete(job));
         setStage("complete");
+        recognitionJobs.current.update(job, "completed");
       }
     } catch (caught) {
       if (job === generation.current) {
+        if (caught instanceof RecognitionJobCancelledError) return;
         setProgress(captionProgress.current.fail(job));
         setStage("error");
+        recognitionJobs.current.update(job, "failed");
         setErrorMessage(
           caught instanceof Error
             ? caught.message
             : "Local recognition failed. Try again.",
         );
       }
+    } finally {
+      recognitionWorker.current?.release(job);
     }
   }
   useEffect(() => {
@@ -1704,8 +1745,7 @@ export default function Home() {
   function clearVideo() {
     exportAbort.current?.abort();
     clearCompletedExport();
-    generation.current += 1;
-    captionProgress.current.reset();
+    invalidateRecognitionForSourceChange();
     waveformGeneration.current += 1;
     setWaveformData(null);
     setTimelineViewport(createTimelineViewport(0));
@@ -1748,7 +1788,11 @@ export default function Home() {
       setErrorMessage("Enter a valid surah and ayah range.");
       return;
     }
-    const job = ++generation.current;
+    const ownership = recognitionJobs.current.start(`manual:${videoFile?.name ?? "source"}:${videoFile?.size ?? 0}`, true);
+    if (!ownership) return;
+    const job = ownership.id;
+    generation.current = job;
+    recognitionProgressCoalescer.current.reset();
     setProgress(captionProgress.current.start(job));
     setProgress(captionProgress.current.report(job, "building-captions"));
     const rangeStart = alignments[0]?.startMs ?? 0;
@@ -1795,12 +1839,14 @@ export default function Home() {
       if (job === generation.current) {
         setProgress(captionProgress.current.complete(job));
         setStage("complete");
+        recognitionJobs.current.update(job, "completed");
         setShowCorrection(false);
       }
     } catch {
       if (job === generation.current) {
         setProgress(captionProgress.current.fail(job));
         setStage("error");
+        recognitionJobs.current.update(job, "failed");
         setErrorMessage("Canonical captions could not be loaded locally.");
       }
     }

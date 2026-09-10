@@ -117,7 +117,9 @@ export async function detectLocalSpeechRegions(
   audio: Float32Array,
   sampleRate: number,
 ): Promise<VadSpeechRegion[]> {
-  if (typeof window === "undefined") throw new Error("Local speech activity detection can only run in a browser.");
+  // Dedicated workers have no `window`, but retain the browser fetch/WASM APIs
+  // used by this local-only runtime. Server execution has no caller here.
+  if (typeof globalThis === "undefined") throw new Error("Local speech activity detection can only run in a browser.");
   if (!audio.length) return [];
 
   const runtime = await getVadRuntime();

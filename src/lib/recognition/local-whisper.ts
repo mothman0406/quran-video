@@ -205,6 +205,81 @@ export function splitPcmAudio(audio: Float32Array, sampleRate = TARGET_SAMPLE_RA
   return chunks;
 }
 
+/**
+ * WebGPU-capable secondary fallback. FastConformer/VAD work has already run in
+ * the worker; this deliberately remains on the window because WebGPU worker
+ * support is not consistent across the browsers we support.
+ */
+export async function transcribePreparedPcm(
+  audio: Float32Array,
+  audioAnalysis: LocalTranscriptionResult["audioAnalysis"],
+  speechRegions: LocalTranscriptionResult["speechRegions"],
+  run: LocalTranscriptionResult["run"],
+  onProgress?: (progress: TranscriptionProgress) => void,
+): Promise<LocalTranscriptionResult> {
+  const startedAt = performance.now();
+  const loadingStartedAt = performance.now();
+  const { transcriber, backend } = await createPipeline(supportsWebGpu(), onProgress);
+  const modelLoadMs = Math.round(performance.now() - loadingStartedAt);
+  const audioChunks = splitPcmAudio(audio);
+  const transcriptionStartedAt = performance.now();
+
+  async function runTranscription(timestampMode: TimestampMode) {
+    const transcriptChunks: LocalTranscriptionResult["chunks"] = [];
+    const returnedUnits: TimestampedUnit[] = [];
+    for (const [index, chunk] of audioChunks.entries()) {
+      onProgress?.({ phase: "transcribing", message: `Transcribing local audio chunk ${index + 1} of ${audioChunks.length}…`, completed: index, total: audioChunks.length });
+      const output = await transcriber(chunk.audio, { language: "arabic", task: "transcribe", return_timestamps: timestampMode === "word" ? "word" : true });
+      const timestamped = output.chunks ?? (output.text ? [{ text: output.text, timestamp: [0, chunk.audio.length / TARGET_SAMPLE_RATE] as [number, number] }] : []);
+      for (const item of timestamped) {
+        const midpoint = (item.timestamp[0] + item.timestamp[1]) / 2;
+        if (midpoint < chunk.trimBeforeSeconds) continue;
+        const text = item.text.trim();
+        if (!text) continue;
+        const startMs = Math.round((chunk.offsetSeconds + item.timestamp[0]) * 1_000);
+        const endMs = Math.round((chunk.offsetSeconds + item.timestamp[1]) * 1_000);
+        returnedUnits.push({ text, timestamp: [startMs / 1_000, endMs / 1_000] });
+        transcriptChunks.push({ text, startMs, endMs, words: timestampMode === "word" ? [{ text, startMs, endMs }] : undefined });
+      }
+    }
+    const stitched = stitchTimestampedChunks(transcriptChunks);
+    return {
+      chunks: stitched,
+      returnedUnits: timestampMode === "word"
+        ? stitched.flatMap((item) => item.words ?? []).map((word) => ({ text: word.text, timestamp: [word.startMs / 1_000, word.endMs / 1_000] as [number, number] }))
+        : returnedUnits,
+    };
+  }
+
+  const initialAttempt = await withTimestampFallback(() => runTranscription("word"), () => runTranscription("chunk-fallback"));
+  let timestampMode = initialAttempt.timestampMode;
+  let fallbackReason = initialAttempt.fallbackReason;
+  let transcription = initialAttempt.value;
+  let validation = validateWordTimestamps(transcription.returnedUnits, run.sourceDurationMs);
+  if (timestampMode === "word" && !validation.valid) {
+    timestampMode = "chunk-fallback";
+    fallbackReason = validation.reason;
+    transcription = await runTranscription("chunk-fallback");
+  }
+  if (timestampMode === "chunk-fallback") {
+    validation = { valid: true, diagnostics: { asrWordCount: transcription.chunks.reduce((count, chunk) => count + chunk.text.split(/\s+/).filter(Boolean).length, 0), timestampedWordCount: 0, zeroDurationCount: 0, rangeMs: null, fallbackReason }, reason: undefined };
+  }
+  onProgress?.({ phase: "transcribing", message: "Local transcription complete.", completed: audioChunks.length, total: audioChunks.length });
+  return {
+    run,
+    chunks: transcription.chunks,
+    rawTranscript: transcription.chunks.map((chunk) => chunk.text).join(" "),
+    backend,
+    timestampMode,
+    timestampValidation: validation.diagnostics,
+    modelLoadMs,
+    transcriptionMs: Math.round(performance.now() - transcriptionStartedAt),
+    durationMs: Math.round(performance.now() - startedAt),
+    audioAnalysis,
+    speechRegions,
+  };
+}
+
 export const localWhisperTranscriber: RecognitionTranscriber = {
   async transcribe(source, onProgress, requestedRun) {
     if (typeof window === "undefined") {

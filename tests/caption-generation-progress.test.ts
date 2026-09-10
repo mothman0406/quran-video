@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   CaptionGenerationProgressController,
+  CaptionGenerationProgressCoalescer,
   captionGenerationProgressForDownload,
 } from "../src/lib/editor/caption-generation-progress.ts";
 
@@ -64,4 +65,13 @@ test("progress reporting does not mutate Quran result data", () => {
   progress.start(1);
   progress.report(1, "aligning-words", 0.5);
   assert.deepEqual(quranResult, { verseKey: "70:1", words: ["سَأَلَ", "سَائِلٌ"] });
+});
+
+test("visual progress is bounded while phase changes remain immediate", () => {
+  const coalescer = new CaptionGenerationProgressCoalescer();
+  const first = { phase: "downloading-model" as const, progress: 0.2, label: "Downloading Quran recognition model…" };
+  assert.equal(coalescer.shouldPublish(first, 0), true);
+  assert.equal(coalescer.shouldPublish({ ...first, progress: 0.201 }, 20), false);
+  assert.equal(coalescer.shouldPublish({ ...first, progress: 0.215 }, 20), true);
+  assert.equal(coalescer.shouldPublish({ phase: "identifying-passage", progress: 0.211, label: "Identifying the Surah and ayat…" }, 21), true);
 });
