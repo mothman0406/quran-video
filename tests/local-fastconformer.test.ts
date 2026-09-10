@@ -79,6 +79,7 @@ test("FastConformer constructs complete 93:1–5 targets from the real pinned Ti
   assert.deepEqual(first.slice(0, 5).map((token) => [token.tokenId, token.owner, token.canonicalWordIndex]), [
     [351, "optional-prelude", undefined], [7, "optional-prelude", undefined], [59, "optional-prelude", undefined], [982, "optional-prelude", undefined], [986, "optional-prelude", undefined],
   ]);
+  assert.deepEqual(first.slice(0, 5).map((token) => token.optionalPreludeWordIndex), [1, 1, 2, 3, 4]);
   assert.deepEqual(first.slice(5).map((token) => [token.tokenId, token.owner, token.canonicalWordIndex]), [
     [63, "canonical", 1], [47, "canonical", 1], [29, "canonical", 1], [2, "canonical", 1],
   ]);

@@ -21,6 +21,11 @@ export type CtcTargetToken = {
   /** Required for canonical tokens; omitted for an optional non-Quran prelude. */
   globalWordIndex?: number;
   owner?: "canonical" | "optional-prelude";
+  /**
+   * Present only when the optional-prelude target can be losslessly mapped to
+   * its canonical display words. It never grants the prelude ayah ownership.
+   */
+  optionalPreludeWordIndex?: number;
 };
 
 export type CtcRepeat = {
@@ -87,6 +92,8 @@ export type CtcForcedAlignmentResult = {
   normalizedPathScore?: number;
   firstCanonicalTokenFrame?: number;
   optionalPreludeTiming?: { startMs: number; endMs: number };
+  /** Available only when every optional-prelude display word has real CTC frames. */
+  optionalPreludeWords?: readonly { wordIndex: number; startMs: number; endMs: number }[];
   /** Free CTC decode captured before any canonical target is forced through
    * the trellis. It is diagnostic evidence for whether forced timing is safe. */
   greedyDecode?: {
@@ -276,10 +283,16 @@ export function forceAlignCtc(
   if (occurrenceFrames.size !== expanded.tokens.length) return { status: "failed", reason: "At least one canonical CTC token received no acoustic frame.", canonicalWords, targetTokens: tokens, words: [], verses: [], pauses: [], audibleRepetitions: [], frameCount: logits.frames, frameDurationMs: 0 };
   const byWord = new Map<number, Array<{ frame: number; score: number; repeated: boolean }>>();
   const preludeFrames: number[] = [];
+  const preludeFramesByWord = new Map<number, number[]>();
   for (const [tokenIndex, frames] of occurrenceFrames) {
     const token = expanded.tokens[tokenIndex]!;
     if (token.owner === "optional-prelude") {
       preludeFrames.push(...frames);
+      if (token.optionalPreludeWordIndex !== undefined) {
+        const wordFrames = preludeFramesByWord.get(token.optionalPreludeWordIndex) ?? [];
+        wordFrames.push(...frames);
+        preludeFramesByWord.set(token.optionalPreludeWordIndex, wordFrames);
+      }
       continue;
     }
     if (token.globalWordIndex === undefined) throw new Error("Canonical CTC token has no canonical word owner.");
@@ -329,7 +342,20 @@ export function forceAlignCtc(
     startMs: msAtFrame(Math.min(...preludeFrames), logits.frames, options.startMs, options.endMs),
     endMs: msAtFrame(Math.max(...preludeFrames) + 1, logits.frames, options.startMs, options.endMs),
   } : undefined;
-  return { status: "complete", canonicalWords, targetTokens: tokens, words, verses, pauses, audibleRepetitions, frameCount: logits.frames, frameDurationMs: Number(((options.endMs - options.startMs) / Math.max(1, logits.frames)).toFixed(4)), normalizedPathScore: Number((path.score / logits.frames).toFixed(6)), firstCanonicalTokenFrame, optionalPreludeTiming, performance: { viterbiMs: Math.round(performance.now() - startedAt) } };
+  const optionalPreludeWordIndexes = [...preludeFramesByWord.keys()].sort((left, right) => left - right);
+  const optionalPreludeWords = optionalPreludeWordIndexes.length
+    && optionalPreludeWordIndexes.every((wordIndex, index) => wordIndex === index + 1)
+    && tokens.filter((token) => token.owner === "optional-prelude").every((token) => token.optionalPreludeWordIndex !== undefined)
+    ? optionalPreludeWordIndexes.map((wordIndex) => {
+      const frames = preludeFramesByWord.get(wordIndex)!;
+      return {
+        wordIndex,
+        startMs: msAtFrame(Math.min(...frames), logits.frames, options.startMs, options.endMs),
+        endMs: msAtFrame(Math.max(...frames) + 1, logits.frames, options.startMs, options.endMs),
+      };
+    })
+    : undefined;
+  return { status: "complete", canonicalWords, targetTokens: tokens, words, verses, pauses, audibleRepetitions, frameCount: logits.frames, frameDurationMs: Number(((options.endMs - options.startMs) / Math.max(1, logits.frames)).toFixed(4)), normalizedPathScore: Number((path.score / logits.frames).toFixed(6)), firstCanonicalTokenFrame, optionalPreludeTiming, ...(optionalPreludeWords ? { optionalPreludeWords } : {}), performance: { viterbiMs: Math.round(performance.now() - startedAt) } };
 }
 
 /** Builds complete display words from the fixed identified verse range. */

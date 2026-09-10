@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Highlight detected basmalah word by word
+
+Complete:
+
+- Preserved the explicit numberless `basmalah-prelude` model (`verseKeys: []`) while carrying complete FastConformer forced-alignment boundaries for its four canonical display words.
+- Retained the safe fallback: partial, malformed, or unavailable prelude word alignment creates the detected prelude without word highlighting and never fabricates timings.
+- Routed the existing shared word-presentation model through the same preview, fullscreen, and export segment snapshot; read-so-far remains the default Electric Lime highlight behavior and no basmalah-specific renderer or style setting was added.
+- Added focused forced-alignment, canonical-target ownership, read-so-far, numberless-prelude, fallback, and export-snapshot regression coverage while preserving ordinary ayah highlights and end ornaments.
+
+Verification: `npm run regression:quran` passes its production invariant probes; its optional local real Quran alignment benchmark remains unavailable/failing in this workspace and its generated report was not retained. `npm test` (326 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and the configuration reminder for optional TikTok posting credentials.
+
 ## Current milestone: Preserve captions in fullscreen preview
 
 Complete:

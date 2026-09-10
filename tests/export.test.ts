@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createLocalExportConfiguration, snapshotLocalExportConfiguration } from "../src/lib/export/config.ts";
-import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, captionVisualStatesAtTime } from "../src/lib/editor/captions.ts";
+import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, arabicCaptionPresentationWords, captionVisualStatesAtTime } from "../src/lib/editor/captions.ts";
 import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, SAFE_AREA_OVERLAY_METADATA, mediabunnyVideoTransform, sourceVideoFitForMediabunny, sourceVideoFitForPreview } from "../src/lib/editor/formats.ts";
 import { audioOutputIsValid, selectOutputProfile, sourceAudioRequiresOutput } from "../src/lib/export/output.ts";
 import { DEFAULT_LOCAL_RENDERER_ID } from "../src/lib/export/offline-webcodecs.ts";
@@ -74,11 +74,18 @@ test("export reuses the preview transition interpolation without a second timing
   assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings).map(({ opacity, blurPx }) => ({ opacity, blurPx })), [{ opacity: 112 / 225, blurPx: 0 }]);
 });
 
-test("export snapshots preserve the exact basmalah display segment used by preview and timeline", () => {
-  const prelude = { ...segment, id: "basmalah-prelude#1", contentKind: "basmalah-prelude" as const, verseKeys: [], startMs: 500, endMs: 900, arabic: "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", translation: null, transliteration: null };
+test("preview and export retain the same highlight-capable basmalah segment", () => {
+  const prelude = { ...segment, id: "basmalah-prelude#1", contentKind: "basmalah-prelude" as const, verseKeys: [], startMs: 500, endMs: 900, arabic: "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", translation: null, transliteration: null, showVerseNumberAtEnd: false, wordTimings: [
+    { canonicalWordIndex: 1, sourceWordStart: 0, sourceWordEnd: 1, startMs: 500, endMs: 590 },
+    { canonicalWordIndex: 2, sourceWordStart: 1, sourceWordEnd: 2, startMs: 600, endMs: 690 },
+    { canonicalWordIndex: 3, sourceWordStart: 2, sourceWordEnd: 3, startMs: 700, endMs: 790 },
+    { canonicalWordIndex: 4, sourceWordStart: 3, sourceWordEnd: 4, startMs: 800, endMs: 890 },
+  ] };
   const value = config({ segments: [prelude] });
   assert.deepEqual(value.segments[0], prelude);
   assert.equal(captionVisualStatesAtTime(value.segments, 700, value.transitionSettings)[0]?.segment.id, prelude.id);
+  assert.deepEqual(arabicCaptionPresentationWords(value.segments[0]!, value.showVerseNumber, 700, value.typography.wordHighlightMode).filter((word) => word.highlighted).map((word) => word.text), ["بِسْمِ", "اللَّهِ", "الرَّحْمَٰنِ"]);
+  assert.equal(arabicCaptionPresentationWords(value.segments[0]!, true, 850, value.typography.wordHighlightMode).some((word) => word.kind === "verse-number"), false);
   assert.equal(captionVisualStatesAtTime(value.segments, 900, value.transitionSettings).length, 0);
 });
 

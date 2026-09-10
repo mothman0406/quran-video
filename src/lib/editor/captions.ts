@@ -559,6 +559,8 @@ export type OptionalPreludeTiming = {
   selected: "present" | "absent";
   startMs: number | null;
   endMs: number | null;
+  /** Forced-aligned prelude word boundaries; omitted if no reliable mapping exists. */
+  wordTimings?: readonly Pick<CaptionWordTiming, "canonicalWordIndex" | "startMs" | "endMs">[];
 };
 
 export type CaptionTimingPatch = { startMs?: number; endMs?: number };
@@ -888,6 +890,14 @@ function createBasmalahPreludeSegment(
     || isCanonicalBasmalah(firstVerse)) return null;
 
   const wordCount = words(CANONICAL_BASMALAH_ARABIC).length;
+  const preludeWordTimings = optionalPrelude.wordTimings?.slice().sort((left, right) => left.canonicalWordIndex - right.canonicalWordIndex);
+  const hasCompletePreludeWordTimings = preludeWordTimings?.length === wordCount
+    && preludeWordTimings.every((timing, index) => timing.canonicalWordIndex === index + 1
+      && Number.isFinite(timing.startMs)
+      && Number.isFinite(timing.endMs)
+      && timing.startMs < timing.endMs
+      && timing.startMs >= startMs
+      && timing.endMs <= endMs);
   return {
     id: "basmalah-prelude#1",
     contentKind: "basmalah-prelude",
@@ -900,6 +910,15 @@ function createBasmalahPreludeSegment(
     wordStart: 0,
     wordEnd: wordCount,
     wordCount,
+    ...(hasCompletePreludeWordTimings ? {
+      wordTimings: preludeWordTimings.map((timing, index) => ({
+        canonicalWordIndex: timing.canonicalWordIndex,
+        sourceWordStart: index,
+        sourceWordEnd: index + 1,
+        startMs: timing.startMs,
+        endMs: timing.endMs,
+      })),
+    } : {}),
     showVerseNumberAtEnd: false,
     timingEvidence: {
       start: { timestampMs: startMs, source: "fastconformer" },

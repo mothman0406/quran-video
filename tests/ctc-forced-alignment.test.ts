@@ -60,6 +60,26 @@ test("optional prelude tokens never own the first canonical word timing", () => 
   assert.ok(Number.isFinite(result.normalizedPathScore));
 });
 
+test("fully owned optional-basmalah target words retain their forced CTC boundaries", () => {
+  const canonical = canonicalCtcWords([{ verseKey: "93:1", text: "والضحي" }]);
+  const result = forceAlignCtc(canonical, [
+    { tokenId: 1, token: "▁بس", owner: "optional-prelude", optionalPreludeWordIndex: 1 },
+    { tokenId: 2, token: "▁الله", owner: "optional-prelude", optionalPreludeWordIndex: 2 },
+    { tokenId: 3, token: "▁الرحمن", owner: "optional-prelude", optionalPreludeWordIndex: 3 },
+    { tokenId: 4, token: "▁الرحيم", owner: "optional-prelude", optionalPreludeWordIndex: 4 },
+    { tokenId: 5, token: "▁وال", globalWordIndex: 1, owner: "canonical" },
+    { tokenId: 6, token: "ضحي", globalWordIndex: 1, owner: "canonical" },
+  ], logitsFor([1, 2, 3, 4, 5, 6], 7), { blankTokenId: 0, startMs: 1_000, endMs: 1_600, frameExactEndpoints: true });
+  assert.equal(result.status, "complete");
+  assert.deepEqual(result.optionalPreludeWords, [
+    { wordIndex: 1, startMs: 1_000, endMs: 1_100 },
+    { wordIndex: 2, startMs: 1_100, endMs: 1_200 },
+    { wordIndex: 3, startMs: 1_200, endMs: 1_300 },
+    { wordIndex: 4, startMs: 1_300, endMs: 1_400 },
+  ]);
+  assert.equal(result.words[0]?.startMs, 1_400, "the prelude remains outside canonical ayah ownership");
+});
+
 test("connected ayat, weak edge words, long madd, and a final video cut retain complete canonical timing", () => {
   const connected = forceAlignCtc(words, tokens, logitsFor([1, 2, 3, 4, 5, 6]), { blankTokenId: 0, startMs: 4_000, endMs: 4_600, finalSpeechEndMs: 4_600 });
   assert.equal(connected.status, "complete");

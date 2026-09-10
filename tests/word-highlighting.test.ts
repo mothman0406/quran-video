@@ -32,6 +32,25 @@ function highlightedAt(timeMs: number, mode: "current-word" | "read-so-far") {
     .map((word) => word.text);
 }
 
+function alignedBasmalahSegment() {
+  return createCaptionSegmentsFromVerseBoundaries(
+    [{ verseKey: "18:57", startMs: 1_600, endMs: 1_800, evidence: { source: "fastconformer", selectedWord: null, candidates: [] } }],
+    { "18:57": verse },
+    {
+      available: true,
+      selected: "present",
+      startMs: 1_000,
+      endMs: 1_500,
+      wordTimings: [
+        { canonicalWordIndex: 1, startMs: 1_000, endMs: 1_110 },
+        { canonicalWordIndex: 2, startMs: 1_120, endMs: 1_230 },
+        { canonicalWordIndex: 3, startMs: 1_240, endMs: 1_350 },
+        { canonicalWordIndex: 4, startMs: 1_360, endMs: 1_470 },
+      ],
+    },
+  )[0]!;
+}
+
 test("canonical Quran word spans preserve Uthmani harakat, display cleaning, spaces, RTL source order, and exclude the ornament", () => {
   const words = arabicCaptionPresentationWords(segment(), true, 1_250, "current-word");
   assert.deepEqual(words.map((word) => word.text), ["وَمَنْ", "أَظْلَمُ", "مِمَّنْ", "٥٧"]);
@@ -104,4 +123,23 @@ test("basmalah without precise canonical word timings and legacy persistence bot
   assert.equal(TypographySchema.shape.wordHighlightMode.parse(undefined), "read-so-far");
   assert.equal(TypographySchema.shape.wordHighlightColor.parse(undefined), "#B7FF00");
   assert.equal(TypographySchema.shape.wordHighlightIntensity.parse(undefined), 0.85);
+});
+
+test("a real forced-aligned basmalah uses the shared read-so-far word model without an ayah ornament", () => {
+  const prelude = alignedBasmalahSegment();
+  assert.equal(prelude.contentKind, "basmalah-prelude");
+  assert.deepEqual(prelude.verseKeys, []);
+  assert.equal(prelude.arabic, "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ", "the canonical basmalah text is unchanged");
+  assert.equal(prelude.showVerseNumberAtEnd, false);
+  assert.deepEqual(prelude.wordTimings?.map((timing) => [timing.canonicalWordIndex, timing.sourceWordStart, timing.sourceWordEnd, timing.startMs, timing.endMs]), [
+    [1, 0, 1, 1_000, 1_110], [2, 1, 2, 1_120, 1_230], [3, 2, 3, 1_240, 1_350], [4, 3, 4, 1_360, 1_470],
+  ]);
+  const highlighted = (timeMs: number) => arabicCaptionPresentationWords(prelude, true, timeMs, "read-so-far")
+    .filter((word) => word.highlighted)
+    .map((word) => word.text);
+  assert.deepEqual(highlighted(999), []);
+  assert.deepEqual(highlighted(1_120), ["بِسْمِ", "اللَّهِ"]);
+  assert.deepEqual(highlighted(1_355), ["بِسْمِ", "اللَّهِ", "الرَّحْمَٰنِ"]);
+  assert.deepEqual(highlighted(1_480), ["بِسْمِ", "اللَّهِ", "الرَّحْمَٰنِ", "الرَّحِيمِ"]);
+  assert.equal(arabicCaptionPresentationWords(prelude, true, 1_480, "read-so-far").some((word) => word.kind === "verse-number"), false);
 });

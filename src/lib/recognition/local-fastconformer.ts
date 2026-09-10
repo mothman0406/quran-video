@@ -85,6 +85,8 @@ export type FastConformerTargetToken = {
   /** Set only when this target token belongs to a selected Quran word. */
   canonicalWordIndex?: number;
   globalWordIndex?: number;
+  /** Present only for a losslessly mapped optional prelude display word. */
+  optionalPreludeWordIndex?: number;
 };
 export type FastConformerTargetValidation = {
   verseKey: string;
@@ -168,6 +170,8 @@ export type FastConformerResult = {
     selected: "present" | "absent";
     startMs: number | null;
     endMs: number | null;
+    /** CTC forced-alignment boundaries; omitted rather than synthesized when unavailable. */
+    wordTimings?: Array<{ canonicalWordIndex: number; startMs: number; endMs: number }>;
   };
   firstCanonicalTokenFrame: number | null;
   firstCanonicalWordStartMs: number | null;
@@ -617,14 +621,32 @@ export function encodeFastConformerWords(
     // the canonical target when there is no lexical prefix. Only a real
     // lexical span before the selected Quran text forms an optional prelude.
     const firstCanonicalPieceIndex = canonicalOffset > 0 ? lexicalOwners.findIndex((owner) => owner !== null) : 0;
+    const preludePieces = pieces.slice(0, firstCanonicalPieceIndex);
+    const preludeLexicalOwners = preludePieces.length ? (() => {
+      const lexicalPrelude = normalizeTilawaArabic(preludePieces.map((piece) => piece.token).join("").replaceAll(WORD_PREFIX, " "));
+      const preludeSpans = canonicalTextSpans(lexicalPrelude.split(" ").filter(Boolean));
+      let preludeOffset = 0;
+      const owners = preludePieces.map((piece) => {
+        const start = preludeOffset;
+        preludeOffset += piece.lexicalText.length;
+        return piece.lexicalText ? wordIndexAtCharacter(preludeSpans, start) : null;
+      });
+      const observed = new Set(owners.filter((owner): owner is number => owner !== null));
+      const complete = observed.size === preludeSpans.length && preludeSpans.every((_, index) => observed.has(index + 1));
+      return complete ? owners.map((owner, index) => owner
+        ?? owners.slice(index + 1).find((candidate): candidate is number => candidate !== null)
+        ?? [...owners.slice(0, index)].reverse().find((candidate): candidate is number => candidate !== null)
+        ?? null) : undefined;
+    })() : undefined;
     if (firstCanonicalPieceIndex > 0) {
-      const lexicalPrelude = normalizeTilawaArabic(pieces.slice(0, firstCanonicalPieceIndex).map((piece) => piece.token).join("").replaceAll(WORD_PREFIX, " "));
+      const lexicalPrelude = normalizeTilawaArabic(preludePieces.map((piece) => piece.token).join("").replaceAll(WORD_PREFIX, " "));
       optionalPreludeLexicalText += `${lexicalPrelude} `;
       optionalPreludeLexicalTextByVerse.set(verseKey, lexicalPrelude);
     }
     const verseMapping = pieces.map((piece, index) => {
       if (index < firstCanonicalPieceIndex) {
-        return { tokenId: piece.tokenId, token: piece.token, verseKey, owner: "optional-prelude" as const };
+        const optionalPreludeWordIndex = preludeLexicalOwners?.[index];
+        return { tokenId: piece.tokenId, token: piece.token, verseKey, owner: "optional-prelude" as const, ...(optionalPreludeWordIndex ? { optionalPreludeWordIndex } : {}) };
       }
       const canonicalWordIndex = lexicalOwners[index]
         ?? lexicalOwners.slice(index + 1).find((owner): owner is number => owner !== null)
@@ -638,7 +660,7 @@ export function encodeFastConformerWords(
     }
     for (const mapped of verseMapping) {
       targetTokenMapping.push(mapped);
-      if (mapped.owner === "optional-prelude") optionalPreludeTokens.push({ tokenId: mapped.tokenId, token: mapped.token, owner: "optional-prelude" });
+      if (mapped.owner === "optional-prelude") optionalPreludeTokens.push({ tokenId: mapped.tokenId, token: mapped.token, owner: "optional-prelude", ...(mapped.optionalPreludeWordIndex ? { optionalPreludeWordIndex: mapped.optionalPreludeWordIndex } : {}) });
       else targetTokens.push({ tokenId: mapped.tokenId, token: mapped.token, globalWordIndex: mapped.globalWordIndex, owner: "canonical" });
     }
   }
@@ -984,6 +1006,9 @@ export function createFastConformerRunner(
           selected: preludePresent ? "present" : "absent",
           startMs: preludePresent ? alignment.optionalPreludeTiming?.startMs ?? null : null,
           endMs: preludePresent ? alignment.optionalPreludeTiming?.endMs ?? null : null,
+          ...(preludePresent && alignment.optionalPreludeWords ? {
+            wordTimings: alignment.optionalPreludeWords.map((word) => ({ canonicalWordIndex: word.wordIndex, startMs: word.startMs, endMs: word.endMs })),
+          } : {}),
         },
         firstCanonicalTokenFrame: alignment.status === "complete" ? alignment.firstCanonicalTokenFrame ?? null : null,
         firstCanonicalWordStartMs: alignment.status === "complete" ? alignment.words[0]?.startMs ?? null : null,
