@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: End timeline scrubbing on pointer release
+
+Complete:
+
+- Replaced the playhead's stale boolean drag flag with an explicit primary-pointer scrub session that is bound to its initiating pointer ID. Timeline movement now requires both that session and the held primary button; ordinary hover has no seek path.
+- Centralized timeline interaction cleanup for captured pointer release, pointer cancellation, lost pointer capture, window blur, and editor unmount. Cleanup releases capture when still held, clears caption/media-edit interaction state, removes the scrub session, and leaves the media clock as the normal playhead authority.
+- Kept one-shot empty-background pointerdown seeking while preventing caption blocks, media blocks, trim handles, and the waveform from bubbling into background seeking. Existing pointer capture retains outside-the-timeline dragging and bounds mapping.
+- Added focused pointer-session and component-wiring regression coverage for hover, pointer identity, defensive missing-button cleanup, all termination paths, independent repeated drags, click-to-seek isolation, paused behavior, playback following, and listener cleanup.
+
+Verification: `npm run regression:quran` passes its production invariant probes; its optional local real Quran alignment benchmark remains unavailable/failing in this workspace and its generated report was not retained. `npm test` (338 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and the optional TikTok posting credential reminder.
+
 ## Current milestone: Make composed preview controls discoverable
 
 Complete:

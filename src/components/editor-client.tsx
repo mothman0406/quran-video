@@ -143,6 +143,7 @@ import { DEFAULT_SOCIAL_PLATFORM_PREVIEW, moveRectToSafeArea, platformCaptionCol
 import { applyPlaybackRate, DEFAULT_PLAYBACK_RATE, resolvePlaybackRate, type PlaybackRate } from "@/lib/editor/playback-rate";
 import { createTikTokCaption } from "@/lib/tiktok/caption";
 import { cloudProjectName, quranProjectMetadata } from "@/lib/cloud-projects";
+import { beginTimelineScrub, endTimelineScrub, isActiveTimelineScrubMove, type TimelineScrubSession } from "@/lib/editor/timeline-scrub";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -370,7 +371,9 @@ export default function Home() {
   } | null>(null);
   const draggingEdge = useRef<"start" | "end" | null>(null);
   const draggingMediaTrim = useRef<"start" | "end" | null>(null);
-  const draggingPlayhead = useRef(false);
+  const playheadScrub = useRef<TimelineScrubSession | null>(null);
+  const timelinePointerCapture = useRef<{ pointerId: number; target: HTMLElement } | null>(null);
+  const timelineCleanup = useRef<() => void>(() => undefined);
   const timelineInteraction = useRef<{
     id: string;
     mode: "start" | "end" | "body";
@@ -513,7 +516,7 @@ export default function Home() {
 
   useEffect(() => {
     const durationMs = projectDurationMs(mediaSource);
-    if (!durationMs || draggingEdge.current || draggingMediaTrim.current || videoRef.current?.paused) return;
+    if (!durationMs || draggingEdge.current || draggingMediaTrim.current || playheadScrub.current || videoRef.current?.paused) return;
     setTimelineViewport((current) => {
       const viewport = clampTimelineViewport(current, durationMs);
       const windowMs = viewport.visibleEndMs - viewport.visibleStartMs;
@@ -1947,10 +1950,45 @@ export default function Home() {
   function seekTimeline(event: PointerEvent<HTMLElement>) {
     seekTo(timelineTimeFromPointer(event));
   }
+  function captureTimelinePointer(event: PointerEvent<HTMLElement>) {
+    if (event.button !== 0 || timelinePointerCapture.current) return false;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    timelinePointerCapture.current = { pointerId: event.pointerId, target: event.currentTarget };
+    return true;
+  }
+  function endTimelineInteractions(pointerId?: number) {
+    const capture = timelinePointerCapture.current;
+    if (capture && pointerId !== undefined && capture.pointerId !== pointerId) return;
+    const hadInteraction = Boolean(capture || playheadScrub.current || timelineInteraction.current || mediaTrimInteraction.current);
+    timelinePointerCapture.current = null;
+    playheadScrub.current = endTimelineScrub(playheadScrub.current, pointerId);
+    draggingEdge.current = null;
+    draggingMediaTrim.current = null;
+    timelineInteraction.current = null;
+    mediaTrimInteraction.current = null;
+    if (capture?.target.hasPointerCapture(capture.pointerId)) capture.target.releasePointerCapture(capture.pointerId);
+    if (!hadInteraction) return;
+    setTimelineTooltip(null);
+    commitProjectHistoryTransaction();
+  }
+  timelineCleanup.current = () => endTimelineInteractions();
+  useEffect(() => {
+    const onWindowBlur = () => timelineCleanup.current();
+    window.addEventListener("blur", onWindowBlur);
+    return () => {
+      window.removeEventListener("blur", onWindowBlur);
+      timelineCleanup.current();
+    };
+  }, []);
+  function handleTimelinePointerDown(event: PointerEvent<HTMLElement>) {
+    if (event.button !== 0) return;
+    seekTimeline(event);
+  }
   function handlePlayheadPointerDown(event: PointerEvent<HTMLElement>) {
     event.stopPropagation();
-    draggingPlayhead.current = true;
-    event.currentTarget.setPointerCapture(event.pointerId);
+    const session = beginTimelineScrub(event.pointerId, event.button);
+    if (!session || !captureTimelinePointer(event)) return;
+    playheadScrub.current = session;
     seekTimeline(event);
   }
   function formatTimelineTime(value: number) {
@@ -1967,6 +2005,7 @@ export default function Home() {
   }
   function handleSegmentPointerDown(event: PointerEvent<HTMLButtonElement>, segment: CaptionSegment) {
     event.stopPropagation();
+    if (!captureTimelinePointer(event)) return;
     const pointerStartMs = timelineTimeFromPointer(event);
     const selection = selectTimelineCaption(segment);
     applyCaptionSelection(selection);
@@ -1974,7 +2013,6 @@ export default function Home() {
     setSplitBoundary(Math.max(1, Math.ceil(segment.arabic.trim().split(/\s+/).length / 2)));
     timelineInteraction.current = { id: segment.id, mode: "body", pointerStartMs, initialStartMs: segment.startMs, initialEndMs: segment.endMs };
     beginProjectHistoryTransaction();
-    event.currentTarget.setPointerCapture(event.pointerId);
   }
   function handleEdgeDown(
     event: PointerEvent<HTMLElement>,
@@ -1982,6 +2020,7 @@ export default function Home() {
     segment: CaptionSegment,
   ) {
     event.stopPropagation();
+    if (!captureTimelinePointer(event)) return;
     timelineInteraction.current = { id: segment.id, mode: edge, pointerStartMs: timelineTimeFromPointer(event), initialStartMs: segment.startMs, initialEndMs: segment.endMs };
     beginProjectHistoryTransaction();
     draggingEdge.current = edge;
@@ -1993,10 +2032,10 @@ export default function Home() {
     if (video && !video.paused) video.pause();
     const boundary = edge === "start" ? segment.startMs : segment.endMs;
     setTimelineTooltip({ label: formatTimelineTime(boundary), position: (boundary - timelineViewport.visibleStartMs) / Math.max(1, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs) });
-    event.currentTarget.setPointerCapture(event.pointerId);
   }
   function handleMediaTrimPointerDown(event: PointerEvent<HTMLElement>, edge: "start" | "end") {
     event.stopPropagation();
+    if (!captureTimelinePointer(event)) return;
     mediaTrimInteraction.current = { edge };
     beginProjectHistoryTransaction();
     draggingMediaTrim.current = edge;
@@ -2004,11 +2043,20 @@ export default function Home() {
     if (media && !media.paused) media.pause();
     const boundary = edge === "start" ? mediaTrim.startMs : mediaTrim.endMs;
     setTimelineTooltip({ label: formatTimelineTime(boundary), position: (boundary - timelineViewport.visibleStartMs) / Math.max(1, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs) });
-    event.currentTarget.setPointerCapture(event.pointerId);
   }
   function handleEdgeMove(event: PointerEvent<HTMLElement>) {
-    if (draggingPlayhead.current) {
-      seekTimeline(event);
+    const capture = timelinePointerCapture.current;
+    if (playheadScrub.current) {
+      if (isActiveTimelineScrubMove(playheadScrub.current, event.pointerId, event.buttons)) {
+        seekTimeline(event);
+      } else if (playheadScrub.current.pointerId === event.pointerId) {
+        endTimelineInteractions(event.pointerId);
+      }
+      return;
+    }
+    if (!capture || capture.pointerId !== event.pointerId) return;
+    if ((event.buttons & 1) === 0) {
+      endTimelineInteractions(event.pointerId);
       return;
     }
     const trimInteraction = mediaTrimInteraction.current;
@@ -2046,14 +2094,8 @@ export default function Home() {
     const boundary = interaction.mode === "end" ? nextPatch.endMs ?? snapped : nextPatch.startMs ?? snapped;
     setTimelineTooltip({ label: `${formatTimelineTime(boundary)}${playheadSnap.snapped ? " · Snap: Playhead" : ""}`, position: (boundary - timelineViewport.visibleStartMs) / Math.max(1, timelineViewport.visibleEndMs - timelineViewport.visibleStartMs) });
   }
-  function handleEdgeUp() {
-    draggingEdge.current = null;
-    draggingMediaTrim.current = null;
-    draggingPlayhead.current = false;
-    timelineInteraction.current = null;
-    mediaTrimInteraction.current = null;
-    setTimelineTooltip(null);
-    commitProjectHistoryTransaction();
+  function handleTimelinePointerEnd(event: PointerEvent<HTMLElement>) {
+    endTimelineInteractions(event.pointerId);
   }
   function setTimelineZoom(zoom: number) {
     const durationMs = projectDurationMs(mediaSource);
@@ -2062,7 +2104,7 @@ export default function Home() {
     setTimelineViewport(zoomTimelineViewport(timelineViewport, durationMs, zoom, anchor));
   }
   function pinchTimelineZoom(clientX: number, deltaY: number): boolean {
-    if (draggingEdge.current || draggingMediaTrim.current || draggingPlayhead.current || timelineInteraction.current) return false;
+    if (draggingEdge.current || draggingMediaTrim.current || playheadScrub.current || timelineInteraction.current) return false;
     const durationMs = projectDurationMs(mediaSource);
     const rect = timelineRef.current?.getBoundingClientRect();
     if (!durationMs || !rect || !Number.isFinite(deltaY)) return false;
@@ -2638,11 +2680,11 @@ export default function Home() {
         onSelectMedia={() => setRightInspectorMode(rightInspectorModeForSelection("editor-object"))}
         onSelectSegment={selectSegment}
         onSegmentPointerDown={handleSegmentPointerDown}
-        onTimelinePointerDown={seekTimeline}
+        onTimelinePointerDown={handleTimelinePointerDown}
         onPlayheadPointerDown={handlePlayheadPointerDown}
         onTimelinePointerMove={handleEdgeMove}
+        onTimelinePointerEnd={handleTimelinePointerEnd}
         onEdgeDown={handleEdgeDown}
-        onEdgeUp={handleEdgeUp}
         onMediaTrimPointerDown={handleMediaTrimPointerDown}
         onResetMediaTrim={resetMediaTrim}
         onTimelineZoom={setTimelineZoom}
