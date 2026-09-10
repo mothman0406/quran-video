@@ -1,6 +1,6 @@
 # Production deployment
 
-This guide prepares Quran Video for a public Vercel deployment while keeping recognition and video rendering local to the browser. It deliberately leaves Stripe in sandbox/test mode. Do not invent a domain in configuration: replace `<production-domain>` only after the domain exists.
+This guide prepares Quran Video for a public Netlify deployment while keeping recognition and video rendering local to the browser. It deliberately leaves Stripe in sandbox/test mode. Do not invent a domain in configuration: replace `<production-domain>` only after the domain exists.
 
 ## Architecture and deployment blockers
 
@@ -20,7 +20,7 @@ Set these in `.env.local` for local work and in Vercel Project Settings → Envi
 | --- | --- | --- |
 | Public | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APP_URL` | Browser-visible identifiers. `NEXT_PUBLIC_APP_URL` is the exact canonical origin, with no path, query, hash, or trailing route. It is `http://localhost:3000` locally and `https://<production-domain>` in production. It is authoritative for Checkout, Customer Portal, and authentication callbacks. |
 | Server only, required for Supabase-backed billing | `SUPABASE_SERVICE_ROLE_KEY` | Used only by server-only entitlement/billing modules and the signed webhook projection. It must never enter client code or logs. |
-| Server only, Stripe sandbox initially | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_MONTHLY_PRICE_ID`, `STRIPE_PRO_ANNUAL_PRICE_ID`, `STRIPE_PREMIUM_MONTHLY_PRICE_ID`, `STRIPE_PREMIUM_ANNUAL_PRICE_ID` | Use only `sk_test_…`, the deployed webhook's test signing secret, and four test recurring Price IDs for this milestone. |
+| Server only, Stripe sandbox initially | `STRIPE_BILLING_ENV=sandbox`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_MONTHLY_PRICE_ID`, `STRIPE_PRO_ANNUAL_PRICE_ID`, `STRIPE_PREMIUM_MONTHLY_PRICE_ID`, `STRIPE_PREMIUM_ANNUAL_PRICE_ID` | Use only `sk_test_…`, the deployed webhook's test signing secret, and four test recurring Price IDs for this milestone. Checkout verifies each Price's Stripe livemode against the secret key. |
 | Server only, optional TikTok | `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, `TIKTOK_REDIRECT_URI`, optional `TIKTOK_TOKEN_ENCRYPTION_KEY`, optional `TIKTOK_DIRECT_POST_AUDITED=false` | Omit all of these to keep TikTok safely unavailable while downloads/export continue. |
 | Server only, optional Quran Foundation API | `QF_CLIENT_ID`, `QF_CLIENT_SECRET`, optional `QF_ENV=prelive` | This optional server-side content integration has no bearing on the local canonical Quran workflow. |
 
@@ -28,7 +28,7 @@ Set these in `.env.local` for local work and in Vercel Project Settings → Envi
 
 ## Vercel steps
 
-1. Import the Git repository in Vercel. It should detect **Next.js**. Use the repository default build command, `npm run build`; do not add a media-processing dependency or a Vercel-specific proxy.
+1. Connect the Git repository in Netlify. Use the repository build command, `npm run build`; do not add a media-processing dependency or a Netlify-specific media proxy.
 2. Add the production environment variables from the table. Initially use Stripe **test** credentials and Prices. Set `NEXT_PUBLIC_APP_URL=https://<production-domain>` only once that canonical domain is known.
 3. For Development, retain `NEXT_PUBLIC_APP_URL=http://localhost:3000` and test-mode Stripe. For Preview, use no Stripe variables or separate test-mode variables; never use a live secret. The server rejects `sk_live_…` when Vercel marks a deployment as Preview.
 4. Preview URLs change per deployment. If auth is required in Preview, set `NEXT_PUBLIC_APP_URL` for Preview builds to that deployment's HTTPS Vercel URL and add Supabase's recommended `https://*-<team-or-account-slug>.vercel.app/**` redirect allow-list entry. Keep Preview Stripe unset or test-only; do not point a preview at the production Stripe webhook or live billing. Google OAuth JavaScript origins do not support a wildcard, so use a controlled preview hostname if Google sign-in itself needs testing.
@@ -94,8 +94,9 @@ Apply migrations once, in filename order, using the Supabase CLI or Dashboard SQ
 5. `20260908000001_storage_api_cloud_media_cleanup.sql`
 6. `20260908000002_account_entitlements.sql`
 7. `20260909000000_stripe_subscription_billing.sql`
+8. `20260909000001_account_deletion_tombstones.sql`
 
-Verify the private `project-media` bucket; `projects` fields including `save_complete`, source/thumbnail paths, and owner RLS; RPCs `begin_cloud_project_save`, `complete_cloud_project_save`, `cancel_cloud_project_save`, `delete_cloud_project`, `cleanup_replaced_cloud_media`, and `cloud_project_storage_summary`; `account_entitlements`; and billing tables `billing_customers`, `billing_subscriptions`, and `stripe_webhook_events` with `claim_stripe_webhook_event`. Confirm ordinary authenticated users have no direct writes to billing tables or service-role functions.
+Verify the private `project-media` bucket; `projects` fields including `save_complete`, source/thumbnail paths, and owner RLS; RPCs `begin_cloud_project_save`, `complete_cloud_project_save`, `cancel_cloud_project_save`, `delete_cloud_project`, `cleanup_replaced_cloud_media`, and `cloud_project_storage_summary`; `account_entitlements`; and billing tables `billing_customers`, `billing_subscriptions`, `stripe_webhook_events`, and server-only `billing_customer_deletions`. Confirm ordinary authenticated users have no direct writes to billing tables or service-role functions.
 
 ## Final production checklist
 

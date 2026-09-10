@@ -21,6 +21,7 @@ export function runtimeConfigurationIssues(env: Environment = process.env): Runt
   const stripe = missing(env, [
     "NEXT_PUBLIC_APP_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
+    "STRIPE_BILLING_ENV",
     "STRIPE_SECRET_KEY",
     "STRIPE_WEBHOOK_SECRET",
     "STRIPE_PRO_MONTHLY_PRICE_ID",

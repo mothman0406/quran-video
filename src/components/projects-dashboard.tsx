@@ -73,7 +73,7 @@ export default function ProjectsDashboard() {
       <Link className="projects-brand" href="/"><span>۝</span>Quran Video</Link>
       <Link className="projects-new projects-new-side" href="/editor">＋ New project</Link>
       <nav><span>Library</span><Link className="is-active" href="/projects">Projects</Link></nav>
-      <div className="projects-account">{session ? <><span className="projects-avatar">{(session.user.email ?? "Q").slice(0, 1).toUpperCase()}</span><div><strong>{session.user.user_metadata.full_name ?? session.user.email ?? "Quran Video member"}</strong><small>{accountEntitlements.plan.replace(/^./, (letter) => letter.toUpperCase())} plan</small></div><button type="button" onClick={() => void signOut()}>Sign out</button></> : <span>Sign in to save projects</span>}</div>
+      <div className="projects-account">{session ? <><span className="projects-avatar">{(session.user.email ?? "Q").slice(0, 1).toUpperCase()}</span><div><strong>{session.user.user_metadata.full_name ?? session.user.email ?? "Quran Video member"}</strong><small>{accountEntitlements.plan.replace(/^./, (letter) => letter.toUpperCase())} plan</small></div><Link href="/account">Settings</Link><button type="button" onClick={() => void signOut()}>Sign out</button></> : <span>Sign in to save projects</span>}</div>
     </aside>
     <section className="projects-main">
       <header className="projects-heading"><div><p>PROJECT LIBRARY</p><h1>Your projects</h1><span>{projects.length} projects saved{accountEntitlements.cloudProjectLimit === null ? " · paid storage quota to be announced" : ` / ${accountEntitlements.cloudProjectLimit} project limit`}</span></div><Link className="projects-new" href="/editor">＋ New project</Link></header>

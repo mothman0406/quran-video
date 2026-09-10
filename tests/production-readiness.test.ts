@@ -38,9 +38,12 @@ test("missing integrations are reported by variable name without blocking local-
   assert.equal(stripeCheckoutConfigured({} as NodeJS.ProcessEnv), false);
 });
 
-test("Preview cannot use a live Stripe secret", () => {
+test("Preview and local development cannot use a live Stripe secret", () => {
   assert.equal(stripeEnvironmentIsSafe({ NODE_ENV: "production", VERCEL_ENV: "preview", STRIPE_SECRET_KEY: "sk_live_should_not_run" }), false);
   assert.equal(stripeEnvironmentIsSafe({ NODE_ENV: "production", VERCEL_ENV: "preview", STRIPE_SECRET_KEY: "sk_test_safe" }), true);
+  assert.equal(stripeEnvironmentIsSafe({ NODE_ENV: "development", STRIPE_SECRET_KEY: "sk_live_should_not_run" }), false);
+  assert.equal(stripeEnvironmentIsSafe({ NODE_ENV: "production", CONTEXT: "deploy-preview", STRIPE_SECRET_KEY: "sk_live_should_not_run" }), false);
+  assert.equal(stripeEnvironmentIsSafe({ NODE_ENV: "production", STRIPE_BILLING_ENV: "live", STRIPE_SECRET_KEY: "sk_test_safe" }), false);
 });
 
 test("service-role clients remain server-only and webhook stays on raw Node.js requests", () => {

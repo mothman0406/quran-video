@@ -1,5 +1,5 @@
 import { authenticatedEntitlementUser } from "@/lib/entitlements/server";
-import { getBillingSubscription, getOrCreateCustomer, getStripeClient, hasPaidSubscription, isBillingInterval, isPaidPlan, priceIdForPlan, safeApplicationOrigin, stripeCheckoutConfigured } from "@/lib/billing/server";
+import { assertStripePricesMatchEnvironment, getBillingSubscription, getOrCreateCustomer, getStripeClient, hasPaidSubscription, isBillingInterval, isPaidPlan, priceIdForPlan, safeApplicationOrigin, stripeCheckoutConfigured } from "@/lib/billing/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,8 +17,10 @@ export async function POST(request: Request) {
     if (hasPaidSubscription(await getBillingSubscription(user.id))) return Response.json({ error: "You already have a paid subscription. Use Manage plan instead." }, { status: 409 });
     const price = priceIdForPlan(body.plan, body.interval);
     if (!price) return Response.json({ error: "That billing option is not configured." }, { status: 503 });
-    const customer = await getOrCreateCustomer(user);
-    const session = await getStripeClient().checkout.sessions.create({
+    const stripe = getStripeClient();
+    await assertStripePricesMatchEnvironment(stripe);
+    const customer = await getOrCreateCustomer(user, { stripe });
+    const session = await stripe.checkout.sessions.create({
       mode: "subscription", customer, line_items: [{ price, quantity: 1 }], client_reference_id: user.id,
       success_url: `${origin}/editor?billing=success`, cancel_url: `${origin}/editor?billing=cancelled`,
       metadata: { user_id: user.id, plan: body.plan, billing_interval: body.interval }, subscription_data: { metadata: { user_id: user.id } },

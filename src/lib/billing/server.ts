@@ -54,13 +54,44 @@ export function planForPriceId(priceId: string | null | undefined, env: NodeJS.P
   return null;
 }
 
-export function stripeCheckoutConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(stripeEnvironmentIsSafe(env) && env.STRIPE_SECRET_KEY && priceIdForPlan("pro", "month", env) && priceIdForPlan("pro", "year", env) && priceIdForPlan("premium", "month", env) && priceIdForPlan("premium", "year", env));
+export type StripeBillingEnvironment = "sandbox" | "live";
+
+function keyBillingEnvironment(key: string | undefined): StripeBillingEnvironment | null {
+  if (key?.startsWith("sk_test_")) return "sandbox";
+  if (key?.startsWith("sk_live_")) return "live";
+  return null;
 }
 
-/** Vercel preview deployments must never be able to use a live Stripe secret. */
+function deploymentIsPreview(env: NodeJS.ProcessEnv): boolean {
+  return env.VERCEL_ENV === "preview" || env.CONTEXT === "deploy-preview" || env.CONTEXT === "branch-deploy";
+}
+
+/**
+ * Environment policy is intentionally stricter than a key-presence check.
+ * STRIPE_BILLING_ENV is optional for the current sandbox deployment, but when
+ * supplied it must match the secret-key mode. Live credentials are never valid
+ * in local development or preview deployments.
+ */
 export function stripeEnvironmentIsSafe(env: NodeJS.ProcessEnv = process.env): boolean {
-  return !(env.VERCEL_ENV === "preview" && env.STRIPE_SECRET_KEY?.startsWith("sk_live_"));
+  const mode = keyBillingEnvironment(env.STRIPE_SECRET_KEY);
+  if (!env.STRIPE_SECRET_KEY) return true;
+  if (!mode) return false;
+  if (env.STRIPE_BILLING_ENV && env.STRIPE_BILLING_ENV !== mode) return false;
+  if (mode === "live" && (env.NODE_ENV !== "production" || deploymentIsPreview(env))) return false;
+  return true;
+}
+
+export function stripeCheckoutConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Boolean(stripeEnvironmentIsSafe(env) && keyBillingEnvironment(env.STRIPE_SECRET_KEY) && priceIdForPlan("pro", "month", env) && priceIdForPlan("pro", "year", env) && priceIdForPlan("premium", "month", env) && priceIdForPlan("premium", "year", env));
+}
+
+/** Checks Stripe's own Price mode before Checkout so test and live resources cannot be mixed. */
+export async function assertStripePricesMatchEnvironment(stripe: Stripe = getStripeClient(), env: NodeJS.ProcessEnv = process.env): Promise<void> {
+  const expectedLiveMode = keyBillingEnvironment(env.STRIPE_SECRET_KEY) === "live";
+  const prices = [priceIdForPlan("pro", "month", env), priceIdForPlan("pro", "year", env), priceIdForPlan("premium", "month", env), priceIdForPlan("premium", "year", env)];
+  if (prices.some((price): price is null => !price)) throw new Error("Stripe Price configuration is incomplete.");
+  const configured = await Promise.all((prices as string[]).map((price) => stripe.prices.retrieve(price)));
+  if (configured.some((price) => price.livemode !== expectedLiveMode)) throw new Error("Stripe Price IDs do not match the configured billing environment.");
 }
 
 /** Conservative launch policy: only active/trialing subscriptions on known prices are paid; past_due and every terminal/incomplete status resolve Free. */
@@ -146,12 +177,17 @@ async function userIdForSubscription(subscription: Stripe.Subscription, admin: B
 
 /** Projects Stripe's signed subscription state into billing records, then into the canonical entitlement projection. */
 export async function syncStripeSubscription(subscription: Stripe.Subscription, admin: BillingAdmin = billingAdminClient()): Promise<void> {
+  const stripeCustomerId = customerId(subscription.customer);
+  const { data: deletion, error: deletionError } = await admin.from("billing_customer_deletions").select("stripe_customer_id").eq("stripe_customer_id", stripeCustomerId).maybeSingle();
+  if (deletionError) throw deletionError;
+  // A deletion tombstone prevents late Stripe webhooks from recreating an
+  // application mapping for an account that has already been removed.
+  if (deletion) return;
   const userId = await userIdForSubscription(subscription, admin);
   const item = subscription.items.data[0];
   const priceId = item?.price.id ?? null;
   const price = planForPriceId(priceId);
   const plan = effectivePlanForSubscription(subscription.status, priceId);
-  const stripeCustomerId = customerId(subscription.customer);
   const now = new Date().toISOString();
   const { error: subscriptionError } = await admin.from("billing_subscriptions").upsert({
     user_id: userId, stripe_customer_id: stripeCustomerId, stripe_subscription_id: subscription.id, stripe_price_id: priceId,

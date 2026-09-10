@@ -113,7 +113,7 @@ export default function AccountPanel({ session, entitlements = accountEntitlemen
         {entitlements.plan === "free" ? <ul><li>720p exports</li><li>Watermark on exports</li><li>{freeUsage}</li></ul> : <ul>{paidBenefits.map((benefit) => <li key={benefit}>{benefit}</li>)}</ul>}
         <button type="button" className="editor-account-plan-action" onClick={entitlements.plan === "free" ? openPlanComparison : () => void managePlan()}>{entitlements.plan === "free" ? "Upgrade plan" : "Manage plan"}</button>
       </section>
-      <div className="editor-account-menu-links"><a role="menuitem" className="editor-account-menu-item" href="/projects" onClick={onClose}>Projects</a><button type="button" role="menuitem" className="editor-account-menu-item" onClick={openPlanComparison}>Billing &amp; plans</button></div>
+      <div className="editor-account-menu-links"><a role="menuitem" className="editor-account-menu-item" href="/projects" onClick={onClose}>Projects</a><a role="menuitem" className="editor-account-menu-item" href="/account" onClick={onClose}>Account settings</a><button type="button" role="menuitem" className="editor-account-menu-item" onClick={openPlanComparison}>Billing &amp; plans</button></div>
       <button type="button" role="menuitem" className="editor-account-menu-item editor-account-signout" onClick={() => void signOut().then(onClose).catch((error: unknown) => setMessage(friendlyAuthError(error)))}>Sign out</button>
       {message && <p className="editor-auth-message editor-auth-error" role="alert">{message}</p>}
       {planComparisonOpen && <PlanComparisonDialog entitlements={entitlements} session={session} onEntitlementsRefresh={onEntitlementsRefresh} onClose={() => setPlanComparisonOpen(false)} />}
@@ -131,7 +131,7 @@ export default function AccountPanel({ session, entitlements = accountEntitlemen
         <form onSubmit={submitEmail}><label htmlFor="auth-email">Email</label><input ref={emailRef} id="auth-email" required type="email" autoComplete="email" placeholder="you@example.com" value={email} disabled={startingGoogle || checkingEmail} onChange={(event) => setEmail(event.target.value)} /><button className="editor-auth-email-button" type="submit" disabled={startingGoogle || checkingEmail}>{checkingEmail ? "Sending link…" : "Continue with email"}</button></form>
       </>}
       {message && <p className={`editor-auth-message ${message.startsWith("Check ") ? "editor-auth-success" : "editor-auth-error"}`} role="status">{message}</p>}
-      <p className="editor-auth-legal">By continuing, you agree to the Terms and Privacy Policy.</p>
+      <p className="editor-auth-legal">By continuing, you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>
     </div>
   </div>;
 }
