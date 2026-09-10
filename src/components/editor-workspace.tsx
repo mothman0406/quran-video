@@ -130,6 +130,8 @@ type EditorWorkspaceProps = {
   onMediaPause: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onMediaEnded: (event: SyntheticEvent<HTMLMediaElement>) => void;
   onMediaSeeking: (event: SyntheticEvent<HTMLMediaElement>) => void;
+  onTogglePreviewPlayback: () => void;
+  onSeekPreview: (ms: number) => void;
   onVideoError: () => void;
   onSelectObject: (segment: CaptionSegment, kind: CaptionObject | null) => void;
   onSetRightInspectorMode: (mode: RightInspectorMode) => void;
@@ -257,6 +259,9 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
   const [fullscreenPreviewElement, setFullscreenPreviewElement] = useState<HTMLDivElement | null>(null);
   const [fullscreenError, setFullscreenError] = useState<string | null>(null);
+  const [isPreviewPlaying, setIsPreviewPlaying] = useState(false);
+  const [previewVolume, setPreviewVolume] = useState(1);
+  const [isPreviewMuted, setIsPreviewMuted] = useState(false);
   const fullscreenPreviewRef = useRef<HTMLDivElement>(null);
   const timelineResizeStart = useRef<{ y: number; height: number } | null>(null);
   const panelResizeStart = useRef<{ panel: "left" | "right"; x: number; width: number } | null>(null);
@@ -267,7 +272,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     transitionSettings, playbackRate, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, session, accountEntitlements, onRefreshEntitlements, canUndo, canRedo, busy, localStyles, localStyleName, authOpen, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportPreflight, exportQuality, exportFormat, outputPlan, exportResult, exportIsStale, exportState, exportError, exportDiagnostics, tiktokCaption, errorMessage, onRetrySourceRestore, timingWarning,
     showCorrection, surah, startAyah, endAyah, youtubeImportAvailable, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
-    onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onVideoError, onSelectObject,
+    onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onTogglePreviewPlayback, onSeekPreview, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown, onSetRightInspectorMode, onSelectMedia,
     onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
     onCorrectDetection, onToggleCorrection, onSurahChange, onStartAyahChange, onEndAyahChange, onClearVideo, onSaveProject, onUndo, onRedo, onHistoryTransactionStart, onHistoryTransactionCommit, onSaveToAccount, onOpenProjects,
@@ -302,6 +307,31 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
       setFullscreenError("Fullscreen couldn't start. Try again.");
     });
   }, []);
+  const syncPreviewVolume = useCallback((event: SyntheticEvent<HTMLMediaElement>) => {
+    setPreviewVolume(event.currentTarget.volume);
+    setIsPreviewMuted(event.currentTarget.muted);
+  }, []);
+  const setPreviewMuted = useCallback(() => {
+    const media = videoRef.current as unknown as HTMLMediaElement | null;
+    if (!media) return;
+    media.muted = !media.muted;
+    setIsPreviewMuted(media.muted);
+  }, [videoRef]);
+  const setPreviewVolumeFromControl = useCallback((value: number) => {
+    const media = videoRef.current as unknown as HTMLMediaElement | null;
+    if (!media) return;
+    media.muted = false;
+    media.volume = value;
+    setPreviewVolume(value);
+    setIsPreviewMuted(false);
+  }, [videoRef]);
+  const setPreviewMediaRef = useCallback((node: HTMLMediaElement | null) => {
+    (videoRef as React.MutableRefObject<HTMLMediaElement | null>).current = node;
+    if (!node) return;
+    setIsPreviewPlaying(!node.paused);
+    setPreviewVolume(node.volume);
+    setIsPreviewMuted(node.muted);
+  }, [videoRef]);
   useEffect(() => {
     if (!session) return;
     const billing = new URLSearchParams(window.location.search).get("billing");
@@ -526,14 +556,22 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
         <div className="editor-canvas-well">
           {videoUrl ? <div ref={setFullscreenPreviewRef} className="editor-fullscreen-preview" data-project-format={projectFormat.preset}>
             <div ref={previewRef} className={`project-preview-canvas editor-canvas ${mediaSource?.hasVideo ? "" : "editor-audio-canvas"}`} data-project-aspect-ratio={selectedFormatDefinition.aspectRatio} data-project-format={projectFormat.preset} style={{ aspectRatio: `${projectFormat.width} / ${projectFormat.height}` }} onPointerDown={onCanvasBackgroundPointerDown}>
-              {mediaSource?.hasVideo ? <video ref={videoRef} className="h-full w-full object-contain" controls controlsList="nofullscreen" playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onPointerDown={onSelectMedia} onDoubleClick={(event) => { event.preventDefault(); togglePreviewFullscreen(); }} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={(node) => { (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node as unknown as HTMLVideoElement; }} className="editor-audio-element" controls preload="metadata" src={videoUrl} onPointerDown={onSelectMedia} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support audio playback.</audio>}
+              {mediaSource?.hasVideo ? <video ref={setPreviewMediaRef} className="h-full w-full object-contain" playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onPointerDown={onSelectMedia} onLoadStart={() => setIsPreviewPlaying(false)} onLoadedMetadata={(event) => { onLoadedMetadata(event); syncPreviewVolume(event); }} onTimeUpdate={onVideoTimeUpdate} onPlay={(event) => { setIsPreviewPlaying(true); onMediaPlay(event); }} onPause={(event) => { setIsPreviewPlaying(false); onMediaPause(event); }} onEnded={(event) => { setIsPreviewPlaying(false); onMediaEnded(event); }} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onVolumeChange={syncPreviewVolume} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={setPreviewMediaRef} className="editor-audio-element" preload="metadata" src={videoUrl} onPointerDown={onSelectMedia} onLoadStart={() => setIsPreviewPlaying(false)} onLoadedMetadata={(event) => { onLoadedMetadata(event); syncPreviewVolume(event); }} onTimeUpdate={onVideoTimeUpdate} onPlay={(event) => { setIsPreviewPlaying(true); onMediaPlay(event); }} onPause={(event) => { setIsPreviewPlaying(false); onMediaPause(event); }} onEnded={(event) => { setIsPreviewPlaying(false); onMediaEnded(event); }} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onVolumeChange={syncPreviewVolume} onError={onVideoError}>Your browser does not support audio playback.</audio>}
               {showSafeArea && <SafeAreaOverlay format={projectFormat} />}
               <SocialPlatformGuideOverlay platform={platformPreview} />
               <CaptionPreview currentTimeMs={currentTimeMs} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedSegmentId={selectedSegmentId} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} onCaptionBoundsChange={onCaptionBoundsChange} />
             </div>
+            <div className="editor-player-controls" aria-label="Preview controls">
+              <button className="editor-player-button" type="button" data-player-control="playback" aria-label={isPreviewPlaying ? "Pause" : "Play"} title={isPreviewPlaying ? "Pause" : "Play"} onClick={onTogglePreviewPlayback}>{isPreviewPlaying ? "❚❚" : "▶"}</button>
+              <span className="editor-player-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(durationMs / 1000)}</span>
+              <input className="editor-player-seek" data-player-control="seek" aria-label="Seek preview" title="Seek" type="range" min="0" max={Math.max(0, durationMs / 1000)} step="0.01" value={Math.min(Math.max(0, currentTimeMs / 1000), Math.max(0, durationMs / 1000))} disabled={durationMs <= 0} onChange={(event) => onSeekPreview(Number(event.currentTarget.value) * 1000)} />
+              <button className="editor-player-button" type="button" data-player-control="mute" aria-label={isPreviewMuted ? "Unmute" : "Mute"} title={isPreviewMuted ? "Unmute" : "Mute"} onClick={setPreviewMuted}>{isPreviewMuted ? "🔇" : "🔊"}</button>
+              <input className="editor-player-volume" data-player-control="volume" aria-label="Preview volume" title="Volume" type="range" min="0" max="1" step="0.05" value={previewVolume} onChange={(event) => setPreviewVolumeFromControl(Number(event.currentTarget.value))} />
+              {fullscreenSupported && <button className="editor-player-button" type="button" data-player-control="fullscreen" aria-label={isPreviewFullscreen ? "Exit fullscreen" : "Enter fullscreen"} title={isPreviewFullscreen ? "Exit fullscreen" : "Enter fullscreen"} onClick={togglePreviewFullscreen}>{isPreviewFullscreen ? "↙" : "⛶"}</button>}
+              {fullscreenError && <span className="editor-playback-fullscreen-error" role="status">{fullscreenError}</span>}
+            </div>
           </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
         </div>
-        <div className="editor-playback-row"><span className="editor-playback-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(durationMs / 1000)}</span><span className="editor-playback-actions"><span className="editor-playback-hint">Space to play · ← → to nudge</span>{fullscreenError && <span className="editor-playback-fullscreen-error" role="status">{fullscreenError}</span>}{videoUrl && <button className="editor-icon-button" type="button" aria-label={isPreviewFullscreen ? "Exit fullscreen preview" : "Fullscreen preview"} title={isPreviewFullscreen ? "Exit fullscreen" : "Fullscreen preview"} aria-pressed={isPreviewFullscreen} disabled={!fullscreenSupported} onClick={togglePreviewFullscreen}>{isPreviewFullscreen ? "↙" : "⛶"}</button>}</span></div>
         {videoUrl && <div className="editor-timeline-panel"><button className="editor-timeline-resize" type="button" aria-label="Resize timeline" title="Drag to resize · double-click to reset" onPointerDown={onTimelineResizeDown} onPointerMove={onTimelineResizeMove} onPointerUp={onTimelineResizeUp} onDoubleClick={() => setTimelineHeight(WORKSPACE_LAYOUT_DEFAULTS.timelineHeight)} /><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><div className="editor-timeline-controls"><button type="button" aria-label={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} title={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} onClick={toggleTimeline}>{timelineCollapsed ? "↑" : "↓"}</button><button type="button" aria-label="Zoom out timeline" title="Zoom out" onClick={() => onTimelineZoom(timelineViewport.zoom / 2)}>−</button><input aria-label="Timeline zoom" title="Timeline zoom" type="range" min="1" max="128" step="1" value={timelineViewport.zoom} onChange={(event) => onTimelineZoom(Number(event.target.value))} /><button type="button" aria-label="Zoom in timeline" title="Zoom in" onClick={() => onTimelineZoom(timelineViewport.zoom * 2)}>+</button><button type="button" title="Fit the full project in the timeline" onClick={() => onTimelineZoom(1)}>Fit</button><button type="button" title="Reset media trim" onClick={onResetMediaTrim}>Reset trim</button></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
           <div className="editor-timeline-labels">{tracks.map((track) => <span className="editor-track-label" key={track.kind}>{track.label}</span>)}</div>
           <div ref={timelineRef} className="editor-timeline-content" onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove}>

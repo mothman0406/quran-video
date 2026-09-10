@@ -83,16 +83,36 @@ test("the sole caption renderer remains inside the fullscreen preview subtree", 
   assert.match(captions, /contentKind === "ayah"/);
 });
 
-test("native video fullscreen is suppressed where controlsList is supported and all project ratios retain a centered canvas", () => {
-  assert.match(workspace, /controlsList="nofullscreen"/);
-  assert.match(workspace, /onDoubleClick=\{\(event\) => \{ event\.preventDefault\(\); togglePreviewFullscreen\(\); \}\}/);
+test("the product-owned player exposes one fullscreen control and no native fullscreen affordance", () => {
+  assert.doesNotMatch(workspace, /controlsList=/);
+  assert.doesNotMatch(workspace, /<video[^>]*\bcontrols\b/);
+  assert.doesNotMatch(workspace, /<audio[^>]*\bcontrols\b/);
+  assert.doesNotMatch(workspace, /disabled=\{!fullscreenSupported\}/);
+  assert.equal((workspace.match(/data-player-control="fullscreen"/g) ?? []).length, 1);
+  assert.match(workspace, /fullscreenSupported && <button className="editor-player-button"/);
+  assert.match(workspace, /aria-label=\{isPreviewFullscreen \? "Exit fullscreen" : "Enter fullscreen"\}/);
+  assert.match(workspace, /title=\{isPreviewFullscreen \? "Exit fullscreen" : "Enter fullscreen"\}/);
+});
+
+test("the custom preview player retains familiar playback, seek, volume, and fullscreen controls", () => {
+  assert.match(workspace, /data-player-control="playback"/);
+  assert.match(workspace, /onClick=\{onTogglePreviewPlayback\}/);
+  assert.match(workspace, /data-player-control="seek"/);
+  assert.match(workspace, /onChange=\{\(event\) => onSeekPreview\(Number\(event\.currentTarget\.value\) \* 1000\)\}/);
+  assert.match(workspace, /data-player-control="mute"/);
+  assert.match(workspace, /data-player-control="volume"/);
+  assert.match(workspace, /onVolumeChange=\{syncPreviewVolume\}/);
+  assert.match(workspace, /editor-player-controls/);
+});
+
+test("fullscreen remains composed-only with mounted capability detection and centered project ratios", () => {
   assert.match(workspace, /fullscreenchange/);
   assert.match(workspace, /webkitfullscreenchange/);
   assert.match(workspace, /canFullscreenComposedPreview\(fullscreenPreviewElement, document\)/);
-  assert.match(workspace, /disabled=\{!fullscreenSupported\}/);
   assert.match(workspace, /const preview = fullscreenPreviewRef\.current;/);
   assert.match(workspace, /Composed preview fullscreen request failed/);
   assert.match(workspace, /editor-audio-canvas/);
+  assert.match(styles, /grid-template-rows:minmax\(0,1fr\) auto/);
   for (const format of ["vertical", "landscape", "square"]) assert.match(styles, new RegExp(`editor-fullscreen-preview[^\\n]*data-project-format=\\"${format}\\"`));
-  assert.match(styles, /align-items:center; justify-content:center; background:#050607/);
+  assert.match(styles, /align-items:center; justify-items:center; gap:12px; background:#050607/);
 });

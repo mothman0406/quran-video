@@ -2620,6 +2620,13 @@ export default function Home() {
         onMediaPause={(event) => stopPlaybackClock(event, "pause")}
         onMediaEnded={(event) => stopPlaybackClock(event, "ended")}
         onMediaSeeking={seekPlaybackClock}
+        onTogglePreviewPlayback={() => {
+          const media = videoRef.current;
+          if (!media) return;
+          if (media.paused) playWithinTrim();
+          else media.pause();
+        }}
+        onSeekPreview={seekTo}
         onVideoError={() => setErrorMessage("This video could not be previewed in your browser.")}
         onSelectObject={selectCaptionObject}
         onObjectPointerDown={handleObjectPointerDown}

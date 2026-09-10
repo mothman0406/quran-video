@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Fix fullscreen UX regression
+
+Complete:
+
+- Replaced browser-native video/audio controls with one compact Quran AutoCaption preview control bar: play/pause, elapsed/total time, seek, mute/volume, and fullscreen. This removes Chrome's misleading disabled native fullscreen glyph instead of trying to style browser shadow DOM.
+- The only fullscreen control is conditionally rendered after the mounted composed-preview wrapper confirms standard or WebKit container fullscreen support. It uses the normal lower-right player position, exact Enter/Exit fullscreen labels, and is omitted on unsupported browsers.
+- The control bar is inside the composed fullscreen wrapper, so its Enter/Exit button, video or audio visual canvas, captions, translations, transliteration, word highlighting, basmalah, and verse ornament all remain in the same fullscreen subtree. Playback and seeking retain the existing trim-aware media-clock behavior.
+- Preserved neutral letterboxing and centered 9:16, 16:9, and 1:1 framing while reserving room for the product controls in fullscreen.
+
+Verification: `npm test` (332 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes its production invariant probes; its optional local real Quran alignment benchmark remains unavailable/failing in this workspace and its generated report was not retained. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and the configuration reminder for optional TikTok posting credentials.
+
 ## Current milestone: Highlight final detected basmalah word
 
 Complete:
