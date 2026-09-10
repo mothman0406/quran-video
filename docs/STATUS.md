@@ -6,7 +6,7 @@ Complete:
 
 - Added authenticated `/account` settings with identity, effective plan, available project usage, Stripe Customer Portal, sign-out, and an explicit `DELETE` confirmation flow.
 - Added server-only account deletion ordered for recovery: cancel nonterminal Stripe subscriptions, persist a minimal Stripe-customer webhook tombstone, remove private media through Supabase Storage API, remove application data, then delete Supabase Auth last. Failures leave the account intact for a safe retry.
-- Added `/privacy`, `/terms`, a production-safe route error boundary, a minimal 404 page, and `/api/health` readiness booleans. Legal pages intentionally mark business/contact details still required before public launch.
+- Added `/privacy`, `/terms`, a production-safe route error boundary, a minimal 404 page, and `/api/health` readiness booleans. Legal pages identify Quran AutoCaption as operated by Mohammad Othman and provide the public privacy, Terms, and support contact email.
 - Hardened Stripe environment separation with `STRIPE_BILLING_ENV`, Netlify/Vercel preview and local live-key rejection, and a server-side Price `livemode` check before Checkout. Stripe remains sandbox/test mode.
 - Added `docs/LAUNCH_QA.md`, account-deletion policy/reset/live-switch documentation, monitoring handoff guidance, and the current Transformers.js → Sharp dependency/reachability assessment.
 

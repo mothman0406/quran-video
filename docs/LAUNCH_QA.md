@@ -26,7 +26,7 @@ Run this on the intended Netlify production URL with sandbox Stripe configured. 
 
 - [ ] `/account` displays identity, plan, usage, billing management, sign-out, and deletion confirmation.
 - [ ] In a disposable sandbox account, type `DELETE`, confirm Stripe subscription cancellation, project/media removal, and sign-out/account removal.
-- [ ] `/privacy`, `/terms`, and 404 page render. Replace the marked business/contact placeholders before public launch.
+- [ ] `/privacy`, `/terms`, and 404 page render. Confirm the operator and contact details are current.
 - [ ] Check `/api/health` exposes only readiness booleans; reject a webhook with an invalid signature.
 - [ ] Review browser bundles and Netlify logs for secrets, signed media URLs, or private media content.
 
