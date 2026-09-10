@@ -174,6 +174,7 @@ type EditorWorkspaceProps = {
   onBeforeAuthenticate: () => Promise<void>;
   onExportOpen: () => void;
   onExport: () => void;
+  onExportAnyway: () => void;
   onExportPreflightAction: (action: ExportPreflightAction, segmentId?: string) => void;
   onCancelExport: () => void;
   onDownloadExport: () => void;
@@ -265,12 +266,13 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown, onSetRightInspectorMode, onSelectMedia,
     onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onEdgeDown, onEdgeUp, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
     onCorrectDetection, onToggleCorrection, onSurahChange, onStartAyahChange, onEndAyahChange, onClearVideo, onSaveProject, onUndo, onRedo, onHistoryTransactionStart, onHistoryTransactionCommit, onSaveToAccount, onOpenProjects,
-    onOpenCloudProjects, onDiscard, onNewProject, onOpenAuth, onCloseAuth, onBeforeAuthenticate, onExportOpen, onExport, onExportPreflightAction, onCancelExport, onDownloadExport,
+    onOpenCloudProjects, onDiscard, onNewProject, onOpenAuth, onCloseAuth, onBeforeAuthenticate, onExportOpen, onExport: onStartExport, onExportAnyway, onExportPreflightAction, onCancelExport, onDownloadExport,
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange, onPlaybackRateChange,
     onSetShowVerseNumber, onSetShowSafeArea, onSetPlatformPreview, onMoveToSafeArea, onCaptionBoundsChange, onApplyStyle, onSaveCurrentStyle, onSetLocalStyleName,
     onResetSelectedObjectStyle, onSetStyleScope, onAlignTranslation, onSetSplitBoundary, onSplit, onMergePrevious,
     onMergeNext, onTranslationFragmentChange, onResetTranslationFragment, onResetTiming, onResetAllTiming, onTimelinePinchZoom,
   } = props;
+  const onExport = exportPreflight?.status === "warnings" ? onExportAnyway : onStartExport;
   useEffect(() => {
     if (!session) return;
     const billing = new URLSearchParams(window.location.search).get("billing");

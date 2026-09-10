@@ -8,7 +8,7 @@ import { DEFAULT_LOCAL_RENDERER_ID } from "../src/lib/export/offline-webcodecs.t
 import { containPlacement, durationMatches, frameTimeline, onceCleanup, resolveExportFrameRate } from "../src/lib/export/timeline.ts";
 import { DEFAULT_EXPORT_QUALITY, EXPORT_QUALITY_PRESETS, exportFormatForQuality, exportQualityPreset } from "../src/lib/export/quality.ts";
 import { generateExportFileName } from "../src/lib/export/filename.ts";
-import { ExportCoordinator } from "../src/lib/export/lifecycle.ts";
+import { ExportCoordinator, ExportPreflightOverride, localExportFailureMessage } from "../src/lib/export/lifecycle.ts";
 import { validateExportProjectFormat, validateLocalExportInputs } from "../src/lib/export/validation.ts";
 import { exportOutputDurationMs, exportOutputTimeToSourceTime, projectDurationMs } from "../src/lib/editor/media.ts";
 import { applyPlaybackRate } from "../src/lib/editor/playback-rate.ts";
@@ -139,6 +139,37 @@ test("duplicate export prevention and cancellation cleanup are explicit", () => 
   coordinator.finish();
   assert.equal(coordinator.start(), true);
   coordinator.finish();
+});
+
+test("Export anyway consumes one staged authorized snapshot and starts exactly once", () => {
+  const override = new ExportPreflightOverride<{ configuration: { quality: string; watermarkRequired: boolean }; authorization: { plan: string } }>();
+  const request = { configuration: { quality: "standard", watermarkRequired: false }, authorization: { plan: "pro" } };
+  assert.equal(override.stage("warnings", request), "warnings");
+  const coordinator = new ExportCoordinator();
+  let starts = 0;
+  const exportAnyway = () => {
+    const pending = override.take();
+    if (pending && coordinator.start()) starts += 1;
+  };
+  exportAnyway();
+  exportAnyway();
+  assert.equal(starts, 1);
+  assert.equal(override.take(), null);
+  assert.deepEqual(request, { configuration: { quality: "standard", watermarkRequired: false }, authorization: { plan: "pro" } });
+  coordinator.finish();
+});
+
+test("blocking and ready preflight states cannot create an overridable request", () => {
+  const override = new ExportPreflightOverride<{ id: string }>();
+  assert.equal(override.stage("blocked", { id: "blocked" }), "blocked");
+  assert.equal(override.take(), null);
+  assert.equal(override.stage("ready", { id: "ready" }), "ready");
+  assert.equal(override.take(), null);
+});
+
+test("renderer failures have a user-facing export error", () => {
+  assert.equal(localExportFailureMessage(new Error("Encoder initialization failed.")), "Encoder initialization failed.");
+  assert.equal(localExportFailureMessage({}), "Local export failed. Your project was kept.");
 });
 
 test("validation reports missing source, captions, and invalid format", () => {

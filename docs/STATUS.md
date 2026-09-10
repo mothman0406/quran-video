@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Restore export preflight flow
+
+Complete:
+
+- Fixed the warning-override loop: the initial Export action now captures one server-authorized, immutable local-render request, and **Export anyway** consumes that request directly rather than authorizing and re-running preflight.
+- Preserved the authorized quality, watermark decision, source file, format, caption snapshot, trim, playback rate, and active asset through warning confirmation. The consumed request and the existing export coordinator prevent duplicate renderer starts.
+- Grouped repeated word-highlighting, missing-translation, and translation-review warnings into concise caption-count findings while retaining all affected segment IDs and the existing first-caption Review action. Blocking preflight findings remain non-overridable.
+- Added focused coverage for grouped warnings, every affected caption reference, blocking/ready override rejection, single-use override execution, authorized snapshot preservation, renderer-facing error copy, and existing entitlement/quality tests.
+
+Verification: `npm test` (320 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes production invariant probes; its optional real Quran alignment benchmark remains unavailable/failing in this workspace and no recognition code or report was retained from this milestone. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Final pre-live production hardening
 
 Complete:

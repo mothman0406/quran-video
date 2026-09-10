@@ -62,7 +62,7 @@ import {
   projectFormatDefinition,
 } from "@/lib/editor/formats";
 import type { ProjectFormat, ProjectFormatPreset } from "@/lib/schemas/project";
-import type { ProjectAsset, SavedProject } from "@/lib/schemas/project";
+import type { Project, ProjectAsset, SavedProject } from "@/lib/schemas/project";
 import {
   createProjectRepository,
   verifySourceFile,
@@ -97,13 +97,14 @@ import {
   exportFormatForQuality,
   type ExportQuality,
 } from "@/lib/export/quality";
-import { ExportCoordinator } from "@/lib/export/lifecycle";
+import { ExportCoordinator, ExportPreflightOverride, localExportFailureMessage } from "@/lib/export/lifecycle";
 import { validateLocalExportInputs } from "@/lib/export/validation";
 import { runExportPreflight, type ExportPreflightAction, type ExportPreflightResult } from "@/lib/export/preflight";
 import type {
   ExportPhase,
   CompletedExport,
   LocalExportDiagnostics,
+  LocalExportConfiguration,
 } from "@/lib/export/types";
 import type { OutputProfile } from "@/lib/export/output";
 import {
@@ -129,7 +130,7 @@ import {
 } from "@/lib/cloud-sync";
 import { exportAuthIntent, rememberAuthContinuation, rememberAuthResumeProject, takeAuthContinuation, takeAuthResumeProject } from "@/lib/auth-flow";
 import type { Session } from "@supabase/supabase-js";
-import { accountEntitlementsForPlan, canExportQuality, defaultExportQualityForPlan, getCustomStyleLimit, isBuiltInStyleAvailable, isFontAvailable, type AccountEntitlements } from "@/lib/entitlements";
+import { accountEntitlementsForPlan, canExportQuality, defaultExportQualityForPlan, getCustomStyleLimit, isBuiltInStyleAvailable, isFontAvailable, type AccountEntitlements, type ExportAuthorization } from "@/lib/entitlements";
 import { authorizeAccountExport, getAccountEntitlements } from "@/lib/entitlements/client";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
 import { clampMediaTrim, clampTimelineViewport, createMediaTrim, createTimelineViewport, mediaKindForFile, mediaSourceFromFile, panTimelineViewport, pinchTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, snapCaptionBoundaryToPlayhead, timelineContentPosition, viewportPositionToTime, zoomTimelineViewport, type MediaSource, type MediaTrim, type TimelineViewport } from "@/lib/editor/media";
@@ -177,6 +178,14 @@ type EditorProjectHistoryState = {
   transitionSettings: TransitionSettings;
   playbackRate: PlaybackRate;
   showVerseNumber: boolean;
+};
+
+type AuthorizedExportRequest = {
+  source: File;
+  configuration: LocalExportConfiguration;
+  preflight: ExportPreflightResult;
+  authorization: Extract<ExportAuthorization, { allowed: true }>;
+  activeMediaAssetId: string | null;
 };
 
 function sameEditorProjectHistoryState(left: EditorProjectHistoryState, right: EditorProjectHistoryState) {
@@ -380,6 +389,7 @@ export default function Home() {
   const assetFiles = useRef(new Map<string, { file: File; source: MediaSource }>());
   const assetYouTubeSessions = useRef(new Map<string, string>());
   const exportCoordinator = useRef(new ExportCoordinator());
+  const exportPreflightOverride = useRef(new ExportPreflightOverride<AuthorizedExportRequest>());
   const playbackClock = useRef<MediaPlaybackClock | null>(null);
   const projectHistory = useRef(new EditorHistory<EditorProjectHistoryState>(sameEditorProjectHistoryState));
   const [, setHistoryVersion] = useState(0);
@@ -2260,26 +2270,13 @@ export default function Home() {
     updateProjectHistory((current) => ({ ...current, segments: resolveCaptionTranslationSegments(mergeCaptionWithNext(current.segments, selectedIndex)) }));
     setSelectedSegmentId(null);
   }
-  async function checkExportPreflight(watermarkRequired: boolean) {
-    const configuration = snapshotLocalExportConfiguration({
-      format: projectFormat,
-      segments,
-      typography,
-      captionBackground,
-      positioning,
-      transitionSettings,
-      showVerseNumber,
-      mediaTrim,
-      playbackRate,
-      quality: exportQuality,
-      watermarkRequired,
-    });
+  async function checkExportPreflight(project: Project, source: File, configuration: LocalExportConfiguration) {
     const capability = offlineWebCodecsSupport();
     let outputProfileAvailable: boolean | null = null;
-    if (videoFile && capability.supported) {
+    if (capability.supported) {
       try {
         const { inspectLocalExport } = await import("@/lib/export/offline-webcodecs");
-        const nextOutputPlan = await inspectLocalExport(videoFile, configuration.format, exportQuality);
+        const nextOutputPlan = await inspectLocalExport(source, configuration.format, configuration.quality);
         setOutputPlan(nextOutputPlan);
         outputProfileAvailable = Boolean(nextOutputPlan.profile);
       } catch {
@@ -2287,19 +2284,19 @@ export default function Home() {
       }
     }
     const result = runExportPreflight(
-      projectSnapshot(savedProject?.id ?? "export-preflight", projectName || "Untitled project", savedProject?.createdAt ?? new Date(0).toISOString()),
+      project,
       {
-        sourceAvailable: Boolean(videoFile),
-        sourceMedia: mediaSource,
-        activeMediaAssetId,
-        projectAssets,
+        sourceAvailable: true,
+        sourceMedia: project.sourceMedia,
+        activeMediaAssetId: project.activeMediaAssetId,
+        projectAssets: project.projectAssets,
         captionBounds: captionCanvasBounds,
         platformPreview,
         exporterSupport: capability,
         outputProfileAvailable,
         playbackRateExportSupported: typeof AudioBuffer !== "undefined",
         exportConfiguration: configuration,
-        exportQuality,
+        exportQuality: configuration.quality,
       },
     );
     setExportPreflight(result);
@@ -2307,6 +2304,7 @@ export default function Home() {
     return result;
   }
   function handleExportPreflightAction(action: ExportPreflightAction, segmentId?: string) {
+    exportPreflightOverride.current.clear();
     if (action === "move-to-safe-area" && segmentId) {
       setSelectedSegmentId(segmentId);
       setSelectedObject("arabic");
@@ -2328,9 +2326,9 @@ export default function Home() {
       setErrorMessage("Relink the active source in Project assets before exporting.");
     }
   }
-  async function exportVideo(watermarkRequired: boolean, preflight = exportPreflight) {
-    if (!preflight || preflight.status === "blocked") return;
-    if (!videoFile || exportAbort.current || !exportCoordinator.current.start())
+  async function exportVideo(request: AuthorizedExportRequest) {
+    if (request.preflight.status === "blocked") return;
+    if (exportAbort.current || !exportCoordinator.current.start())
       return;
     const capability = offlineWebCodecsSupport();
     if (!capability.supported) {
@@ -2340,20 +2338,8 @@ export default function Home() {
       exportCoordinator.current.finish();
       return;
     }
-    const snapshot = snapshotLocalExportConfiguration({
-      format: projectFormat,
-      segments,
-      typography,
-      captionBackground,
-      positioning,
-      transitionSettings,
-      showVerseNumber,
-      mediaTrim,
-      playbackRate,
-      quality: exportQuality,
-      watermarkRequired,
-    });
-    const validationErrors = validateLocalExportInputs(videoFile, snapshot);
+    const snapshot = request.configuration;
+    const validationErrors = validateLocalExportInputs(request.source, snapshot);
     if (validationErrors.length) {
       setExportError(validationErrors[0]);
       setExportState("error");
@@ -2367,25 +2353,16 @@ export default function Home() {
     setExportError(null);
     setExportState({ phase: "preparing", fraction: 0, elapsedSeconds: 0 });
     const projectFingerprint = JSON.stringify({
-      source: { name: videoFile.name, size: videoFile.size, lastModified: videoFile.lastModified },
-      activeMediaAssetId,
-      mediaTrim,
-      projectFormat,
-      segments,
-      typography,
-      captionBackground,
-      positioning,
-      transitionSettings,
-      showVerseNumber,
-      playbackRate,
-      exportQuality,
+      source: { name: request.source.name, size: request.source.size, lastModified: request.source.lastModified },
+      activeMediaAssetId: request.activeMediaAssetId,
+      configuration: snapshot,
     });
     try {
       const { inspectLocalExport } = await import("@/lib/export/offline-webcodecs");
       const plan = await inspectLocalExport(
-        videoFile,
+        request.source,
         snapshot.format,
-        exportQuality,
+        snapshot.quality,
       );
       setOutputPlan(plan);
       if (!plan.profile)
@@ -2397,7 +2374,7 @@ export default function Home() {
       const { offlineWebCodecsRenderer } =
         await import("@/lib/export/offline-webcodecs");
       const output = await offlineWebCodecsRenderer.render({
-        source: videoFile,
+        source: request.source,
         ...snapshot,
         signal: controller.signal,
         onProgress: setExportState,
@@ -2416,16 +2393,7 @@ export default function Home() {
       setExportDiagnostics(output.diagnostics);
       setExportState("complete");
     } catch (caught) {
-      if ((caught as DOMException)?.name === "AbortError")
-        setExportError(
-          "Export cancelled. Your source video and editor state were kept.",
-        );
-      else
-        setExportError(
-          caught instanceof Error
-            ? caught.message
-            : "Local export failed. Your project was kept.",
-        );
+      setExportError(localExportFailureMessage(caught));
       setExportState("error");
       setExportOpen(true);
     } finally {
@@ -2443,6 +2411,7 @@ export default function Home() {
     }
     if (exportStarting.current || exportAbort.current || exportActive) return;
     exportStarting.current = true;
+    exportPreflightOverride.current.clear();
     setExportState({ phase: "preparing", fraction: 0, elapsedSeconds: 0 });
     try {
       const authorization = await authorizeAccountExport(session, exportQuality);
@@ -2453,14 +2422,65 @@ export default function Home() {
         setExportOpen(true);
         return;
       }
-      const preflight = await checkExportPreflight(authorization.watermarkRequired);
-      if (preflight.status === "ready") {
+      const configuration = snapshotLocalExportConfiguration({
+        format: projectFormat,
+        segments,
+        typography,
+        captionBackground,
+        positioning,
+        transitionSettings,
+        showVerseNumber,
+        mediaTrim,
+        playbackRate,
+        quality: authorization.quality,
+        watermarkRequired: authorization.watermarkRequired,
+      });
+      if (!videoFile) {
+        setExportError("Choose a source video before exporting.");
+        setExportState("error");
+        setExportOpen(true);
+        return;
+      }
+      const preflightProject = projectSnapshot(savedProject?.id ?? "export-preflight", projectName || "Untitled project", savedProject?.createdAt ?? new Date(0).toISOString());
+      const preflight = await checkExportPreflight(preflightProject, videoFile, configuration);
+      const request: AuthorizedExportRequest = {
+        source: videoFile,
+        configuration,
+        preflight,
+        authorization,
+        activeMediaAssetId: preflightProject.activeMediaAssetId,
+      };
+      const status = exportPreflightOverride.current.stage(preflight.status, request);
+      if (status === "ready") {
         setExportOpen(false);
-        await exportVideo(authorization.watermarkRequired, preflight);
+        await exportVideo(request);
       } else {
         setExportState(exportResult ? "complete" : null);
         setExportOpen(true);
       }
+    } catch (caught) {
+      console.error("Export preflight could not be completed.", caught);
+      setExportError(localExportFailureMessage(caught));
+      setExportState("error");
+      setExportOpen(true);
+    } finally {
+      exportStarting.current = false;
+    }
+  }
+  async function exportAnyway() {
+    if (exportStarting.current || exportAbort.current || exportActive) return;
+    const request = exportPreflightOverride.current.take();
+    if (!request) {
+      setExportError("This export confirmation is no longer active. Please review export settings again.");
+      setExportState("error");
+      setExportOpen(true);
+      return;
+    }
+    exportStarting.current = true;
+    setExportPreflight(null);
+    setExportOpen(false);
+    try {
+      await exportVideo(request);
     } finally {
       exportStarting.current = false;
     }
@@ -2469,6 +2489,7 @@ export default function Home() {
     if (exportActive) exportAbort.current?.abort();
   }
   function openExportSettings() {
+    exportPreflightOverride.current.clear();
     setExportOpen(true);
     setExportPreflight(null);
     setExportError(null);
@@ -2645,11 +2666,12 @@ export default function Home() {
         onCloseAuth={() => setAuthOpen(false)}
         onExportOpen={requestExportSettings}
         onExport={() => void startExport()}
+        onExportAnyway={() => void exportAnyway()}
         onExportPreflightAction={handleExportPreflightAction}
         onCancelExport={cancelExport}
         onDownloadExport={downloadExport}
-        onSetExportQuality={(quality) => { if (!canExportQuality(accountEntitlements, quality)) return; setExportQuality(quality); setOutputPlan(null); setExportPreflight(null); }}
-        onSetExportOpen={(open) => { setExportOpen(open); if (!open) { setExportPreflight(null); if (exportState === "error") { setExportError(null); setExportState(exportResult ? "complete" : null); } } }}
+        onSetExportQuality={(quality) => { if (!canExportQuality(accountEntitlements, quality)) return; exportPreflightOverride.current.clear(); setExportQuality(quality); setOutputPlan(null); setExportPreflight(null); }}
+        onSetExportOpen={(open) => { setExportOpen(open); if (!open) { exportPreflightOverride.current.clear(); setExportPreflight(null); if (exportState === "error") { setExportError(null); setExportState(exportResult ? "complete" : null); } } }}
         onTypographyChange={updateTypography}
         onBackgroundChange={updateCaptionBackground}
         onTransitionChange={(patch) => updateProjectHistory((current) => ({ ...current, transitionSettings: { ...current.transitionSettings, ...patch } }))}

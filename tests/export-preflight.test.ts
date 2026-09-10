@@ -118,6 +118,43 @@ test("translation review, trim exclusion, visual bounds, social collisions, and 
   for (const id of ["translation-needs-review", "word-highlight-unavailable", "trim-excludes-quran", "social-safe-zone-collision"]) assert.ok(result.checks.some((item) => item.id === id));
 });
 
+test("repeated caption warnings are grouped while retaining every affected caption", () => {
+  const otherVerse = getVerse("93:2")!;
+  const otherArabic = quranDisplayText(otherVerse);
+  const first = caption({
+    id: "93:1#highlight",
+    wordTimings: undefined,
+    translationSegment: { text: "fallback", wordStart: 0, wordEnd: wordCount, source: "fallback", reviewStatus: "needs-review" },
+  });
+  const otherWordCount = otherArabic.split(/\s+/u).length;
+  const second = caption({
+    id: "93:2#highlight",
+    verseKeys: ["93:2"],
+    arabic: otherArabic,
+    wordEnd: otherWordCount,
+    wordCount: otherWordCount,
+    startMs: 2_100,
+    endMs: 3_000,
+    wordTimings: undefined,
+    translationSegment: { text: "fallback", wordStart: 0, wordEnd: otherWordCount, source: "fallback", reviewStatus: "needs-review" },
+  });
+  const result = runExportPreflight(project({
+    verseAlignments: [...project().verseAlignments, { verseKey: "93:2", surahNumber: 93, ayahNumber: 2, startMs: 2_100, endMs: 3_000, confidence: 1 }],
+    captionSegments: [first, second],
+    typography: { ...DEFAULT_TYPOGRAPHY, wordHighlightMode: "current-word" },
+  }), runtime);
+  assert.equal(result.status, "warnings");
+  const highlight = result.checks.filter((item) => item.id === "word-highlight-unavailable");
+  const translation = result.checks.filter((item) => item.id === "translation-needs-review");
+  assert.equal(highlight.length, 1);
+  assert.equal(translation.length, 1);
+  assert.match(highlight[0]!.title, /2 captions/);
+  assert.match(translation[0]!.title, /2 captions/);
+  assert.deepEqual(highlight[0]!.affectedSegmentIds, [first.id, second.id]);
+  assert.deepEqual(translation[0]!.affectedSegmentIds, [first.id, second.id]);
+  assert.equal(highlight[0]!.affectedSegmentId, first.id);
+});
+
 test("manual translations and audio-only sources remain valid, while malformed trims block", () => {
   const manuallyTranslated = project({ captionSegments: [caption({ translationSegment: { text: "A reviewed manual translation", wordStart: 0, wordEnd: wordCount, source: "manual", reviewStatus: "manual" } })] });
   assert.equal(runExportPreflight(manuallyTranslated, { ...runtime, platformPreview: "none" }).status, "ready");

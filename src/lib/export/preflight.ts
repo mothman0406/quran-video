@@ -20,6 +20,9 @@ export type ExportPreflightCheck = {
   severity: ExportPreflightSeverity;
   title: string;
   message: string;
+  /** All affected captions when one warning represents a repeated condition. */
+  affectedSegmentIds?: readonly string[];
+  /** First affected caption, retained for the existing single-click Review action. */
   affectedSegmentId?: string;
   action?: ExportPreflightAction;
 };
@@ -86,7 +89,7 @@ function addBlock(checks: ExportPreflightCheck[], id: string, category: ExportPr
   check(checks, { id, category, severity: "blocking", title, message, ...(segment ? { affectedSegmentId: segment.id } : {}), ...(action ? { action } : {}) });
 }
 
-function validateQuranSegment(project: Project, segment: ProjectCaptionSegment, checks: ExportPreflightCheck[]) {
+function validateQuranSegment(project: Project, segment: ProjectCaptionSegment, checks: ExportPreflightCheck[], wordHighlightUnavailable: ProjectCaptionSegment[]) {
   if (segment.contentKind === "basmalah-prelude") {
     if (segment.verseKeys.length || segment.showVerseNumberAtEnd) addBlock(checks, "basmalah-ownership", "quran", "Basmalah prelude is structurally invalid", "A basmalah prelude cannot own an ayah or carry a verse ornament.", segment, "review-caption");
     if (normalizedArabic(segment.arabic) !== normalizedArabic(CANONICAL_BASMALAH_ARABIC)) addBlock(checks, "basmalah-text", "quran", "Basmalah prelude text is inconsistent", "The prelude no longer resolves to the canonical basmalah text.", segment, "review-caption");
@@ -147,8 +150,25 @@ function validateQuranSegment(project: Project, segment: ProjectCaptionSegment, 
 
   const style = segmentStyle(project, segment);
   if (style.wordHighlightMode !== "off" && (!timings.length || timings.length !== segment.wordCount)) {
-    check(checks, { id: "word-highlight-unavailable", category: "timing", severity: "warning", title: "Word highlighting is unavailable for one caption", message: "The video can still export with normal Quran text.", affectedSegmentId: segment.id, action: "review-caption" });
+    wordHighlightUnavailable.push(segment);
   }
+}
+
+function countLabel(count: number, singular: string): string {
+  return `${count} ${singular}${count === 1 ? "" : "s"}`;
+}
+
+function addGroupedWarning(
+  checks: ExportPreflightCheck[],
+  input: Omit<ExportPreflightCheck, "severity" | "affectedSegmentId" | "affectedSegmentIds">,
+  segments: readonly ProjectCaptionSegment[],
+) {
+  const affectedSegmentIds = segments.map((segment) => segment.id);
+  check(checks, {
+    ...input,
+    severity: "warning",
+    ...(affectedSegmentIds.length ? { affectedSegmentId: affectedSegmentIds[0], affectedSegmentIds } : {}),
+  });
 }
 
 function validateOwnershipSequences(segments: readonly ProjectCaptionSegment[], checks: ExportPreflightCheck[]) {
@@ -185,6 +205,7 @@ function validateOwnershipSequences(segments: readonly ProjectCaptionSegment[], 
 /** Deterministic, local-only validation of the project snapshot and host-provided runtime facts. */
 export function runExportPreflight(project: Project, runtime: ExportPreflightRuntimeContext): ExportPreflightResult {
   const checks: ExportPreflightCheck[] = [];
+  const wordHighlightUnavailable: ProjectCaptionSegment[] = [];
   const source = runtime.sourceMedia ?? project.sourceMedia;
   const durationMs = projectDurationMs(source);
   const quranSegments = project.captionSegments.filter((segment) => segment.contentKind === "ayah");
@@ -196,7 +217,15 @@ export function runExportPreflight(project: Project, runtime: ExportPreflightRun
     if (!Number.isFinite(segment.startMs) || !Number.isFinite(segment.endMs) || segment.startMs >= segment.endMs || segment.startMs < 0 || (durationMs > 0 && segment.endMs > durationMs)) {
       addBlock(checks, "invalid-caption-timing", "timing", "Caption timing is invalid", "Caption intervals must be finite, ordered, and inside the source media.", segment, "review-caption");
     }
-    validateQuranSegment(project, segment, checks);
+    validateQuranSegment(project, segment, checks, wordHighlightUnavailable);
+  }
+  if (wordHighlightUnavailable.length) {
+    const captionCount = countLabel(wordHighlightUnavailable.length, "caption");
+    addGroupedWarning(checks, {
+      id: "word-highlight-unavailable", category: "timing",
+      title: `Word highlighting is unavailable for ${captionCount}`,
+      message: "The video can still export with normal Quran text.", action: "review-caption",
+    }, wordHighlightUnavailable);
   }
   validateOwnershipSequences(project.captionSegments, checks);
 
@@ -227,10 +256,18 @@ export function runExportPreflight(project: Project, runtime: ExportPreflightRun
 
   if (project.typography.translationVisible) {
     const translationSegments = project.captionSegments.filter((segment) => segment.contentKind === "ayah");
-    if (translationSegments.some((segment) => !segment.translation)) check(checks, { id: "translation-source-missing", category: "translation", severity: "warning", title: "Translation is unavailable for one caption", message: "The video can still export with Arabic text.", action: "review-translation" });
-    for (const segment of translationSegments) {
-      if (segment.translationSegment?.reviewStatus === "needs-review") check(checks, { id: "translation-needs-review", category: "translation", severity: "warning", title: "Translation segment may need review", message: "This visible translation fragment uses a fallback source range.", affectedSegmentId: segment.id, action: "review-translation" });
-    }
+    const missingTranslations = translationSegments.filter((segment) => !segment.translation);
+    if (missingTranslations.length) addGroupedWarning(checks, {
+      id: "translation-source-missing", category: "translation",
+      title: `Translation is unavailable for ${countLabel(missingTranslations.length, "caption")}`,
+      message: "The video can still export with Arabic text.", action: "review-translation",
+    }, missingTranslations);
+    const translationsNeedingReview = translationSegments.filter((segment) => segment.translationSegment?.reviewStatus === "needs-review");
+    if (translationsNeedingReview.length) addGroupedWarning(checks, {
+      id: "translation-needs-review", category: "translation",
+      title: `Translation segments may need review for ${countLabel(translationsNeedingReview.length, "caption")}`,
+      message: "These visible translation fragments use fallback source ranges.", action: "review-translation",
+    }, translationsNeedingReview);
   }
 
   if (!runtime.sourceAvailable) addBlock(checks, "source-unavailable", "media", "Source video needs to be relinked", "The active source file is unavailable in this browser.", undefined, "relink-source");
