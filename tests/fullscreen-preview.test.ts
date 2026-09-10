@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { isComposedPreviewFullscreen, toggleComposedPreviewFullscreen } from "../src/lib/editor/fullscreen.ts";
+import { canFullscreenComposedPreview, isComposedPreviewFullscreen, toggleComposedPreviewFullscreen } from "../src/lib/editor/fullscreen.ts";
 
 const workspace = readFileSync(new URL("../src/components/editor-workspace.tsx", import.meta.url), "utf8");
 const captions = readFileSync(new URL("../src/components/caption-preview.tsx", import.meta.url), "utf8");
@@ -9,7 +9,8 @@ const styles = readFileSync(new URL("../src/app/globals.css", import.meta.url), 
 
 test("fullscreen requests the composed preview target and leaves the media clock untouched", async () => {
   const composedPreview = {} as Element & { requestFullscreen: () => Promise<void> };
-  const rawVideo = { requestFullscreen: () => { throw new Error("raw video must not be fullscreened"); } };
+  let rawVideoRequests = 0;
+  const rawVideo = { requestFullscreen: () => { rawVideoRequests += 1; } };
   let fullscreenElement: Element | null = null;
   let requestCount = 0;
   let exitCount = 0;
@@ -22,10 +23,11 @@ test("fullscreen requests the composed preview target and leaves the media clock
   assert.equal(await toggleComposedPreviewFullscreen(composedPreview, documentLike), "entered");
   assert.equal(requestCount, 1);
   assert.equal(isComposedPreviewFullscreen(composedPreview, documentLike), true);
-  assert.equal(rawVideo.requestFullscreen instanceof Function, true);
+  assert.equal(rawVideoRequests, 0);
   assert.equal(await toggleComposedPreviewFullscreen(composedPreview, documentLike), "exited");
   assert.equal(exitCount, 1);
   assert.equal(fullscreenElement, null);
+  assert.equal(rawVideoRequests, 0);
 });
 
 test("legacy WebKit container fullscreen is supported without a media-element fallback", async () => {
@@ -39,8 +41,37 @@ test("legacy WebKit container fullscreen is supported without a media-element fa
   assert.doesNotMatch(readFileSync(new URL("../src/lib/editor/fullscreen.ts", import.meta.url), "utf8"), /webkitEnterFullscreen/);
 });
 
+test("mounted composed previews gain standard fullscreen capability after an initial null ref", () => {
+  const documentLike = { fullscreenEnabled: true };
+  const composedPreview = { requestFullscreen() {} };
+
+  assert.equal(canFullscreenComposedPreview(null, documentLike), false);
+  assert.equal(canFullscreenComposedPreview(composedPreview, documentLike), true);
+});
+
+test("WebKit container fullscreen capability is available when the standard API is absent", () => {
+  const composedPreview = { webkitRequestFullscreen() {} };
+
+  assert.equal(canFullscreenComposedPreview(composedPreview, { webkitFullscreenEnabled: true }), true);
+  assert.equal(canFullscreenComposedPreview(composedPreview, { webkitFullscreenEnabled: false }), false);
+});
+
+test("fullscreen stays disabled when the composed container or browser support is unavailable", () => {
+  assert.equal(canFullscreenComposedPreview(null, { fullscreenEnabled: true }), false);
+  assert.equal(canFullscreenComposedPreview({}, { fullscreenEnabled: true }), false);
+  assert.equal(canFullscreenComposedPreview({ requestFullscreen() {} }, { fullscreenEnabled: false }), false);
+});
+
+test("a rejected composed fullscreen request remains retryable", async () => {
+  const composedPreview = { requestFullscreen: async () => { throw new Error("gesture expired"); } } as unknown as Element & { requestFullscreen: () => Promise<void> };
+  const documentLike = { fullscreenEnabled: true };
+
+  await assert.rejects(toggleComposedPreviewFullscreen(composedPreview, documentLike), /gesture expired/);
+  assert.equal(canFullscreenComposedPreview(composedPreview, documentLike), true);
+});
+
 test("the sole caption renderer remains inside the fullscreen preview subtree", () => {
-  const fullscreenStart = workspace.indexOf('ref={fullscreenPreviewRef} className="editor-fullscreen-preview"');
+  const fullscreenStart = workspace.indexOf('ref={setFullscreenPreviewRef} className="editor-fullscreen-preview"');
   const canvasStart = workspace.indexOf('ref={previewRef} className={`project-preview-canvas', fullscreenStart);
   const captionRenderer = workspace.indexOf("<CaptionPreview", canvasStart);
   const fullscreenEnd = workspace.indexOf("</div> : <label className=\"editor-empty-canvas\"", captionRenderer);
@@ -57,6 +88,10 @@ test("native video fullscreen is suppressed where controlsList is supported and 
   assert.match(workspace, /onDoubleClick=\{\(event\) => \{ event\.preventDefault\(\); togglePreviewFullscreen\(\); \}\}/);
   assert.match(workspace, /fullscreenchange/);
   assert.match(workspace, /webkitfullscreenchange/);
+  assert.match(workspace, /canFullscreenComposedPreview\(fullscreenPreviewElement, document\)/);
+  assert.match(workspace, /disabled=\{!fullscreenSupported\}/);
+  assert.match(workspace, /const preview = fullscreenPreviewRef\.current;/);
+  assert.match(workspace, /Composed preview fullscreen request failed/);
   assert.match(workspace, /editor-audio-canvas/);
   for (const format of ["vertical", "landscape", "square"]) assert.match(styles, new RegExp(`editor-fullscreen-preview[^\\n]*data-project-format=\\"${format}\\"`));
   assert.match(styles, /align-items:center; justify-content:center; background:#050607/);

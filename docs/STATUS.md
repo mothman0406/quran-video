@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Restore fullscreen control availability
+
+Complete:
+
+- Restored fullscreen capability detection from the mounted composed-preview wrapper, rather than from raw media. The client-safe callback-ref lifecycle starts disabled during SSR, then enables the control as soon as the wrapper mounts in a browser that supports it.
+- Standard `requestFullscreen` and practical WebKit container fallbacks are supported; an explicitly disabled browser capability or missing wrapper remains correctly disabled. The raw video/audio element is still never the fullscreen target.
+- Preserved the composed caption subtree, canvas centering, audio-only preview, fullscreen-change state handling, and native video fullscreen suppression. A rejected request logs a development diagnostic, shows a small retry message, and leaves the control usable.
+- Added focused coverage for standard/WebKit/unsupported capability detection, initial null-ref recovery, composed-only targeting, rejection retryability, and existing fullscreen caption invariants.
+
+Verification: `npm run regression:quran` passes its production invariant probes; its optional local real Quran alignment benchmark remains unavailable/failing in this workspace and its generated report was not retained. `npm test` (330 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and the configuration reminder for optional TikTok posting credentials.
+
 ## Current milestone: Highlight detected basmalah word by word
 
 Complete:

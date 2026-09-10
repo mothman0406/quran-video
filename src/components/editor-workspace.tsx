@@ -31,7 +31,7 @@ import { formatTimelineClock, projectDurationMs, timeToViewportPosition, timelin
 import { waveformPeaksForViewport, type WaveformData } from "@/lib/editor/waveform";
 import type { CaptionCanvasBounds, PlatformCollision, SocialPlatformId } from "@/lib/editor/social-platform-guides";
 import { WORKSPACE_LAYOUT_DEFAULTS, clampWorkspacePanelWidth, clampWorkspaceTimelineHeight } from "@/lib/editor/workspace-layout";
-import { isComposedPreviewFullscreen, toggleComposedPreviewFullscreen } from "@/lib/editor/fullscreen";
+import { canFullscreenComposedPreview, isComposedPreviewFullscreen, toggleComposedPreviewFullscreen } from "@/lib/editor/fullscreen";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage = "idle" | "preparing" | "detecting-speech" | "loading-model" | "transcribing" | "matching" | "captions" | "complete" | "error";
@@ -255,6 +255,8 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const [workspacePreferencesReady, setWorkspacePreferencesReady] = useState(false);
   const [layoutResizing, setLayoutResizing] = useState(false);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
+  const [fullscreenPreviewElement, setFullscreenPreviewElement] = useState<HTMLDivElement | null>(null);
+  const [fullscreenError, setFullscreenError] = useState<string | null>(null);
   const fullscreenPreviewRef = useRef<HTMLDivElement>(null);
   const timelineResizeStart = useRef<{ y: number; height: number } | null>(null);
   const panelResizeStart = useRef<{ panel: "left" | "right"; x: number; width: number } | null>(null);
@@ -276,6 +278,11 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     onMergeNext, onTranslationFragmentChange, onResetTranslationFragment, onResetTiming, onResetAllTiming, onTimelinePinchZoom,
   } = props;
   const onExport = exportPreflight?.status === "warnings" ? onExportAnyway : onStartExport;
+  const fullscreenSupported = typeof document !== "undefined" && canFullscreenComposedPreview(fullscreenPreviewElement, document);
+  const setFullscreenPreviewRef = useCallback((node: HTMLDivElement | null) => {
+    fullscreenPreviewRef.current = node;
+    setFullscreenPreviewElement(node);
+  }, []);
   useEffect(() => {
     const syncFullscreenState = () => setIsPreviewFullscreen(isComposedPreviewFullscreen(fullscreenPreviewRef.current, document));
     document.addEventListener("fullscreenchange", syncFullscreenState);
@@ -285,11 +292,15 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
       document.removeEventListener("fullscreenchange", syncFullscreenState);
       document.removeEventListener("webkitfullscreenchange", syncFullscreenState);
     };
-  }, []);
+  }, [fullscreenPreviewElement]);
   const togglePreviewFullscreen = useCallback(() => {
     const preview = fullscreenPreviewRef.current;
-    if (!preview) return;
-    void toggleComposedPreviewFullscreen(preview, document).catch(() => undefined);
+    if (!preview || !canFullscreenComposedPreview(preview, document)) return;
+    setFullscreenError(null);
+    void toggleComposedPreviewFullscreen(preview, document).catch((error: unknown) => {
+      console.warn("Composed preview fullscreen request failed", error);
+      setFullscreenError("Fullscreen couldn't start. Try again.");
+    });
   }, []);
   useEffect(() => {
     if (!session) return;
@@ -513,7 +524,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
       <section className="editor-main-stage">
         <div className="editor-stage-header"><div><SectionLabel>Canvas</SectionLabel><h1>{videoFile ? "Caption composition" : "Begin with a recitation"}</h1></div><div className="editor-stage-info"><span>{selectedFormatDefinition.label}</span><span>{formatDuration(durationMs / 1000)}</span></div></div>
         <div className="editor-canvas-well">
-          {videoUrl ? <div ref={fullscreenPreviewRef} className="editor-fullscreen-preview" data-project-format={projectFormat.preset}>
+          {videoUrl ? <div ref={setFullscreenPreviewRef} className="editor-fullscreen-preview" data-project-format={projectFormat.preset}>
             <div ref={previewRef} className={`project-preview-canvas editor-canvas ${mediaSource?.hasVideo ? "" : "editor-audio-canvas"}`} data-project-aspect-ratio={selectedFormatDefinition.aspectRatio} data-project-format={projectFormat.preset} style={{ aspectRatio: `${projectFormat.width} / ${projectFormat.height}` }} onPointerDown={onCanvasBackgroundPointerDown}>
               {mediaSource?.hasVideo ? <video ref={videoRef} className="h-full w-full object-contain" controls controlsList="nofullscreen" playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onPointerDown={onSelectMedia} onDoubleClick={(event) => { event.preventDefault(); togglePreviewFullscreen(); }} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={(node) => { (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node as unknown as HTMLVideoElement; }} className="editor-audio-element" controls preload="metadata" src={videoUrl} onPointerDown={onSelectMedia} onLoadedMetadata={onLoadedMetadata} onTimeUpdate={onVideoTimeUpdate} onPlay={onMediaPlay} onPause={onMediaPause} onEnded={onMediaEnded} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onError={onVideoError}>Your browser does not support audio playback.</audio>}
               {showSafeArea && <SafeAreaOverlay format={projectFormat} />}
@@ -522,7 +533,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
             </div>
           </div> : <label className="editor-empty-canvas"><span className="editor-upload-icon">↑</span><strong>Choose media to begin</strong><small>Your source stays on this device. Nothing is uploaded.</small><input accept="video/*,audio/*" type="file" onChange={onVideoSelect} /></label>}
         </div>
-        <div className="editor-playback-row"><span className="editor-playback-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(durationMs / 1000)}</span><span className="editor-playback-actions"><span className="editor-playback-hint">Space to play · ← → to nudge</span>{videoUrl && <button className="editor-icon-button" type="button" aria-label={isPreviewFullscreen ? "Exit fullscreen preview" : "Fullscreen preview"} title={isPreviewFullscreen ? "Exit fullscreen" : "Fullscreen preview"} aria-pressed={isPreviewFullscreen} onClick={togglePreviewFullscreen}>{isPreviewFullscreen ? "↙" : "⛶"}</button>}</span></div>
+        <div className="editor-playback-row"><span className="editor-playback-time">{formatDuration(currentTimeMs / 1000)} <i>/</i> {formatDuration(durationMs / 1000)}</span><span className="editor-playback-actions"><span className="editor-playback-hint">Space to play · ← → to nudge</span>{fullscreenError && <span className="editor-playback-fullscreen-error" role="status">{fullscreenError}</span>}{videoUrl && <button className="editor-icon-button" type="button" aria-label={isPreviewFullscreen ? "Exit fullscreen preview" : "Fullscreen preview"} title={isPreviewFullscreen ? "Exit fullscreen" : "Fullscreen preview"} aria-pressed={isPreviewFullscreen} disabled={!fullscreenSupported} onClick={togglePreviewFullscreen}>{isPreviewFullscreen ? "↙" : "⛶"}</button>}</span></div>
         {videoUrl && <div className="editor-timeline-panel"><button className="editor-timeline-resize" type="button" aria-label="Resize timeline" title="Drag to resize · double-click to reset" onPointerDown={onTimelineResizeDown} onPointerMove={onTimelineResizeMove} onPointerUp={onTimelineResizeUp} onDoubleClick={() => setTimelineHeight(WORKSPACE_LAYOUT_DEFAULTS.timelineHeight)} /><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><div className="editor-timeline-controls"><button type="button" aria-label={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} title={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} onClick={toggleTimeline}>{timelineCollapsed ? "↑" : "↓"}</button><button type="button" aria-label="Zoom out timeline" title="Zoom out" onClick={() => onTimelineZoom(timelineViewport.zoom / 2)}>−</button><input aria-label="Timeline zoom" title="Timeline zoom" type="range" min="1" max="128" step="1" value={timelineViewport.zoom} onChange={(event) => onTimelineZoom(Number(event.target.value))} /><button type="button" aria-label="Zoom in timeline" title="Zoom in" onClick={() => onTimelineZoom(timelineViewport.zoom * 2)}>+</button><button type="button" title="Fit the full project in the timeline" onClick={() => onTimelineZoom(1)}>Fit</button><button type="button" title="Reset media trim" onClick={onResetMediaTrim}>Reset trim</button></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
           <div className="editor-timeline-labels">{tracks.map((track) => <span className="editor-track-label" key={track.kind}>{track.label}</span>)}</div>
           <div ref={timelineRef} className="editor-timeline-content" onPointerDown={onTimelinePointerDown} onPointerMove={onTimelinePointerMove}>
