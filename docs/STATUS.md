@@ -1,5 +1,18 @@
 # Status
 
+## Current milestone: Polish dashboard and billing experience
+
+Complete:
+
+- Added a shared responsive Quran AutoCaption dashboard shell for Projects, Billing, and Settings. Its Upload recitation action enters the existing editor upload flow, and authenticated members see their identity and authoritative plan in the shell.
+- Refined Projects around a factual saved-project count, search, existing cloud project cards, and the existing Open/Rename/Delete behavior. Removed customer-facing paid-storage placeholder copy.
+- Added `/billing` with a Monthly/Yearly selector, exact canonical pricing (Pro $9.99/month or $8.25/month billed $99 yearly; Premium $19.99/month or $16.58/month billed $199 yearly), entitlement-driven current-plan treatment, and the existing Stripe Checkout/Customer Portal actions.
+- Added factual pricing FAQs and a restrained Stripe/cancellation information row. The editor plan dialog now uses the same yearly framing and no longer exposes unfinished paid-storage language.
+- Reworked Account Settings into the shared shell with identity, plan/billing, real cloud-project count, Privacy/Terms links, sign out, and the existing reachable account deletion flow.
+- Added focused dashboard/billing coverage for navigation, upload routing, prices, Stripe-action preservation, current-plan handling, FAQ content, free-project language, legal links, deletion reachability, and no fabricated unlimited limits.
+
+Verification: `npm run regression:quran` passes production invariant probes; the optional local real `quran-align`/EveryAyah benchmark remains unavailable in this workspace and wrote `docs/regression/results/20260910.md`. `npm test` (360 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and optional TikTok configuration reminder.
+
 ## Current milestone: Simplify media and sharing UI
 
 Complete:

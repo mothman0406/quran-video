@@ -23,11 +23,14 @@ test("the reusable comparison marks the active tier, shows launch pricing, and d
   assert.match(plans, /Current plan/);
   assert.match(plans, /monthly: 9\.99/);
   assert.match(plans, /monthly: 19\.99/);
-  assert.match(plans, /Annual/);
+  assert.match(plans, /Yearly/);
   assert.match(plans, /Upgrade to \$\{detail\.name\}/);
   assert.match(plans, /Manage plan/);
   assert.match(plans, /Plan capability comparison/);
-  assert.match(plans, /TBD/);
+  assert.match(plans, /\$8\.25 \/ month/);
+  assert.match(plans, /\$16\.58 \/ month/);
+  assert.doesNotMatch(plans, /TBD/);
+  assert.doesNotMatch(plans, /unlimited/i);
   assert.doesNotMatch(plans, /Upgrade available soon/);
 });
 
