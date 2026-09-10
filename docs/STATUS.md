@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Preserve captions in fullscreen preview
+
+Complete:
+
+- Diagnosed the caption loss as browser-native fullscreen acting on the raw video element while the authoritative Quran caption layer is its sibling in the preview canvas.
+- Added a dedicated fullscreen action that requests fullscreen on a wrapper around the existing composed preview. The existing video/audio element, caption renderer, Arabic/translation/transliteration layers, word highlights, verse ornament, and basmalah all retain their single rendering path and media clock.
+- Added fullscreen-change state cleanup, legacy WebKit container support, native-control fullscreen suppression where `controlsList` is supported, and double-click routing to the composed-preview action. The fullscreen canvas centers the existing 9:16, 16:9, or 1:1 composition with neutral letterboxing; audio-only projects use the same canvas.
+- Added focused mocked Fullscreen API coverage for target/exit state, caption-subtree and no-duplicate-renderer structure, caption content/word highlighting, native-control handling, all formats, and audio-only validity.
+
+Verification: `npm test` (324 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes production invariant probes; its optional local real Quran alignment benchmark remains unavailable/failing in this workspace, and its generated evidence was not retained because no recognition code changed. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning.
+
 ## Current milestone: Restore export preflight flow
 
 Complete:
