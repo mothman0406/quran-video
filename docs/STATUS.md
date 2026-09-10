@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Production basmalah timing diagnostics
+
+Complete:
+
+- Added a production-safe basmalah diagnostic mode gated only by `?debugBasmalah=1`. It exposes **Copy basmalah diagnostics** only when the current editable captions contain an acoustic `basmalah-prelude`; normal production use has no new control or console logging.
+- The copied JSON intentionally contains only the canonical basmalah, logical token indexes, optional-prelude and resulting caption word timings, display/presentation mappings, highlight mode, counts, final-word stage flags, and representative shared highlight evaluations. It excludes media, URLs, transcripts, account/auth/billing data, storage data, and filesystem details.
+- Captured the raw FastConformer optional-prelude timing summary in memory for the current recognition run, then compare it to the exact `CaptionSegment` used by preview/export. No recognition decision, timing, split, layout, or highlight behavior changed.
+- Added focused coverage for the query gate, four-word fixture, privacy boundary, fourth-word loss localization, shared presentation evaluation, and non-mutating diagnostic construction.
+
+Verification: `npm run regression:quran` passes production invariant probes; its optional real Quran alignment benchmark remains unavailable/failing in this workspace, and its generated evidence was not retained. `npm test` (343 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and optional TikTok configuration reminder.
+
 ## Current milestone: End timeline scrubbing on pointer release
 
 Complete:

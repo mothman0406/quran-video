@@ -157,6 +157,8 @@ type EditorWorkspaceProps = {
   onChangeFormat: (preset: ProjectFormatPreset) => void;
   onDetect: () => void;
   onCopyAlignmentDebug: () => void;
+  showBasmalahDiagnostics: boolean;
+  onCopyBasmalahDiagnostics: () => void;
   onCorrectDetection: () => void;
   onToggleCorrection: () => void;
   onSurahChange: (surah: number) => void;
@@ -275,7 +277,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     showCorrection, surah, startAyah, endAyah, youtubeImportAvailable, youtubeUrl, youtubeMode, youtubeImportStatus, youtubeImportError, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
     onProjectNameChange, onVideoSelect, onRelinkAsset, onActivateAsset, onRemoveAsset, onYoutubeUrlChange, onYoutubeModeChange, onImportYouTube, onCancelYouTubeImport, onLoadedMetadata, onVideoTimeUpdate, onMediaPlay, onMediaPause, onMediaEnded, onMediaSeeking, onTogglePreviewPlayback, onSeekPreview, onVideoError, onSelectObject,
     onObjectPointerDown, onResizePointerDown, onObjectPointerMove, onObjectPointerUp, onCanvasBackgroundPointerDown, onSetRightInspectorMode, onSelectMedia,
-    onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onTimelinePointerEnd, onEdgeDown, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug,
+    onSelectSegment, onSegmentPointerDown, onTimelinePointerDown, onPlayheadPointerDown, onTimelinePointerMove, onTimelinePointerEnd, onEdgeDown, onMediaTrimPointerDown, onResetMediaTrim, onTimelineZoom, onTimelinePan, onChangeFormat, onDetect, onCopyAlignmentDebug, showBasmalahDiagnostics, onCopyBasmalahDiagnostics,
     onCorrectDetection, onToggleCorrection, onSurahChange, onStartAyahChange, onEndAyahChange, onClearVideo, onSaveProject, onUndo, onRedo, onHistoryTransactionStart, onHistoryTransactionCommit, onSaveToAccount, onOpenProjects,
     onOpenCloudProjects, onDiscard, onNewProject, onOpenAuth, onCloseAuth, onBeforeAuthenticate, onExportOpen, onExport: onStartExport, onExportAnyway, onExportPreflightAction, onCancelExport, onDownloadExport,
     onSetExportQuality, onSetExportOpen, onTypographyChange, onBackgroundChange, onTransitionChange, onPlaybackRateChange,
@@ -505,6 +507,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
             {videoMetadata && <p className="editor-meta-line">{formatDuration(videoMetadata.durationSeconds)}{mediaSource?.hasVideo ? ` · ${videoMetadata.width} × ${videoMetadata.height}` : " · audio"}</p>}
             {stage === "complete" && <button className="editor-button editor-button-primary editor-full-button" disabled={busy || !support?.supported} type="button" onClick={onDetect}>Detect again</button>}
             {process.env.NODE_ENV !== "production" && (stage === "complete" || stage === "error") && <button className="editor-text-button" type="button" onClick={onCopyAlignmentDebug}>Copy Alignment Debug</button>}
+            {showBasmalahDiagnostics && <button className="editor-text-button" type="button" onClick={onCopyBasmalahDiagnostics}>Copy basmalah diagnostics</button>}
             {stage === "complete" && alignments.length > 0 && <button className="editor-button editor-button-quiet editor-full-button" type="button" onClick={onToggleCorrection}>Correct detection</button>}
             <button className="editor-text-button" type="button" onClick={onClearVideo}>Clear active source</button>
           </>}

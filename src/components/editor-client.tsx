@@ -90,6 +90,12 @@ import type { QuranTranslation } from "@/lib/quran/translations";
 import { localTranscriptionSupport } from "@/lib/recognition/support";
 import { type CaptionObject, type CaptionResizeEdge } from "@/components/caption-preview";
 import EditorWorkspace from "@/components/editor-workspace";
+import {
+  basmalahDiagnosticsEnabled,
+  createBasmalahDiagnostic,
+  shouldShowBasmalahDiagnostics,
+  type BasmalahDiagnosticsPrelude,
+} from "@/lib/editor/basmalah-diagnostics";
 import { snapshotLocalExportConfiguration } from "@/lib/export/config";
 import { offlineWebCodecsSupport } from "@/lib/export/support";
 import {
@@ -244,6 +250,7 @@ type AlignmentDebug = {
 
 export default function Home() {
   const youtubeImportAvailable = process.env.NODE_ENV !== "production";
+  const basmalahDiagnosticCaptureEnabled = typeof window !== "undefined" && basmalahDiagnosticsEnabled(window.location.search);
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(
@@ -358,6 +365,7 @@ export default function Home() {
   const automaticRecognition = useRef(new AutomaticRecognitionController());
   const captionProgress = useRef(new CaptionGenerationProgressController());
   const alignmentDebug = useRef<AlignmentDebug | null>(null);
+  const basmalahDiagnosticsPrelude = useRef<BasmalahDiagnosticsPrelude | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const previewRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -811,6 +819,7 @@ export default function Home() {
       resetProjectHistory();
       setAlignments([]);
       setSegments([]);
+      basmalahDiagnosticsPrelude.current = null;
       setContent({});
       setCurrentTimeMs(0);
       setPositioning(resetCaptionPositioning(projectFormat));
@@ -869,6 +878,7 @@ export default function Home() {
     setMediaTrim(createMediaTrim(0));
     setAlignments([]);
     setSegments([]);
+    basmalahDiagnosticsPrelude.current = null;
     setContent({});
     setCurrentTimeMs(0);
     setTimelineTooltip(null);
@@ -1084,6 +1094,7 @@ export default function Home() {
     setProjectName(project.title);
     setProjectFormat(project.format);
     setProjectFormatExplicitlyChosen(true);
+    basmalahDiagnosticsPrelude.current = null;
     setAlignments(project.verseAlignments as VerseAlignment[]);
     setSegments(resolveCaptionTranslationSegments(project.captionSegments as CaptionSegment[]));
     setPositioning(project.positioning);
@@ -1339,6 +1350,7 @@ export default function Home() {
     setProgress(null);
     setAlignments([]);
     setSegments([]);
+    basmalahDiagnosticsPrelude.current = null;
     setContent({});
     setStage("preparing");
     setProgress(captionProgress.current.start(job));
@@ -1475,6 +1487,7 @@ export default function Home() {
       );
       reportProgress("building-captions", 1);
       const displayPrelude = nextSegments.find((segment) => segment.contentKind === "basmalah-prelude") ?? null;
+      basmalahDiagnosticsPrelude.current = fastConformerAlignment?.optionalPrelude ?? null;
       setAlignments(next);
       setSegments(nextSegments);
       resetProjectHistory();
@@ -1669,6 +1682,18 @@ export default function Home() {
     if (!alignmentDebug.current || typeof navigator === "undefined") return;
     await navigator.clipboard.writeText(JSON.stringify(alignmentDebug.current, null, 2));
   }
+  async function copyBasmalahDiagnostics() {
+    if (!basmalahDiagnosticCaptureEnabled || typeof navigator === "undefined") return;
+    const segment = segments.find((item) => item.contentKind === "basmalah-prelude");
+    if (!segment) return;
+    const diagnostic = createBasmalahDiagnostic({
+      segment,
+      optionalPrelude: basmalahDiagnosticsPrelude.current,
+      wordHighlightMode: typography.wordHighlightMode,
+    });
+    console.debug("BASMALAH_DIAGNOSTIC", diagnostic);
+    await navigator.clipboard.writeText(JSON.stringify(diagnostic, null, 2));
+  }
   function clearVideo() {
     exportAbort.current?.abort();
     clearCompletedExport();
@@ -1688,6 +1713,7 @@ export default function Home() {
     setMediaTrim(createMediaTrim(0));
     setAlignments([]);
     setSegments([]);
+    basmalahDiagnosticsPrelude.current = null;
     setContent({});
     setProgress(null);
     setStage("idle");
@@ -2693,6 +2719,8 @@ export default function Home() {
         onChangeFormat={changeFormat}
         onDetect={() => void detect()}
         onCopyAlignmentDebug={() => { void copyAlignmentDebug(); }}
+        showBasmalahDiagnostics={shouldShowBasmalahDiagnostics(typeof window === "undefined" ? "" : window.location.search, segments)}
+        onCopyBasmalahDiagnostics={() => { void copyBasmalahDiagnostics(); }}
         onCorrectDetection={() => void correctDetection()}
         onToggleCorrection={() => setShowCorrection((value) => !value)}
         onSurahChange={setSurah}
