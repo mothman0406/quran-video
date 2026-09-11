@@ -4,6 +4,7 @@ import { createClient, type SupabaseClient, type User } from "@supabase/supabase
 import Stripe from "stripe";
 import { accountEntitlementsForPlan, type Plan } from "../entitlements.ts";
 import { applicationOrigin } from "../application-url.ts";
+import { retrySupabaseJwtClockSkew } from "../supabase/clock-skew.ts";
 
 export const BILLING_INTERVALS = ["month", "year"] as const;
 export type BillingInterval = (typeof BILLING_INTERVALS)[number];
@@ -128,13 +129,13 @@ export function safeApplicationOrigin(request: Request): string | null {
 }
 
 export async function getBillingCustomer(userId: string, admin: BillingAdmin = billingAdminClient(), billingEnvironment: StripeBillingEnvironment = stripeBillingEnvironment()): Promise<BillingCustomer | null> {
-  const { data, error } = await admin.from("billing_customers").select("user_id,stripe_customer_id,billing_environment").eq("user_id", userId).eq("billing_environment", billingEnvironment).maybeSingle();
+  const { data, error } = await retrySupabaseJwtClockSkew(() => admin.from("billing_customers").select("user_id,stripe_customer_id,billing_environment").eq("user_id", userId).eq("billing_environment", billingEnvironment).maybeSingle());
   if (error) throw error;
   return data as BillingCustomer | null;
 }
 
 export async function getBillingSubscription(userId: string, admin: BillingAdmin = billingAdminClient()): Promise<BillingSubscription | null> {
-  const { data, error } = await admin.from("billing_subscriptions").select("user_id,stripe_customer_id,stripe_subscription_id,stripe_price_id,plan,billing_interval,status,current_period_end,cancel_at_period_end").eq("user_id", userId).maybeSingle();
+  const { data, error } = await retrySupabaseJwtClockSkew(() => admin.from("billing_subscriptions").select("user_id,stripe_customer_id,stripe_subscription_id,stripe_price_id,plan,billing_interval,status,current_period_end,cancel_at_period_end").eq("user_id", userId).maybeSingle());
   if (error) throw error;
   return data as BillingSubscription | null;
 }

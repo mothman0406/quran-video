@@ -2,6 +2,7 @@ import "server-only";
 
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 import { accountEntitlementsForPlan, type AccountEntitlements } from "../entitlements.ts";
+import { retrySupabaseJwtClockSkew } from "../supabase/clock-skew.ts";
 
 export type AccountEntitlementReader = (userId: string) => Promise<unknown>;
 
@@ -18,7 +19,7 @@ function entitlementAdminClient(): SupabaseClient {
 
 /** Resolves one account's effective plan. Missing and unknown rows safely become Free. */
 async function readAccountPlan(userId: string): Promise<unknown> {
-  const { data, error } = await entitlementAdminClient().from("account_entitlements").select("plan").eq("user_id", userId).maybeSingle();
+  const { data, error } = await retrySupabaseJwtClockSkew(() => entitlementAdminClient().from("account_entitlements").select("plan").eq("user_id", userId).maybeSingle());
   if (error) throw new Error("Account entitlement lookup failed.");
   return data?.plan;
 }

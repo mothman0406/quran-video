@@ -2,6 +2,7 @@ import { createBrowserClient } from "@supabase/ssr";
 import type { Session, SupabaseClient } from "@supabase/supabase-js";
 import { authCallbackUrl as configuredAuthCallbackUrl } from "./application-url.ts";
 import { supabaseCookieOptions } from "./supabase/cookies.ts";
+import { retrySupabaseJwtClockSkew } from "./supabase/clock-skew.ts";
 import { cloudProjectName, mediaExtension, PROJECT_MEDIA_BUCKET, projectMediaPath, quranProjectMetadata } from "./cloud-projects.ts";
 import { loadSavedProject, serializeSavedProject } from "./project-storage.ts";
 import type { SavedProject } from "./schemas/project.ts";
@@ -139,7 +140,7 @@ export async function signOut(): Promise<void> { const { error } = await require
 
 function rows(data: unknown): CloudProjectRow[] { return (Array.isArray(data) ? data : data ? [data] : []) as CloudProjectRow[]; }
 export async function listCloudProjectRecords(): Promise<CloudProjectRecord[]> {
-  const { data, error } = await requireClient().from("projects").select("*").eq("save_complete", true).order("updated_at", { ascending: false });
+  const { data, error } = await retrySupabaseJwtClockSkew(() => requireClient().from("projects").select("*").eq("save_complete", true).order("updated_at", { ascending: false }));
   if (error) throw cloudProjectError(error, "database");
   return rows(data).map(cloudRecord);
 }
@@ -203,7 +204,7 @@ export async function cancelCloudProjectSave(id: string): Promise<void> {
   const { error } = await requireClient().rpc("cancel_cloud_project_save", { p_id: id });
   if (error) throw cloudProjectError(error, "database");
 }
-export async function getCloudStorageSummary(): Promise<CloudStorageSummary> { const { data, error } = await requireClient().rpc("cloud_project_storage_summary"); if (error) throw error; return ((Array.isArray(data) ? data[0] : data) as CloudStorageSummary | null) ?? { project_count: 0, total_source_bytes: 0, total_duration_ms: 0 }; }
+export async function getCloudStorageSummary(): Promise<CloudStorageSummary> { const { data, error } = await retrySupabaseJwtClockSkew(() => requireClient().rpc("cloud_project_storage_summary")); if (error) throw error; return ((Array.isArray(data) ? data[0] : data) as CloudStorageSummary | null) ?? { project_count: 0, total_source_bytes: 0, total_duration_ms: 0 }; }
 
 export async function uploadPrivateProjectObject(path: string, body: Blob, contentType: string, stage: Extract<CloudSaveStage, "source-upload" | "thumbnail"> = "source-upload"): Promise<void> { const { error } = await requireClient().storage.from(PROJECT_MEDIA_BUCKET).upload(path, body, { contentType, upsert: false, cacheControl: "3600" }); if (error) throw cloudProjectError(error, stage); }
 
