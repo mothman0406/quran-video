@@ -13,11 +13,22 @@ export function exportAuthIntent(authenticated: boolean): AuthIntent {
     : { kind: "authenticate", continuation: "export" };
 }
 
+const AUTH_RETURN_PATHS = new Set(["/", "/editor", "/projects", "/account", "/billing"]);
+
 /** OAuth and email links may only return to public, first-party application routes. */
-export function safeAuthReturnPath(value: string | null | undefined): "/" | "/editor" | "/projects" {
-  if (value === "/" || value === "/projects") return value;
-  return "/editor";
+export function safeAuthReturnPath(value: string | null | undefined): string {
+  if (!value?.startsWith("/") || value.startsWith("//")) return "/editor";
+
+  try {
+    const returnUrl = new URL(value, CANONICAL_AUTH_RETURN_ORIGIN);
+    if (returnUrl.origin !== CANONICAL_AUTH_RETURN_ORIGIN || !AUTH_RETURN_PATHS.has(returnUrl.pathname)) return "/editor";
+    return `${returnUrl.pathname}${returnUrl.search}${returnUrl.hash}`;
+  } catch {
+    return "/editor";
+  }
 }
+
+const CANONICAL_AUTH_RETURN_ORIGIN = "https://qurancaptions.com";
 
 type SessionStorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 

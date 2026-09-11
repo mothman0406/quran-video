@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { applicationOrigin, authCallbackUrl } from "../src/lib/application-url.ts";
+import { applicationOrigin, authCallbackUrl, CANONICAL_PRODUCTION_ORIGIN } from "../src/lib/application-url.ts";
 import { formatRuntimeConfigurationIssues, runtimeConfigurationIssues } from "../src/lib/runtime-config.ts";
 import { stripeCheckoutConfigured, stripeEnvironmentIsSafe } from "../src/lib/billing/server.ts";
 
@@ -19,6 +19,8 @@ test("canonical app URLs retain localhost development and reject unsafe producti
   assert.equal(applicationOrigin("http://localhost:3000", undefined, "production"), null);
   assert.equal(applicationOrigin("https://quran.example", "https://attacker.example", "production"), "https://quran.example");
   assert.equal(applicationOrigin("https://quran.example/editor", undefined, "production"), null);
+  assert.equal(applicationOrigin("https://quran-autocaption.netlify.app", undefined, "production"), CANONICAL_PRODUCTION_ORIGIN);
+  assert.equal(applicationOrigin("https://quran-video.netlify.app", undefined, "production"), CANONICAL_PRODUCTION_ORIGIN);
 });
 
 test("configured application URL controls billing and authentication return destinations", () => {

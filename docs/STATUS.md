@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Restore custom-domain Google OAuth sessions
+
+Complete:
+
+- Traced the production OAuth path from the client’s cookie-backed PKCE browser client through Supabase, `/auth/callback`, its code exchange, and the shared Supabase SSR cookie adapters. The callback and `proxy.ts` retain the prior Netlify repair: every session cookie and Supabase response header is attached to the exact response returned to the browser.
+- Confirmed the deployed failure with a safe header probe: on 2026-09-11, `https://qurancaptions.com/auth/callback?next=/editor` returned a 307 to the retired Netlify hostname before a session exchange. Since Supabase’s cookies are deliberately Secure, SameSite=Lax, Path=/, and host-only, the returned session could not be read on `qurancaptions.com`.
+- Set local production configuration to `https://qurancaptions.com` and made the app normalize any production `*.netlify.app` origin to that canonical custom domain. This prevents a stale Netlify application-origin setting from sending a new OAuth flow back to a retired hostname; no cookie Domain override was added.
+- Preserved a safe `/editor` OAuth return (including a permitted editor query string) and added the existing Account and Billing routes as safe first-party continuations. External, protocol-relative, backslash-normalized, and unsupported destinations fall back to `/editor`.
+- Added targeted regression coverage for legacy-origin normalization and safe continuation handling. Before release, update Netlify Production’s `NEXT_PUBLIC_APP_URL` to `https://qurancaptions.com`, redeploy, then confirm the no-code callback redirects to `https://qurancaptions.com/editor` and complete a real Google sign-in through refresh, Account, and Billing.
+
+Verification: `npm test` (372 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and optional TikTok configuration reminder.
+
 ## Current milestone: Polish dashboard and billing experience
 
 Complete:

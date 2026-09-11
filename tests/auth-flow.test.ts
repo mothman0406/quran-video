@@ -14,9 +14,14 @@ function storage() {
 test("public landing and editor routes remain safe auth return destinations", () => {
   assert.equal(safeAuthReturnPath("/"), "/");
   assert.equal(safeAuthReturnPath("/editor"), "/editor");
+  assert.equal(safeAuthReturnPath("/editor?project=project-123"), "/editor?project=project-123");
   assert.equal(safeAuthReturnPath("/projects"), "/projects");
+  assert.equal(safeAuthReturnPath("/account"), "/account");
+  assert.equal(safeAuthReturnPath("/billing"), "/billing");
   assert.equal(safeAuthReturnPath("https://attacker.example/editor"), "/editor");
   assert.equal(safeAuthReturnPath("//attacker.example"), "/editor");
+  assert.equal(safeAuthReturnPath("/\\\\attacker.example"), "/editor");
+  assert.equal(safeAuthReturnPath("/auth/callback?next=https://attacker.example"), "/editor");
 });
 
 test("guest export asks for authentication while authenticated export opens settings", () => {

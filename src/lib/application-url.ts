@@ -1,6 +1,10 @@
+export const CANONICAL_PRODUCTION_ORIGIN = "https://qurancaptions.com";
+
 /**
  * Returns a canonical Quran Video origin. A configured public origin always
- * wins; the request/browser origin is only a localhost development fallback.
+ * wins, except that retired Netlify origins are upgraded to the production
+ * custom domain. The request/browser origin is only a localhost development
+ * fallback.
  */
 export function applicationOrigin(
   configured = process.env.NEXT_PUBLIC_APP_URL,
@@ -11,7 +15,11 @@ export function applicationOrigin(
     try {
       const url = new URL(configured);
       const isLocalHttp = url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
-      if ((url.protocol === "https:" || (environment !== "production" && isLocalHttp)) && url.pathname === "/" && !url.search && !url.hash) return url.origin;
+      if ((url.protocol === "https:" || (environment !== "production" && isLocalHttp)) && url.pathname === "/" && !url.search && !url.hash) {
+        return environment === "production" && url.hostname.endsWith(".netlify.app")
+          ? CANONICAL_PRODUCTION_ORIGIN
+          : url.origin;
+      }
     } catch {
       // Invalid configuration must not be replaced with an untrusted origin.
     }
