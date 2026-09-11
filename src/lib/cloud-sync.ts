@@ -134,7 +134,10 @@ function requireClient(): SupabaseClient {
 
 export async function getAuthSession(): Promise<Session | null> { const { data, error } = await requireClient().auth.getSession(); if (error) throw error; return data.session; }
 export function authCallbackUrl(next = "/editor"): string { if (typeof window === "undefined") throw new Error("Authentication can only start in the browser."); return configuredAuthCallbackUrl(next, window.location.origin); }
-export async function signInWithGoogle(next = "/editor"): Promise<void> { const { error } = await requireClient().auth.signInWithOAuth({ provider: "google", options: { redirectTo: authCallbackUrl(next) } }); if (error) throw error; }
+function reportOAuthStart(next: string, redirectTo: string): void {
+  void fetch("/api/debug/auth-start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ next, redirectTo }), cache: "no-store", keepalive: true }).catch(() => undefined);
+}
+export async function signInWithGoogle(next = "/editor"): Promise<void> { const redirectTo = authCallbackUrl(next); reportOAuthStart(next, redirectTo); const { error } = await requireClient().auth.signInWithOAuth({ provider: "google", options: { redirectTo } }); if (error) throw error; }
 export async function sendMagicLink(email: string, next = "/editor"): Promise<void> { const { error } = await requireClient().auth.signInWithOtp({ email, options: { emailRedirectTo: authCallbackUrl(next) } }); if (error) throw error; }
 export async function signOut(): Promise<void> { const { error } = await requireClient().auth.signOut(); if (error) throw error; }
 

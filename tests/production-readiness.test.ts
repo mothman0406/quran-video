@@ -26,9 +26,14 @@ test("canonical app URLs retain localhost development and reject unsafe producti
 test("configured application URL controls billing and authentication return destinations", () => {
   const environment = process.env as Record<string, string | undefined>;
   const previous = environment.NEXT_PUBLIC_APP_URL;
+  const previousNodeEnv = environment.NODE_ENV;
   environment.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
   assert.equal(authCallbackUrl("/editor", "http://localhost:3000"), "http://localhost:3000/auth/callback?next=%2Feditor");
+  environment.NEXT_PUBLIC_APP_URL = "https://quran-autocaption.netlify.app";
+  environment.NODE_ENV = "production";
+  assert.equal(authCallbackUrl("/editor", "https://quran-autocaption.netlify.app"), "https://qurancaptions.com/auth/callback?next=%2Feditor");
   if (previous === undefined) delete environment.NEXT_PUBLIC_APP_URL; else environment.NEXT_PUBLIC_APP_URL = previous;
+  if (previousNodeEnv === undefined) delete environment.NODE_ENV; else environment.NODE_ENV = previousNodeEnv;
   assert.match(cloud, /configuredAuthCallbackUrl\(next, window\.location\.origin\)/);
   assert.match(billingServer, /applicationOrigin\(process\.env\.NEXT_PUBLIC_APP_URL, request\.url\)/);
 });

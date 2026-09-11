@@ -1,10 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { authCookieNames, logAuthDebug, safeAuthDiagnosticError } from "@/lib/auth-debug";
 import { createSupabaseServerClient, supabaseServerConfigured } from "@/lib/supabase/server";
 
 /** Refreshes Supabase's cookie session without restricting public editor routes. */
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
-  if (!supabaseServerConfigured()) return response;
+  const isEditor = request.nextUrl.pathname === "/editor";
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? request.nextUrl.host;
+  const requestCookieNames = isEditor ? authCookieNames(request.cookies.getAll()) : [];
+  if (!supabaseServerConfigured()) {
+    if (isEditor) logAuthDebug("editor-auth-read", { host, requestCookieNames, getUserOk: false, getUserError: "supabase-not-configured" });
+    return response;
+  }
   const supabase = createSupabaseServerClient({
     getAll: () => request.cookies.getAll(),
     setAll: (cookiesToSet, headers) => {
@@ -20,7 +27,8 @@ export async function proxy(request: NextRequest) {
       });
     },
   });
-  await supabase.auth.getUser();
+  const { data, error } = await supabase.auth.getUser();
+  if (isEditor) logAuthDebug("editor-auth-read", { host, requestCookieNames, getUserOk: Boolean(data.user) && !error, getUserError: safeAuthDiagnosticError(error) ?? (data.user ? null : "no-authenticated-user") });
   return response;
 }
 

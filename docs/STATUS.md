@@ -1,16 +1,17 @@
 # Status
 
-## Current milestone: Restore custom-domain Google OAuth sessions
+## Current milestone: Production OAuth forensic trace
 
 Complete:
 
-- Traced the production OAuth path from the client’s cookie-backed PKCE browser client through Supabase, `/auth/callback`, its code exchange, and the shared Supabase SSR cookie adapters. The callback and `proxy.ts` retain the prior Netlify repair: every session cookie and Supabase response header is attached to the exact response returned to the browser.
-- Confirmed the deployed failure with a safe header probe: on 2026-09-11, `https://qurancaptions.com/auth/callback?next=/editor` returned a 307 to the retired Netlify hostname before a session exchange. Since Supabase’s cookies are deliberately Secure, SameSite=Lax, Path=/, and host-only, the returned session could not be read on `qurancaptions.com`.
-- Set local production configuration to `https://qurancaptions.com` and made the app normalize any production `*.netlify.app` origin to that canonical custom domain. This prevents a stale Netlify application-origin setting from sending a new OAuth flow back to a retired hostname; no cookie Domain override was added.
-- Preserved a safe `/editor` OAuth return (including a permitted editor query string) and added the existing Account and Billing routes as safe first-party continuations. External, protocol-relative, backslash-normalized, and unsupported destinations fall back to `/editor`.
-- Added targeted regression coverage for legacy-origin normalization and safe continuation handling. Before release, update Netlify Production’s `NEXT_PUBLIC_APP_URL` to `https://qurancaptions.com`, redeploy, then confirm the no-code callback redirects to `https://qurancaptions.com/editor` and complete a real Google sign-in through refresh, Account, and Billing.
+- Traced `/editor` → cookie-backed Supabase browser client → `signInWithOAuth()` → `https://qurancaptions.com/auth/callback?next=%2Feditor` → callback code exchange → cookie-bearing redirect response → `proxy.ts` authenticated editor read → browser session initialization. Continuations remain same-origin allowlisted paths only.
+- Confirmed the deployed failure with a safe 2026-09-11 header probe: the canonical callback currently returns `307 Location: https://quran-autocaption.netlify.app/editor?next=%2Feditor`; `www.qurancaptions.com` and `http://qurancaptions.com` correctly redirect to the HTTPS apex; the retired `quran-autocaption.netlify.app` hostname also serves the old redirect; and `quran-video.netlify.app` is 404. No tracked Netlify redirect, `next.config.ts`, or client hostname rewrite produces this behavior.
+- Root cause: `qurancaptions.com` is serving a pre-canonical Netlify build/config. The checked-out callback instead normalizes a retired Netlify `NEXT_PUBLIC_APP_URL` to `https://qurancaptions.com`; its no-code callback redirect is therefore `/editor` on the canonical host. Secure, SameSite=Lax, Path=/ Supabase cookies remain intentionally host-only, so the deployed cross-host redirect loses the exchanged session before editor hydration.
+- Kept the established successful-exchange response object unchanged: Supabase writes every cookie and response header to that exact `NextResponse.redirect()` object, and that object is returned. No cookie Domain widening, Stripe change, or auth-client replacement was made.
+- Added temporary `AUTH_DEBUG=true` server diagnostics for OAuth start, callback entry/exchange/final returned response, and the `/editor` server auth read, plus a 404-when-disabled `/api/debug/auth-state` endpoint. They log only hosts, protocols, safe paths, booleans, cookie names, sanitized error classes, and Set-Cookie counts—never codes, token values, identities, or cookie values.
+- Added regression coverage for canonical `/editor` callback construction, safe diagnostics, and returned-response cookie tracing. Deploy this commit with `NEXT_PUBLIC_APP_URL=https://qurancaptions.com` and temporarily `AUTH_DEBUG=true`; verify the no-code callback `Location` is `https://qurancaptions.com/editor`, run one Google sign-in, inspect the redacted logs and `/api/debug/auth-state`, then remove `AUTH_DEBUG` and redeploy if desired.
 
-Verification: `npm test` (372 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require warning and optional TikTok configuration reminder.
+Verification: `npm test` (374 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the pre-existing non-fatal VAD/ONNX Runtime dynamic-require warning and the optional TikTok configuration reminder.
 
 ## Current milestone: Polish dashboard and billing experience
 
