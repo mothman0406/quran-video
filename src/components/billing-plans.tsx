@@ -7,6 +7,7 @@ import type { BillingInterval } from "@/lib/billing/server";
 import { getAuthSession, getSupabaseClient } from "@/lib/cloud-sync";
 import { accountEntitlementsForPlan, type AccountEntitlements, type Plan } from "@/lib/entitlements";
 import { getAccountEntitlements } from "@/lib/entitlements/client";
+import { billingConfigurationState } from "@/lib/billing/presentation";
 
 type PaidPlan = Exclude<Plan, "free">;
 const benefits: Record<Plan, readonly string[]> = {
@@ -17,13 +18,14 @@ const benefits: Record<Plan, readonly string[]> = {
 
 function planName(plan: Plan): string { return plan[0]!.toUpperCase() + plan.slice(1); }
 
-export default function BillingPlans() {
+export default function BillingPlans({ initialBillingConfigured }: { initialBillingConfigured: boolean }) {
   const [session, setSession] = useState<Session | null>(null);
   const [entitlements, setEntitlements] = useState<AccountEntitlements>(() => accountEntitlementsForPlan("free"));
   const [billing, setBilling] = useState<BillingStatus | null>(null);
   const [interval, setInterval] = useState<BillingInterval>("year");
   const [working, setWorking] = useState<"checkout" | "portal" | "upgrade" | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [billingLoadFailed, setBillingLoadFailed] = useState(false);
 
   useEffect(() => {
     if (!getSupabaseClient()) return;
@@ -32,8 +34,11 @@ export default function BillingPlans() {
       if (!active) return;
       setSession(next);
       if (!next) return;
-      const [nextEntitlements, nextBilling] = await Promise.all([getAccountEntitlements(next).catch(() => accountEntitlementsForPlan("free")), getBillingStatus(next).catch(() => null)]);
-      if (active) { setEntitlements(nextEntitlements); setBilling(nextBilling); }
+      const [nextEntitlements, nextBilling] = await Promise.all([
+        getAccountEntitlements(next).catch(() => accountEntitlementsForPlan("free")),
+        getBillingStatus(next).then((value) => ({ value, failed: false })).catch(() => ({ value: null, failed: true })),
+      ]);
+      if (active) { setEntitlements(nextEntitlements); setBilling(nextBilling.value); setBillingLoadFailed(nextBilling.failed); if (nextBilling.failed) setMessage("We couldn't load billing information right now."); }
     }).catch(() => { if (active) setMessage("We couldn't load billing information right now."); });
     return () => { active = false; };
   }, []);
@@ -57,7 +62,8 @@ export default function BillingPlans() {
     catch { setMessage("We couldn't open plan management. Try again."); setWorking(null); }
   }
 
-  const configured = billing?.configured ?? false;
+  const billingConfiguration = billingConfigurationState(billing, initialBillingConfigured, billingLoadFailed);
+  const configured = billingConfiguration === "configured";
   const status = billing && billing.status !== "none" ? `${billing.billingInterval === "year" ? "Yearly" : "Monthly"} · ${billing.status.replace(/_/g, " ")}${billing.cancelAtPeriodEnd ? " · Cancels at period end" : ""}` : null;
   const action = (plan: Plan) => {
     if (plan === entitlements.plan) return plan === "free" ? <span className="billing-current">Current plan</span> : <button type="button" className="billing-secondary" disabled={working !== null} onClick={() => void manage()}>{working === "portal" ? "Opening billing…" : "Manage plan"}</button>;
@@ -75,7 +81,7 @@ export default function BillingPlans() {
       <ul>{benefits[plan].map((benefit) => <li key={benefit}>{benefit}</li>)}</ul>
       {action(plan)}
     </article>)}</div>
-    {session && !configured ? <p className="billing-message" role="status">Stripe billing is not configured for this environment yet.</p> : message && <p className="billing-message" role="status">{message}</p>}
+    {session && billingConfiguration === "unconfigured" ? <p className="billing-message" role="status">Stripe billing is not configured for this environment yet.</p> : billingConfiguration === "loading" ? <p className="billing-message" role="status">Loading billing options…</p> : message && <p className="billing-message" role="status">{message}</p>}
     <div className="billing-trust" aria-label="Billing information"><span>Secure checkout with Stripe</span><span>Cancel anytime</span><span>No hidden upgrade fees</span></div>
     <section className="billing-faq" aria-labelledby="billing-faq-title"><div><p>HELPFUL DETAILS</p><h2 id="billing-faq-title">Frequently asked questions</h2></div>{[
       ["Is there a free plan?", "Yes. You can create and edit Quran caption projects without a subscription. Free exports are available in 720p with a Quran AutoCaption watermark, and Free accounts can save up to 3 cloud projects."],

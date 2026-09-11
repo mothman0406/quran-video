@@ -5,6 +5,7 @@ import type { Session } from "@supabase/supabase-js";
 import { getBillingStatus, openCustomerPortal, openSubscriptionUpdatePortal, startCheckout, type BillingStatus } from "@/lib/billing/client";
 import type { BillingInterval } from "@/lib/billing/server";
 import type { AccountEntitlements, Plan } from "@/lib/entitlements";
+import { billingConfigurationState } from "@/lib/billing/presentation";
 
 type BillingReturn = "checkout" | "plan-update";
 type PlanComparisonDialogProps = { entitlements: AccountEntitlements; session?: Session | null; onClose: () => void; onEntitlementsRefresh?: () => Promise<void>; billingReturn?: BillingReturn | null };
@@ -28,6 +29,7 @@ export default function PlanComparisonDialog({ entitlements, session = null, onC
   const [billing, setBilling] = useState<BillingStatus | null>(null);
   const [message, setMessage] = useState<string | null>(billingReturn ? "Updating your plan…" : null);
   const [working, setWorking] = useState<"checkout" | "portal" | "upgrade" | null>(null);
+  const [billingLoadFailed, setBillingLoadFailed] = useState(false);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => dialogRef.current?.querySelector<HTMLElement>("button")?.focus());
@@ -47,7 +49,7 @@ export default function PlanComparisonDialog({ entitlements, session = null, onC
   useEffect(() => {
     if (!session) return;
     let active = true;
-    void getBillingStatus(session).then((next) => { if (active) setBilling(next); }).catch((error: unknown) => { if (active) setMessage(error instanceof Error ? error.message : "Billing information is unavailable."); });
+    void getBillingStatus(session).then((next) => { if (active) { setBilling(next); setBillingLoadFailed(false); } }).catch((error: unknown) => { if (active) { setBillingLoadFailed(true); setMessage(error instanceof Error ? error.message : "Billing information is unavailable."); } });
     return () => { active = false; };
   }, [session]);
 
@@ -95,7 +97,8 @@ export default function PlanComparisonDialog({ entitlements, session = null, onC
     catch { setMessage("We couldn't open plan management. Try again."); setWorking(null); }
   }
 
-  const configured = billing?.configured ?? false;
+  const billingConfiguration = billingConfigurationState(billing, undefined, billingLoadFailed);
+  const configured = billingConfiguration === "configured";
   const subscriptionDetail = billing && billing.status !== "none" ? `${billing.billingInterval === "year" ? "Annual" : billing.billingInterval === "month" ? "Monthly" : ""}${billing.billingInterval ? " · " : ""}${billing.status.replace(/_/g, " ")}${billing.cancelAtPeriodEnd ? " · Cancels at period end" : ""}` : null;
   return <div className="plan-comparison-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="plan-comparison-dialog" ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="plan-comparison-title" onKeyDown={(event) => event.stopPropagation()}>
     <header><div><p>QURAN AUTOCAPTION PLANS</p><h2 id="plan-comparison-title">Choose the export quality you need</h2></div><button className="plan-comparison-close" type="button" aria-label="Close plan comparison" onClick={onClose}>×</button></header>
@@ -103,7 +106,7 @@ export default function PlanComparisonDialog({ entitlements, session = null, onC
     <div className="plan-comparison-interval" aria-label="Billing interval"><button className={interval === "month" ? "is-selected" : ""} type="button" onClick={() => setInterval("month")}>Monthly</button><button className={interval === "year" ? "is-selected" : ""} type="button" onClick={() => setInterval("year")}>Yearly <small>Save {annualSavings("pro")}%</small></button></div>
     <div className="plan-comparison-cards">{(Object.keys(PLAN_DETAILS) as Plan[]).map((plan) => { const detail = PLAN_DETAILS[plan]; const active = entitlements.plan === plan; const directUpgrade = entitlements.plan === "pro" && plan === "premium"; return <article className={`plan-comparison-card ${active ? "is-current" : ""}`} key={plan}><div><span>{detail.name.toUpperCase()}</span>{active && <b>Current plan</b>}</div><strong className="plan-comparison-price">{priceText(plan, interval)}</strong>{plan !== "free" && interval === "year" && <small className="plan-comparison-saving">billed ${detail.annual} yearly · Save {annualSavings(plan)}%</small>}<ul>{detail.benefits.map((benefit) => <li key={benefit}>{benefit}</li>)}</ul>{active ? plan !== "free" && <button className="editor-button editor-button-quiet plan-comparison-action" type="button" disabled={working !== null} onClick={() => void portal()}>{working === "portal" ? "Opening portal…" : "Manage plan"}</button> : directUpgrade ? <button className="editor-button editor-button-accent plan-comparison-action" type="button" disabled={!configured || working !== null} onClick={() => void upgrade()}>{working === "upgrade" ? "Opening secure billing…" : "Upgrade to Premium"}</button> : entitlements.plan === "free" && plan !== "free" && <button className="editor-button editor-button-accent plan-comparison-action" type="button" disabled={!configured || working !== null} onClick={() => void checkout(plan)}>{working === "checkout" ? "Opening Checkout…" : `Upgrade to ${detail.name}`}</button>}</article>; })}</div>
     <div className="plan-comparison-matrix" role="table" aria-label="Plan capability comparison"><div role="row" className="plan-comparison-matrix-head"><span role="columnheader">Capability</span><span role="columnheader">Free</span><span role="columnheader">Pro</span><span role="columnheader">Premium</span></div><div role="row"><span role="cell">Maximum export</span><span role="cell">720p</span><span role="cell">1080p</span><span role="cell">4K</span></div><div role="row"><span role="cell">Export watermark</span><span role="cell">Included</span><span role="cell">None</span><span role="cell">None</span></div><div role="row"><span role="cell">Cloud projects</span><span role="cell">Up to 3</span><span role="cell">Access available</span><span role="cell">Access available</span></div></div>
-    {!session ? <p className="plan-comparison-message">Sign in to choose a plan.</p> : !configured ? <p className="plan-comparison-message">Stripe billing is not configured for this environment yet. Add the four server-only Price IDs and Stripe test secret before enabling Checkout.</p> : message && <p className="plan-comparison-message" role="status">{message}</p>}
+    {!session ? <p className="plan-comparison-message">Sign in to choose a plan.</p> : billingConfiguration === "loading" ? <p className="plan-comparison-message" role="status">Loading billing options…</p> : billingConfiguration === "unconfigured" ? <p className="plan-comparison-message">Stripe billing is not configured for this environment yet.</p> : message && <p className="plan-comparison-message" role="status">{message}</p>}
     <footer><span>Payments and plan changes are securely managed by Stripe.</span><div>{billingReturn && session && <button className="editor-button editor-button-quiet" type="button" onClick={() => void refresh()}>Refresh</button>}<button className="editor-button editor-button-quiet" type="button" onClick={onClose}>Done</button></div></footer>
   </section></div>;
 }
