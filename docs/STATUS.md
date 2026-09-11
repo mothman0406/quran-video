@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Add landing page authentication
+
+Complete:
+
+- Added a restrained homepage Sign in action that reuses the existing Google and email authentication panel, preserving the same Supabase browser client, PKCE callback, host-only cookies, and safe continuation validation.
+- Homepage authentication now starts with `/projects` as its return destination, while editor authentication continues to use `/editor`; Start creating remains a direct guest-first `/editor` link.
+- The homepage derives only an authenticated boolean from the server-side Supabase session before rendering, so a known signed-in visit renders Projects immediately without exposing user data or changing after client hydration.
+- Added focused landing/auth routing coverage for signed-out Sign in and Start creating, signed-in Projects replacement, server-derived initial state, homepage OAuth continuation, editor continuation, unsafe URL handling, and narrow-header availability.
+
+Verification: `npm test` (376 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the pre-existing non-fatal VAD/ONNX Runtime dynamic-require warning and optional TikTok configuration reminder.
+
 ## Current milestone: Production OAuth forensic trace
 
 Complete:

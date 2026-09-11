@@ -1,9 +1,10 @@
 import Link from "next/link";
 import Image from "next/image";
+import LandingAuthActions from "@/components/landing-auth-actions";
 import type { MarketingQuranDemo } from "@/lib/landing/marketing-demo";
 import { LANDING_SHOWCASE, type LandingShowcaseAsset } from "@/lib/landing/showcase-assets";
 
-type LandingPageProps = { demos: MarketingQuranDemo[]; showcaseAssets: LandingShowcaseAsset[] };
+type LandingPageProps = { demos: MarketingQuranDemo[]; showcaseAssets: LandingShowcaseAsset[]; authenticated: boolean };
 
 const features = [
   ["Quran-aware detection", "Identify a recited passage before you begin editing."],
@@ -60,7 +61,7 @@ function EditorScreenshot({ priority = false, className = "" }: { priority?: boo
   return <Image className={className} src="/landing/editor-demo.png" alt="Quran AutoCaption editor showing a vertical recitation video, synchronized Quran captions, timeline, waveform, and subtitle controls." width={1649} height={954} priority={priority} sizes="(max-width: 600px) 100vw, (max-width: 1180px) calc(100vw - 48px), 1180px" />;
 }
 
-export default function LandingPage({ demos, showcaseAssets }: LandingPageProps) {
+export default function LandingPage({ demos, showcaseAssets, authenticated }: LandingPageProps) {
   const [morning, night, unity, eternal] = demos;
   const year = new Date().getFullYear();
 
@@ -68,7 +69,7 @@ export default function LandingPage({ demos, showcaseAssets }: LandingPageProps)
     <header className="landing-header">
       <Link className="landing-brand" href="/" aria-label="Quran AutoCaption home"><span>۝</span><b>Quran AutoCaption</b></Link>
       <nav className="landing-nav" aria-label="Main navigation"><a href="#how-it-works">How it works</a><a href="#features">Features</a></nav>
-      <Link className="landing-header-cta" href="/editor">Start creating <span aria-hidden="true">↗</span></Link>
+      <LandingAuthActions authenticated={authenticated} />
     </header>
 
     <section className="landing-hero" aria-labelledby="landing-title">

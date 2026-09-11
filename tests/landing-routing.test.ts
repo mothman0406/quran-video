@@ -22,6 +22,29 @@ test("public route renders the lightweight landing page and leaves the editor on
   assert.match(landingComponent, /No sign-up required to start\./);
 });
 
+test("landing header is guest-first and supplies its initial Supabase auth state from the server", () => {
+  const landingRoute = readFileSync(fromRoot("src/app/page.tsx"), "utf8");
+  const landing = readFileSync(fromRoot("src/components/landing-page.tsx"), "utf8");
+  const authActions = readFileSync(fromRoot("src/components/landing-auth-actions.tsx"), "utf8");
+  const accountPanel = readFileSync(fromRoot("src/components/account-panel.tsx"), "utf8");
+  const globals = readFileSync(fromRoot("src/app/globals.css"), "utf8");
+
+  assert.match(landingRoute, /import \{ cookies \} from "next\/headers"/);
+  assert.match(landingRoute, /createSupabaseServerClient/);
+  assert.match(landingRoute, /supabase\.auth\.getUser\(\)/);
+  assert.match(landingRoute, /authenticated=\{authenticated\}/);
+  assert.match(landing, /<LandingAuthActions authenticated=\{authenticated\} \/>/);
+  assert.match(authActions, /authenticated \? <Link className="landing-auth-link" href="\/projects">Projects<\/Link> : <button className="landing-auth-link"/);
+  assert.match(authActions, />Sign in<\/button>/);
+  assert.match(authActions, /<Link className="landing-header-cta" href="\/editor">Start creating/);
+  assert.match(authActions, /<AccountPanel session=\{null\} authReturnPath="\/projects"/);
+  assert.match(accountPanel, /await signInWithGoogle\(authReturnPath\)/);
+  assert.match(accountPanel, /await sendMagicLink\(email\.trim\(\), authReturnPath\)/);
+  assert.doesNotMatch(authActions, /getAuthSession|useEffect|localStorage/);
+  assert.match(globals, /\.landing-auth-actions \{ display:flex; align-items:center; gap:14px; \}/);
+  assert.match(globals, /@media \(max-width:600px\) \{ \.landing-auth-actions \{ gap:8px; \}/);
+});
+
 test("marketing Quran captions resolve exactly from the canonical local corpus", () => {
   const demo = getMarketingQuranDemo();
   assert.deepEqual(demo.map((item) => item.verseKey), [...MARKETING_DEMO_VERSE_KEYS]);

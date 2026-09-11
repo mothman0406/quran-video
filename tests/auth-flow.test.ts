@@ -24,6 +24,12 @@ test("public landing and editor routes remain safe auth return destinations", ()
   assert.equal(safeAuthReturnPath("/auth/callback?next=https://attacker.example"), "/editor");
 });
 
+test("homepage and editor OAuth continuations retain their distinct safe destinations", () => {
+  assert.equal(safeAuthReturnPath("/projects"), "/projects");
+  assert.equal(safeAuthReturnPath("/editor"), "/editor");
+  assert.equal(safeAuthReturnPath("/projects?next=https://attacker.example"), "/projects?next=https://attacker.example");
+});
+
 test("guest export asks for authentication while authenticated export opens settings", () => {
   assert.deepEqual(exportAuthIntent(false), { kind: "authenticate", continuation: "export" });
   assert.deepEqual(exportAuthIntent(true), { kind: "open-export-settings" });
