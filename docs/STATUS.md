@@ -1,5 +1,19 @@
 # Status
 
+## Current milestone: Decode audio from playable Apple recordings
+
+Complete:
+
+- Traced the browser-playable/Web-Audio-failed route from source selection through Mediabunny inspection, audio-only routing, lazy FFmpeg load, WORKERFS, one-second decode probe, PCM extraction, and recognition handoff. The former terminal “can't process” message was emitted because runtime, mount, probe, decoder, extraction, and resource exceptions were all converted to `unsupported`; without the real file, that collapse made its actual final stage unobservable.
+- Kept the original playable recording as preview/export source and made FFmpeg's audio-only invariant explicit on both fallback commands: `-map 0:a:0 -vn`. An unsupported HEVC/H.264 video decoder can no longer be part of the audio-only command path.
+- Verified the pinned single-thread FFmpeg core includes worker-context WORKERFS, retained the File-backed mount (no source `arrayBuffer()`/MEMFS copy), and separated runtime, WORKERFS, no-stream, corrupt, protected, audio-decoder, decode, PCM, and resource errors into typed internal compatibility results with concise friendly wording.
+- Added opt-in `?debugMedia=1` console tracing containing only safe compatibility facts. It records no filename, media contents, user/account data, tokens, URLs, or raw FFmpeg output. Mediabunny continues to inspect MOV/MP4 tracks and native/WebCodecs decode capability; no additional decoder architecture was required.
+- Added focused routing, HEVC-video/AAC-audio isolation, audio-only command, typed FFmpeg failure, safe-debug, local-only, no-duplicate-source-copy, PCM-duration, and large-screen-recording regression coverage.
+
+Retest: open `/editor?debugMedia=1`, select the recording, then copy the `[Quran AutoCaption media]` console entries. The last entry's `errorCode` identifies the exact remaining local stage if the specific source still fails.
+
+Verification: `npm run regression:quran` passes production invariant probes (the optional real quran-align/EveryAyah benchmark remains unavailable in this workspace), `npm test` (385 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains its pre-existing non-fatal VAD/ONNX Runtime dynamic-import warnings and the optional TikTok configuration reminder.
+
 ## Current milestone: Handle large local media by operation
 
 Complete:

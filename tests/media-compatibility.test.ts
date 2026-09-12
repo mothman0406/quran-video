@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { MAX_FULL_NORMALIZATION_BYTES, MAX_RECOGNITION_PCM_BYTES, MEDIA_COMPATIBILITY_ERRORS, MediaCompatibilityError, recognitionPcmBytes, routeMediaCompatibility, type MediaInspection } from "../src/lib/media-compatibility.ts";
+import { MAX_FULL_NORMALIZATION_BYTES, MAX_RECOGNITION_PCM_BYTES, MEDIA_COMPATIBILITY_ERRORS, MediaCompatibilityError, mediaCompatibilityErrorMessage, recognitionPcmBytes, routeMediaCompatibility, type MediaInspection } from "../src/lib/media-compatibility.ts";
 import { MEDIA_FILE_ACCEPT, mediaFileError, mediaKindForFile } from "../src/lib/editor/media.ts";
+import { mediaFailureFromFfmpegLog } from "../src/lib/recognition/local-media-compatibility.ts";
+import { mediaDebugEnabled, visibleFileExtension } from "../src/lib/recognition/media-debug.ts";
 
 const editor = readFileSync("src/components/editor-client.tsx", "utf8");
 const workspace = readFileSync("src/components/editor-workspace.tsx", "utf8");
@@ -24,13 +26,15 @@ test("iPhone-style MOV selection is accepted without File System Access", () => 
   assert.doesNotMatch(`${workspace}\n${editor}`, /showOpenFilePicker|FileSystemFileHandle|File System Access/i);
 });
 
-test("playable video with an unusable recognition decoder selects audio-only fallback", () => {
-  assert.equal(routeMediaCompatibility(250 * 1024 * 1024, inspection({ nativeRecognitionAudio: false, durationMs: 30_000 })), "audio-fallback");
+test("playable MOV with AAC audio routes to audio-only fallback without requiring a video decoder", () => {
+  assert.equal(routeMediaCompatibility(250 * 1024 * 1024, inspection({ nativeRecognitionAudio: false, durationMs: 30_000, videoCodec: "hevc", audioCodec: "aac" })), "audio-fallback");
   assert.match(editor, /decodeAudioChannels\(sourceFile\)/);
   assert.match(editor, /decodeRecognitionAudioFallback\(sourceFile\)/);
   assert.match(editor, /compatibility: "audio-fallback"/);
   assert.match(fallback, /"-map", "0:a:0"/);
+  assert.match(fallback, /"-vn"/);
   assert.doesNotMatch(fallback, /decodeRecognitionAudioFallback[\s\S]*?"-c:v", "libx264"/);
+  assert.doesNotMatch(fallback, /decodeRecognitionAudioFallback[\s\S]*?"-map", "0:v:0"/);
   assert.match(fallback, /mount\("WORKERFS", \{ files: \[file\] \}/);
   assert.doesNotMatch(fallback, /file\.arrayBuffer\(\)/);
   assert.match(editor, /Preparing the audio for detection/);
@@ -57,8 +61,31 @@ test("unreadable, no-audio, oversized PCM, and unsafe full normalization fail du
   assert.equal(MEDIA_COMPATIBILITY_ERRORS.noAudio, "This video doesn't contain an audio track. Choose a recording where the recitation can be heard.");
   assert.equal(MEDIA_COMPATIBILITY_ERRORS.unreadable, "We couldn't read this recording. It may be damaged or incomplete. Try selecting the original file again.");
   assert.equal(MEDIA_COMPATIBILITY_ERRORS.protected, "This recording is protected and can't be processed in the browser. Try the original unprotected video from your Photos library.");
-  assert.equal(MEDIA_COMPATIBILITY_ERRORS.unsupported, "We can't process this recording on this device yet. Try another copy of the video or export it from Photos and try again.");
+  assert.equal(MEDIA_COMPATIBILITY_ERRORS.runtimeLoad, "We couldn't prepare this recording on this device. Try refreshing the page and selecting it again.");
+  assert.equal(MEDIA_COMPATIBILITY_ERRORS.audioDecoderUnavailable, "We found audio in this recording, but this device can't decode its audio format yet. Try exporting another copy of the recording and selecting it again.");
+  assert.equal(mediaCompatibilityErrorMessage(new Error("worker import failed")), MEDIA_COMPATIBILITY_ERRORS.runtimeLoad);
   assert.equal(MEDIA_COMPATIBILITY_ERRORS.fullNormalizationTooLarge, "This recording needs more conversion than this browser can safely handle. Try trimming it to the part you want to caption, or choose a smaller copy.");
+});
+
+test("FFmpeg audio failures retain their internal stage instead of becoming generic unsupported", () => {
+  assert.equal(mediaFailureFromFfmpegLog(["Stream map '0:a:0' matches no streams."]).code, "noAudio");
+  assert.equal(mediaFailureFromFfmpegLog(["Error opening input: Invalid argument"]).code, "containerOpen");
+  assert.equal(mediaFailureFromFfmpegLog(["Invalid data found when processing input"]).code, "unreadable");
+  assert.equal(mediaFailureFromFfmpegLog(["Unknown decoder 'aac_at'"]).code, "audioDecoderUnavailable");
+  assert.equal(mediaFailureFromFfmpegLog(["Cannot enlarge memory arrays"]).code, "resource");
+  assert.equal(mediaFailureFromFfmpegLog(["Error while decoding stream #0:1"], "pcmExtractionFailed").code, "pcmExtractionFailed");
+  assert.notEqual(mediaFailureFromFfmpegLog(["Unknown decoder 'aac_at'"]).code, "workerfsMount");
+});
+
+test("safe media debugging is opt-in and excludes the filename", () => {
+  assert.equal(mediaDebugEnabled("?debugMedia=1"), true);
+  assert.equal(mediaDebugEnabled("?debugMedia=0"), false);
+  assert.equal(visibleFileExtension("Screen Recording 2026-09-11 at 10.32.15.mov"), "mov");
+  assert.equal(visibleFileExtension("recitation"), null);
+  assert.match(fallback, /mediaDebug\("inspection"/);
+  assert.match(fallback, /audioStreams/);
+  assert.match(fallback, /pcmDurationMs/);
+  assert.doesNotMatch(fallback, /mediaDebug\([^\n]*file\.name/);
 });
 
 test("fallback work is local, cancellable, cleaned up, and cannot introduce a backend conversion service", () => {

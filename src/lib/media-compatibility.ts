@@ -15,8 +15,14 @@ export const MAX_RECOGNITION_PCM_BYTES = 256 * 1024 * 1024;
 export const MEDIA_COMPATIBILITY_ERRORS = {
   noAudio: "This video doesn't contain an audio track. Choose a recording where the recitation can be heard.",
   unreadable: "We couldn't read this recording. It may be damaged or incomplete. Try selecting the original file again.",
+  containerOpen: "We couldn't read this recording. It may be damaged or incomplete. Try selecting the original file again.",
   protected: "This recording is protected and can't be processed in the browser. Try the original unprotected video from your Photos library.",
-  unsupported: "We can't process this recording on this device yet. Try another copy of the video or export it from Photos and try again.",
+  runtimeLoad: "We couldn't prepare this recording on this device. Try refreshing the page and selecting it again.",
+  workerfsMount: "We couldn't prepare this recording on this device. Try refreshing the page and selecting it again.",
+  audioDecoderUnavailable: "We found audio in this recording, but this device can't decode its audio format yet. Try exporting another copy of the recording and selecting it again.",
+  audioDecodeFailed: "We found audio in this recording, but this device couldn't decode it locally. Try exporting another copy of the recording and selecting it again.",
+  pcmExtractionFailed: "We couldn't prepare this recording's audio on this device. Try refreshing the page and selecting it again.",
+  resource: "This device ran out of resources while preparing the recording. Try trimming it and selecting it again.",
   fullNormalizationTooLarge: "This recording needs more conversion than this browser can safely handle. Try trimming it to the part you want to caption, or choose a smaller copy.",
   recognitionAudioTooLarge: "This recording's audio is too long for this browser to prepare safely. Try trimming it to the part you want to caption, or choose a shorter copy.",
 } as const;
@@ -45,6 +51,9 @@ export type MediaInspection = {
   height?: number;
   videoCodec?: string | null;
   audioCodec?: string | null;
+  audioStreamCount?: number;
+  audioSampleRate?: number;
+  audioChannels?: number;
 };
 
 export type MediaCompatibilityRoute = "native" | "audio-fallback" | "full-normalization";
@@ -76,7 +85,7 @@ export function routeMediaCompatibility(fileSize: number, inspection: MediaInspe
 export function mediaCompatibilityErrorMessage(error: unknown): string {
   if (error instanceof MediaCompatibilityError) return error.message;
   if (error instanceof DOMException && error.name === "AbortError") return "";
-  return MEDIA_COMPATIBILITY_ERRORS.unsupported;
+  return MEDIA_COMPATIBILITY_ERRORS.runtimeLoad;
 }
 
 export function compatibilityErrorFromUnknown(error: unknown, fallback: MediaCompatibilityErrorCode): MediaCompatibilityError {
