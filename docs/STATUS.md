@@ -1,5 +1,18 @@
 # Status
 
+## Current milestone: Add local media compatibility fallback
+
+Complete:
+
+- Added a native-first, local-only file-selection pipeline for normal file pickers, drag/drop, iPhone/iPad Photo Library, macOS Photos/Finder, and Android pickers. The accessible input keeps `video/*` and `audio/*` while explicitly including ordinary extension-only media selections such as MOV, M4V, MKV, AVI, transport streams, Ogg, FLAC, and AIFF.
+- Added lazy Mediabunny preflight for container readability, stream presence, codec metadata, duration, browser playback, and local decoder capability before replacing the active source. Native H.264/AAC-style media stays on the existing path unchanged.
+- Added a lazy single-thread FFmpeg-WASM fallback. When preview playback works but Web Audio fails, it proves a one-second audio decode then extracts only source-timeline PCM for recognition; the original video remains preview/export media. When playback cannot work, a successful one-second media probe is required before local H.264/yuv420p/AAC fast-start MP4 normalization.
+- Added friendly preflight errors for no audio, damaged/unreadable, protected, unsupported, and fallback-memory-limit cases; compatibility errors offer another recording instead of irrelevant correction UI. Failed preflight leaves any existing project source untouched.
+- Native sources retain the existing 500 MB selection limit. Browser fallback is capped at 100 MB before copying media into WASM. Temporary FFmpeg files are deleted, active preparation is abortable, object URL replacement remains deferred until a source passes preflight, and the single-thread runtime is reused only in-session.
+- Added [MEDIA_COMPATIBILITY.md](./MEDIA_COMPATIBILITY.md) and architecture documentation covering Camera Roll flow, Apple/HEVC behavior, local-only privacy/cost model, preflight, safety policy, limitations, and debugging.
+
+Verification: `npm test` (383 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes production invariant probes; its optional local real `quran-align`/EveryAyah benchmark remains unavailable in this workspace and wrote `docs/regression/results/20260912.md`. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require and Transformers `import.meta` warnings, plus the optional TikTok configuration reminder.
+
 ## Current milestone: Add landing page authentication
 
 Complete:

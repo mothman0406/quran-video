@@ -143,6 +143,7 @@ import { accountEntitlementsForPlan, canExportQuality, defaultExportQualityForPl
 import { authorizeAccountExport, getAccountEntitlements } from "@/lib/entitlements/client";
 import { DEV_BUILD_VERSION } from "@/lib/build-info";
 import { clampMediaTrim, clampTimelineViewport, createMediaTrim, createTimelineViewport, mediaFileError, mediaKindForFile, mediaSourceFromFile, panTimelineViewport, pinchTimelineViewport, playbackStartForMediaTrim, projectDurationMs, resizeMediaTrim, snapCaptionBoundaryToPlayhead, timelineContentPosition, viewportPositionToTime, zoomTimelineViewport, type MediaSource, type MediaTrim, type TimelineViewport } from "@/lib/editor/media";
+import { MediaCompatibilityError, mediaCompatibilityErrorMessage } from "@/lib/media-compatibility";
 import { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 import { waveformPeaksFromPcm, type WaveformData } from "@/lib/editor/waveform";
 import { projectAssetFromMediaSource } from "@/lib/editor/project-assets";
@@ -253,6 +254,8 @@ export default function Home() {
   const recognitionStatusLabel = recognitionStageLabel(stage);
   const [progress, setProgress] = useState<CaptionGenerationProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [mediaPreparation, setMediaPreparation] = useState<"checking" | "converting" | null>(null);
+  const [mediaCompatibilityError, setMediaCompatibilityError] = useState(false);
   const [timingWarning, setTimingWarning] = useState<string | null>(null);
   const [support, setSupport] = useState<{
     supported: boolean;
@@ -349,6 +352,7 @@ export default function Home() {
   const recognitionJobs = useRef(new RecognitionJobController());
   const recognitionWorker = useRef<LocalRecognitionWorkerClient | null>(null);
   const recognitionProgressCoalescer = useRef(new CaptionGenerationProgressCoalescer());
+  const mediaPreparationAbort = useRef<AbortController | null>(null);
   const automaticRecognition = useRef(new AutomaticRecognitionController());
   const captionProgress = useRef(new CaptionGenerationProgressController());
   const alignmentDebug = useRef<AlignmentDebug | null>(null);
@@ -661,6 +665,8 @@ export default function Home() {
   );
   useEffect(() => () => {
     exportAbort.current?.abort();
+    mediaPreparationAbort.current?.abort();
+    void import("@/lib/recognition/local-media-compatibility").then(({ releaseLocalMediaRuntime }) => releaseLocalMediaRuntime());
     const previous = completedExport.current;
     if (previous) URL.revokeObjectURL(previous.objectUrl);
   }, []);
@@ -1193,22 +1199,53 @@ export default function Home() {
       if (job === waveformGeneration.current) setWaveformData(null);
     }
   }
-  function selectMediaFile(next: File | undefined) {
+  async function selectMediaFile(next: File | undefined) {
     if (!next) return;
     const validationError = mediaFileError(next);
     if (validationError) {
       setErrorMessage(validationError);
+      setMediaCompatibilityError(true);
       return;
     }
-    const assetId = crypto.randomUUID();
-    const source = mediaSourceFromFile(next, mediaKindForFile(next)!, { assetId });
-    assetFiles.current.set(assetId, { file: next, source });
-    setProjectAssets((current) => [...current, projectAssetFromMediaSource(source, assetId)]);
-    setActiveMediaAssetId(assetId);
-    loadSelectedSource(next, source);
+    mediaPreparationAbort.current?.abort();
+    const abort = new AbortController();
+    mediaPreparationAbort.current = abort;
+    setMediaPreparation("checking");
+    setMediaCompatibilityError(false);
+    setErrorMessage(null);
+    try {
+      const { prepareLocalMedia } = await import("@/lib/recognition/local-media-compatibility");
+      const prepared = await prepareLocalMedia(next, abort.signal, () => setMediaPreparation("converting"));
+      if (abort.signal.aborted) return;
+      const assetId = crypto.randomUUID();
+      const source = mediaSourceFromFile(prepared.file, prepared.kind, {
+        assetId,
+        compatibility: prepared.route,
+        originalFileName: prepared.original.name,
+        originalMimeType: prepared.original.type || undefined,
+        displayName: prepared.original.name,
+      });
+      assetFiles.current.set(assetId, { file: prepared.file, source });
+      setProjectAssets((current) => [...current, projectAssetFromMediaSource(source, assetId)]);
+      setActiveMediaAssetId(assetId);
+      loadSelectedSource(prepared.file, source);
+    } catch (error) {
+      if (!abort.signal.aborted) {
+        const message = mediaCompatibilityErrorMessage(error);
+        if (message) {
+          setErrorMessage(message);
+          setMediaCompatibilityError(true);
+        }
+      }
+    } finally {
+      if (mediaPreparationAbort.current === abort) {
+        mediaPreparationAbort.current = null;
+        setMediaPreparation(null);
+      }
+    }
   }
   function selectVideo(event: ChangeEvent<HTMLInputElement>) {
-    selectMediaFile(event.target.files?.[0]);
+    void selectMediaFile(event.target.files?.[0]);
     event.currentTarget.value = "";
   }
   function relinkProjectAsset(assetId: string, event: ChangeEvent<HTMLInputElement>) {
@@ -1321,7 +1358,15 @@ export default function Home() {
     try {
       const { decodeAudioChannels } = await import("@/lib/recognition/local-audio-decode");
       reportProgress("preparing-media");
-      const decoded = await decodeAudioChannels(sourceFile);
+      let decoded;
+      try {
+        decoded = await decodeAudioChannels(sourceFile);
+      } catch {
+        reportProgress("preparing-media", undefined, "Preparing this recording for your browser");
+        const { decodeRecognitionAudioFallback } = await import("@/lib/recognition/local-media-compatibility");
+        decoded = await decodeRecognitionAudioFallback(sourceFile);
+        setMediaSource((current) => current?.compatibility === "native" ? { ...current, compatibility: "audio-fallback" } : current);
+      }
       if (job !== generation.current) return;
       setStage("detecting-speech");
       recognitionJobs.current.update(job, "processing");
@@ -1592,6 +1637,7 @@ export default function Home() {
             ? caught.message
             : "Local recognition failed. Try again.",
         );
+        setMediaCompatibilityError(caught instanceof MediaCompatibilityError);
       }
     } finally {
       recognitionWorker.current?.release(job);
@@ -2612,6 +2658,8 @@ export default function Home() {
         exportError={exportError}
         exportDiagnostics={exportDiagnostics}
         errorMessage={errorMessage}
+        mediaPreparation={mediaPreparation}
+        mediaCompatibilityError={mediaCompatibilityError}
         onRetrySourceRestore={cloudSourceRestoreRetry ? retryCloudSourceRestore : null}
         timingWarning={timingWarning}
         timelineTooltip={timelineTooltip}

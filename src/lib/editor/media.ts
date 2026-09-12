@@ -30,6 +30,10 @@ export type MediaSource = ({
   origin?: "local-file" | "youtube-import";
   sourceUrl?: string;
   displayName?: string;
+  /** Local-only compatibility representation; original source metadata remains user-facing. */
+  compatibility?: "native" | "audio-fallback" | "full-normalization";
+  originalFileName?: string;
+  originalMimeType?: string;
 };
 
 export type TimelineTrackKind = "text" | "video" | "audio";
@@ -131,20 +135,28 @@ export function snapCaptionBoundaryToPlayhead(
   return { timeMs: boundaryTimeMs, snapped: false };
 }
 
-export function mediaKindForFile(file: Pick<File, "type">): MediaKind | null {
+const explicitMediaExtensions = new Set([
+  "3gp", "aif", "aiff", "avi", "flac", "m4a", "m4v", "mkv", "mov", "mp3", "mp4", "mpeg", "mpg", "mts", "m2ts", "oga", "ogg", "ogv", "ts", "wav", "webm",
+]);
+
+export const MEDIA_FILE_ACCEPT = "video/*,audio/*,.mov,.mp4,.m4v,.m4a,.webm,.mkv,.avi,.mpeg,.mpg,.ts,.mts,.m2ts,.3gp,.ogv,.ogg,.mp3,.wav,.flac,.aif,.aiff";
+
+export function mediaKindForFile(file: Pick<File, "type"> & Partial<Pick<File, "name">>): MediaKind | null {
   if (file.type.startsWith("video/")) return "video";
   if (file.type.startsWith("audio/")) return "audio";
-  return null;
+  const extension = file.name?.split(".").pop()?.toLowerCase();
+  if (!extension || !explicitMediaExtensions.has(extension)) return null;
+  return new Set(["m4a", "mp3", "wav", "flac", "aif", "aiff", "oga", "ogg"]).has(extension) ? "audio" : "video";
 }
 
 /** Validates the local-only source contract shared by browsing and drag/drop. */
-export function mediaFileError(file: Pick<File, "type" | "size">): string | null {
+export function mediaFileError(file: Pick<File, "type" | "size"> & Partial<Pick<File, "name">>): string | null {
   if (!mediaKindForFile(file)) return "Choose an MP4, MOV, MP3, WAV, M4A, or another browser-supported video or audio file.";
   if (file.size > MAX_LOCAL_MEDIA_BYTES) return "Choose a recitation up to 500 MB.";
   return null;
 }
 
-export function mediaSourceFromFile(file: Pick<File, "name" | "size" | "type">, kind: MediaKind, metadata?: { assetId?: string; durationMs?: number; width?: number; height?: number; origin?: NonNullable<MediaSource["origin"]>; sourceUrl?: string; displayName?: string }): MediaSource {
+export function mediaSourceFromFile(file: Pick<File, "name" | "size" | "type">, kind: MediaKind, metadata?: { assetId?: string; durationMs?: number; width?: number; height?: number; origin?: NonNullable<MediaSource["origin"]>; sourceUrl?: string; displayName?: string; compatibility?: MediaSource["compatibility"]; originalFileName?: string; originalMimeType?: string }): MediaSource {
   const common = {
     fileName: file.name,
     assetId: metadata?.assetId,
@@ -155,6 +167,9 @@ export function mediaSourceFromFile(file: Pick<File, "name" | "size" | "type">, 
     origin: metadata?.origin ?? "local-file",
     sourceUrl: metadata?.sourceUrl,
     displayName: metadata?.displayName,
+    compatibility: metadata?.compatibility,
+    originalFileName: metadata?.originalFileName,
+    originalMimeType: metadata?.originalMimeType,
   };
   if (kind === "audio") return { ...common, kind: "audio", hasVideo: false, hasAudio: true };
   return {
