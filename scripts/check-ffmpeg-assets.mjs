@@ -2,11 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const assets = [
-  ["public/ffmpeg/ffmpeg-core.js", "node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.js"],
-  ["public/ffmpeg/ffmpeg-core.wasm", "node_modules/@ffmpeg/core/dist/esm/ffmpeg-core.wasm"],
-  ["public/ffmpeg/ffmpeg-worker.js", "node_modules/@ffmpeg/ffmpeg/dist/esm/worker.js"],
-  ["public/ffmpeg/const.js", "node_modules/@ffmpeg/ffmpeg/dist/esm/const.js"],
-  ["public/ffmpeg/errors.js", "node_modules/@ffmpeg/ffmpeg/dist/esm/errors.js"],
+  ["public/ffmpeg/ffmpeg-core.js", "node_modules/@ffmpeg/core/dist/umd/ffmpeg-core.js"],
+  ["public/ffmpeg/ffmpeg-core.wasm", "node_modules/@ffmpeg/core/dist/umd/ffmpeg-core.wasm"],
 ];
 const requiredVersions = {
   "@ffmpeg/core": "0.12.10",

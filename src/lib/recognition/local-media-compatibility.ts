@@ -32,9 +32,8 @@ type FfmpegRuntime = {
 
 let runtimePromise: Promise<FfmpegRuntime> | null = null;
 
-/** Pinned, same-origin browser runtime files copied from the installed FFmpeg packages. */
+/** Pinned, same-origin single-thread core files copied from @ffmpeg/core/dist/umd. */
 export const FFMPEG_RUNTIME_ASSETS = {
-  worker: "/ffmpeg/ffmpeg-worker.js",
   core: "/ffmpeg/ffmpeg-core.js",
   wasm: "/ffmpeg/ffmpeg-core.wasm",
 } as const;
@@ -121,6 +120,50 @@ function isJavaScriptContentType(contentType: string | null): boolean {
   return Boolean(contentType && /(?:java|ecma)script/iu.test(contentType));
 }
 
+function sanitizeInitializationMessage(value: string): string {
+  const redacted = value
+    .replace(/(?:blob:|file:|https?:\/\/)[^\s)'"`]+/giu, "[redacted-url]")
+    .replace(/(?:[A-Za-z]:)?(?:\\|\/)[^\s)'"`]+(?:\\|\/)[^\s)'"`]*/gu, "[redacted-path]")
+    .replace(/\s+/gu, " ")
+    .trim();
+  return (redacted || "No error message was provided.").slice(0, 320);
+}
+
+function initializationSubstage(error: unknown, rawMessage: string): "main-thread" | "wrapper-worker" | "ffmpeg-core-factory" | "wasm-instantiation" | "worker-message-protocol" {
+  if (/webassembly|\bwasm\b|instantiate|compile|memory/iu.test(rawMessage)) return "wasm-instantiation";
+  if (/createffmpegcore|ffmpeg-core|\bimport\b/iu.test(rawMessage)) return "ffmpeg-core-factory";
+  if (typeof error === "string") return "worker-message-protocol";
+  if (/worker/iu.test(rawMessage)) return "wrapper-worker";
+  return "main-thread";
+}
+
+function safeSourceLocation(error: unknown): string | null {
+  if (!(error instanceof Error) || !error.stack) return null;
+  const match = /(?:^|[/\\])(ffmpeg-(?:core|worker)\.js):(\d+)(?::\d+)?/u.exec(error.stack);
+  return match ? `${match[1]}:${match[2]}` : null;
+}
+
+/** Safe details for ?debugMedia=1; the wrapper reports worker ERROR payloads as strings. */
+export function ffmpegInitializationDebugFacts(error: unknown): {
+  errorName: string;
+  errorMessage: string;
+  initializationSubstage: ReturnType<typeof initializationSubstage>;
+  failureOrigin: "main-thread" | "wrapper-worker";
+  workerMessageProtocol: boolean;
+  sourceLocation: string | null;
+} {
+  const rawMessage = error instanceof Error ? error.message : typeof error === "string" ? error : "Unknown FFmpeg initialization failure.";
+  const workerMessageProtocol = typeof error === "string";
+  return {
+    errorName: error instanceof Error ? error.name || "Error" : workerMessageProtocol ? "WorkerMessageError" : "UnknownError",
+    errorMessage: sanitizeInitializationMessage(rawMessage),
+    initializationSubstage: initializationSubstage(error, rawMessage),
+    failureOrigin: workerMessageProtocol ? "wrapper-worker" : "main-thread",
+    workerMessageProtocol,
+    sourceLocation: safeSourceLocation(error),
+  };
+}
+
 async function verifyRuntimeAsset(asset: "core" | "wasm", signal?: AbortSignal): Promise<void> {
   const stage = asset === "core" ? "ffmpeg-core-load-failed" : "ffmpeg-wasm-load-failed";
   const event = asset === "core" ? "core-load" : "wasm-load";
@@ -149,55 +192,6 @@ async function verifyRuntimeAsset(asset: "core" | "wasm", signal?: AbortSignal):
   }
 }
 
-/**
- * FFmpeg creates a module worker internally. Exercise the pinned worker first
- * so a worker-construction/import failure is observable separately from core
- * initialization. Its unknown-message response proves the module ran.
- */
-async function verifyFfmpegWorker(signal?: AbortSignal): Promise<void> {
-  mediaDebug("worker-create-start", {});
-  try {
-    await new Promise<void>((resolve, reject) => {
-      let worker: Worker | null = null;
-      let settled = false;
-      let timeout: number | null = null;
-      const onAbort = () => fail(abortError());
-      const cleanup = () => {
-        if (timeout != null) window.clearTimeout(timeout);
-        signal?.removeEventListener("abort", onAbort);
-        worker?.terminate();
-      };
-      const fail = (error: unknown = runtimeFailure("ffmpeg-worker-create-failed")) => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        reject(error);
-      };
-      try {
-        worker = new Worker(FFMPEG_RUNTIME_ASSETS.worker, { type: "module" });
-      } catch (error) {
-        fail(error);
-        return;
-      }
-      timeout = window.setTimeout(() => fail(), 10_000);
-      worker.addEventListener("error", () => fail());
-      worker.addEventListener("message", () => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        resolve();
-      }, { once: true });
-      signal?.addEventListener("abort", onAbort, { once: true });
-      worker.postMessage({ id: "runtime-check", type: "RUNTIME_CHECK" });
-    });
-    mediaDebug("worker-create-ok", {});
-  } catch (error) {
-    if (isAbort(error)) throw error;
-    mediaDebug("worker-create-failed", { errorCode: "ffmpeg-worker-create-failed" });
-    throw runtimeFailure("ffmpeg-worker-create-failed");
-  }
-}
-
 async function createFfmpegRuntime(signal?: AbortSignal): Promise<FfmpegRuntime> {
   let FFmpeg: (new () => FfmpegRuntime);
   mediaDebug("runtime-wrapper-import-start", {});
@@ -209,20 +203,21 @@ async function createFfmpegRuntime(signal?: AbortSignal): Promise<FfmpegRuntime>
     mediaDebug("runtime-wrapper-import-failed", { errorCode: "ffmpeg-wrapper-import-failed" });
     throw runtimeFailure("ffmpeg-wrapper-import-failed");
   }
-  await verifyFfmpegWorker(signal);
   await verifyRuntimeAsset("core", signal);
   await verifyRuntimeAsset("wasm", signal);
   const runtime = new FFmpeg();
   mediaDebug("ffmpeg-initialize-start", {});
   try {
     // The default @ffmpeg/core package is single-threaded and therefore does not require SharedArrayBuffer/COOP/COEP.
-    await runtime.load({ classWorkerURL: FFMPEG_RUNTIME_ASSETS.worker, coreURL: FFMPEG_RUNTIME_ASSETS.core, wasmURL: FFMPEG_RUNTIME_ASSETS.wasm }, { signal });
+    // Leave the @ffmpeg/ffmpeg wrapper worker to Next/Webpack, as its API intends.
+    mediaDebug("ffmpeg-initialize-config", { wrapperWorker: "next-webpack-bundled-classic", core: "self-hosted-umd", wasm: "self-hosted-umd-pair", coreWorker: "not-supplied-single-thread" });
+    await runtime.load({ coreURL: FFMPEG_RUNTIME_ASSETS.core, wasmURL: FFMPEG_RUNTIME_ASSETS.wasm }, { signal });
     mediaDebug("ffmpeg-initialize-ok", {});
     return runtime;
   } catch (error) {
     runtime.terminate();
     if (isAbort(error)) throw error;
-    mediaDebug("ffmpeg-initialize-failed", { errorCode: "ffmpeg-initialize-failed" });
+    mediaDebug("ffmpeg-initialize-failed", { errorCode: "ffmpeg-initialize-failed", ...ffmpegInitializationDebugFacts(error) });
     throw runtimeFailure("ffmpeg-initialize-failed");
   }
 }

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { MAX_FULL_NORMALIZATION_BYTES, MAX_RECOGNITION_PCM_BYTES, MEDIA_COMPATIBILITY_ERRORS, MediaCompatibilityError, mediaCompatibilityErrorMessage, recognitionPcmBytes, routeMediaCompatibility, type MediaInspection } from "../src/lib/media-compatibility.ts";
 import { MEDIA_FILE_ACCEPT, mediaFileError, mediaKindForFile } from "../src/lib/editor/media.ts";
-import { FFMPEG_RUNTIME_ASSETS, mediaFailureFromFfmpegLog, resolveFfmpegRuntimeAssetUrl } from "../src/lib/recognition/local-media-compatibility.ts";
+import { FFMPEG_RUNTIME_ASSETS, ffmpegInitializationDebugFacts, mediaFailureFromFfmpegLog, resolveFfmpegRuntimeAssetUrl } from "../src/lib/recognition/local-media-compatibility.ts";
 import { mediaDebugEnabled, visibleFileExtension } from "../src/lib/recognition/media-debug.ts";
 
 const editor = readFileSync("src/components/editor-client.tsx", "utf8");
@@ -52,21 +52,21 @@ test("unplayable HEVC/MOV selects full normalization only after a local probe", 
 
 test("FFmpeg runtime assets are pinned same-origin paths from every editor route", () => {
   assert.deepEqual(FFMPEG_RUNTIME_ASSETS, {
-    worker: "/ffmpeg/ffmpeg-worker.js",
     core: "/ffmpeg/ffmpeg-core.js",
     wasm: "/ffmpeg/ffmpeg-core.wasm",
   });
-  assert.equal(resolveFfmpegRuntimeAssetUrl("worker", "https://qurancaptions.com/editor?debugMedia=1"), "https://qurancaptions.com/ffmpeg/ffmpeg-worker.js");
   assert.equal(resolveFfmpegRuntimeAssetUrl("core", "https://qurancaptions.com/editor"), "https://qurancaptions.com/ffmpeg/ffmpeg-core.js");
   assert.equal(resolveFfmpegRuntimeAssetUrl("wasm", "https://qurancaptions.com/editor"), "https://qurancaptions.com/ffmpeg/ffmpeg-core.wasm");
   assert.doesNotMatch(fallback, /quran-autocaption\.netlify\.app|cdn\.jsdelivr\.net|unpkg\.com|toBlobURL/);
-  assert.match(fallback, /classWorkerURL: FFMPEG_RUNTIME_ASSETS\.worker/);
   assert.match(fallback, /coreURL: FFMPEG_RUNTIME_ASSETS\.core/);
   assert.match(fallback, /wasmURL: FFMPEG_RUNTIME_ASSETS\.wasm/);
+  assert.doesNotMatch(fallback, /classWorkerURL:|workerURL:/);
+  assert.match(fallback, /wrapperWorker: "next-webpack-bundled-classic"/);
+  assert.match(fallback, /core: "self-hosted-umd"/);
 });
 
-test("FFmpeg runtime setup reports distinct wrapper, worker, core, WASM, and initialization stages", () => {
-  for (const event of ["runtime-wrapper-import-start", "runtime-wrapper-import-ok", "worker-create-start", "worker-create-ok", "ffmpeg-initialize-ok"]) {
+test("FFmpeg runtime setup reports its exact safe initialization failure", () => {
+  for (const event of ["runtime-wrapper-import-start", "runtime-wrapper-import-ok", "ffmpeg-initialize-config", "ffmpeg-initialize-ok"]) {
     assert.match(fallback, new RegExp(`mediaDebug\\("${event}"`));
   }
   assert.match(fallback, /const event = asset === "core" \? "core-load" : "wasm-load"/);
@@ -80,14 +80,38 @@ test("FFmpeg runtime setup reports distinct wrapper, worker, core, WASM, and ini
   assert.match(fallback, /application\/wasm/);
   assert.match(fallback, /value\[0\] !== 0/);
   assert.match(fallback, /await runtime\.load\([\s\S]*?mediaDebug\("ffmpeg-initialize-ok"/);
+  assert.match(fallback, /\.\.\.ffmpegInitializationDebugFacts\(error\)/);
+  assert.match(fallback, /WorkerMessageError/);
+  assert.match(fallback, /worker-message-protocol/);
+  assert.match(fallback, /wasm-instantiation/);
+  assert.match(fallback, /ffmpeg-core-factory/);
+
+  assert.deepEqual(ffmpegInitializationDebugFacts("TypeError: WebAssembly.instantiate(): bad import at https://private.example/token"), {
+    errorName: "WorkerMessageError",
+    errorMessage: "TypeError: WebAssembly.instantiate(): bad import at [redacted-url]",
+    initializationSubstage: "wasm-instantiation",
+    failureOrigin: "wrapper-worker",
+    workerMessageProtocol: true,
+    sourceLocation: null,
+  });
+  assert.deepEqual(ffmpegInitializationDebugFacts(new Error("failed to import ffmpeg-core.js from file:///private/source")), {
+    errorName: "Error",
+    errorMessage: "failed to import ffmpeg-core.js from [redacted-url]",
+    initializationSubstage: "ffmpeg-core-factory",
+    failureOrigin: "main-thread",
+    workerMessageProtocol: false,
+    sourceLocation: null,
+  });
 });
 
 test("pinned FFmpeg static files are package-matched and build-checked", () => {
-  for (const asset of ["ffmpeg-core.js", "ffmpeg-core.wasm", "ffmpeg-worker.js", "const.js", "errors.js"]) {
+  for (const asset of ["ffmpeg-core.js", "ffmpeg-core.wasm"]) {
     assert.equal(readFileSync(`public/ffmpeg/${asset}`).byteLength > 0, true, `${asset} must be shipped from public/ffmpeg`);
   }
+  for (const asset of ["ffmpeg-worker.js", "const.js", "errors.js"]) assert.throws(() => readFileSync(`public/ffmpeg/${asset}`), { code: "ENOENT" }, `${asset} must be bundled by Next, not self-hosted`);
   const assetCheck = readFileSync("scripts/check-ffmpeg-assets.mjs", "utf8");
   assert.match(assetCheck, /readFileSync\(resolve\(published\)\)\.equals/);
+  assert.match(assetCheck, /@ffmpeg\/core\/dist\/umd/);
   assert.match(readFileSync("package.json", "utf8"), /check:ffmpeg-assets/);
 });
 
