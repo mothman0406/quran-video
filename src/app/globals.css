@@ -202,6 +202,7 @@
 .editor-empty-canvas b { font-size:15px; font-weight:700; }
 .editor-empty-canvas small { font-size:12px; }
 .editor-empty-canvas em { margin-top:8px; color:#8493a2; font-size:11px; font-style:normal; }
+.editor-media-preparation-progress { width:min(100%,360px); margin-top:4px; }
 
 /* Public landing page. Kept separate from the editor so the marketing route stays lightweight. */
 .landing-page { --landing-bg:#090d0e; --landing-surface:#111819; --landing-surface-raised:#152021; --landing-border:rgba(202,231,220,.13); --landing-text:#eff6f2; --landing-muted:#9daea9; --landing-green:#b7efc6; --landing-green-strong:#67c995; min-width:0; overflow:hidden; background:radial-gradient(100% 44rem at 50% -8%,rgba(35,101,82,.28),transparent 62%),var(--landing-bg); color:var(--landing-text); font-family:Arial,Helvetica,sans-serif; }

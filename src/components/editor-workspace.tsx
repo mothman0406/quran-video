@@ -15,6 +15,7 @@ import type { CaptionObject, CaptionResizeEdge } from "@/components/caption-prev
 import type { QuranContentResponse } from "@/lib/quran/content";
 import type { RightInspectorMode } from "@/lib/editor/selection";
 import type { CaptionGenerationProgress } from "@/lib/editor/caption-generation-progress";
+import type { LocalMediaPreparationProgress } from "@/lib/recognition/local-media-progress";
 import { PLAYBACK_RATES, playbackRateLabel, type PlaybackRate } from "@/lib/editor/playback-rate";
 import { hafsSurahs } from "@/lib/recognition/core";
 import { arabicCaptionDisplay, captionSegmentLabel, getActiveCaptionSegment, translationDisplayText } from "@/lib/editor/captions";
@@ -101,7 +102,7 @@ type EditorWorkspaceProps = {
   exportError: string | null;
   exportDiagnostics: LocalExportDiagnostics | null;
   errorMessage: string | null;
-  mediaPreparation: "checking" | "converting" | null;
+  mediaPreparation: LocalMediaPreparationProgress | null;
   mediaCompatibilityError: boolean;
   onRetrySourceRestore: (() => void) | null;
   timingWarning: string | null;
@@ -213,6 +214,17 @@ const formatDuration = (seconds: number) => {
 
 const formatFileSize = (bytes: number) => `${(bytes / (1024 * 1024)).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
 
+function mediaPreparationLabel(progress: LocalMediaPreparationProgress) {
+  switch (progress.stage) {
+    case "checking": return "Checking your recording...";
+    case "preparing-converter": return "Preparing converter...";
+    case "inspecting-recording": return "Inspecting recording...";
+    case "converting-recording": return "Converting recording...";
+    case "preparing-audio": return "Preparing audio for detection...";
+    case "preparing-editor": return "Preparing editor...";
+  }
+}
+
 const WORD_HIGHLIGHT_PRESETS = [
   ["Electric Lime", "#B7FF00"],
   ["Neon Cyan", "#00F5FF"],
@@ -279,6 +291,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     onResetSelectedObjectStyle, onSetStyleScope, onAlignTranslation, onSetSplitBoundary, onSplit, onMergePrevious,
     onMergeNext, onTranslationFragmentChange, onResetTranslationFragment, onResetTiming, onResetAllTiming, onTimelinePinchZoom,
   } = props;
+  const currentMediaPreparationLabel = mediaPreparation ? mediaPreparationLabel(mediaPreparation) : null;
   const onExport = exportPreflight?.status === "warnings" ? onExportAnyway : onStartExport;
   const fullscreenSupported = typeof document !== "undefined" && canFullscreenComposedPreview(fullscreenPreviewElement, document);
   const setFullscreenPreviewRef = useCallback((node: HTMLDivElement | null) => {
@@ -556,7 +569,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
               {fullscreenSupported && <button className="editor-player-button" type="button" data-player-control="fullscreen" aria-label={isPreviewFullscreen ? "Exit fullscreen" : "Enter fullscreen"} title={isPreviewFullscreen ? "Exit fullscreen" : "Enter fullscreen"} onClick={togglePreviewFullscreen}>{isPreviewFullscreen ? <Minimize2 aria-hidden="true" size={16} strokeWidth={2.25} /> : <Maximize2 aria-hidden="true" size={16} strokeWidth={2.25} />}</button>}
               {fullscreenError && <span className="editor-playback-fullscreen-error" role="status">{fullscreenError}</span>}
             </div>
-          </div> : mediaPreparation ? <div className="editor-empty-canvas" role="status" aria-live="polite"><span className="editor-upload-icon"><Upload aria-hidden="true" size={24} strokeWidth={1.8} /></span><strong>{mediaPreparation === "checking" ? "Checking your recording..." : "Preparing this recording for your browser..."}</strong><p>{mediaPreparation === "checking" ? "Checking local playback and recognition compatibility." : "Converting locally on this device. Your recording is not uploaded."}</p></div> : <label className={`editor-empty-canvas ${isDraggingMedia ? "is-dragging" : ""}`} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.querySelector<HTMLInputElement>("input")?.click(); } }} onDragEnter={(event) => { event.preventDefault(); setIsDraggingMedia(true); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setIsDraggingMedia(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingMedia(false); }} onDrop={(event) => { event.preventDefault(); setIsDraggingMedia(false); const file = event.dataTransfer.files.item(0); if (file) onVideoDrop(file); }}><span className="editor-upload-icon"><Upload aria-hidden="true" size={24} strokeWidth={1.8} /></span><strong>{mediaCompatibilityError ? "Choose another recording" : "Upload your recitation"}</strong><p>{mediaCompatibilityError ? "Choose the original recording or another local media file to try again." : "Add a Quran recitation and we&apos;ll detect the verses, sync the captions, and prepare them for editing."}</p><b>Drop your recitation here</b><small>or click to choose a file</small><em>MP4, MOV, MP3, WAV, M4A and more</em><input accept={MEDIA_FILE_ACCEPT} type="file" onChange={onVideoSelect} /></label>}
+          </div> : mediaPreparation ? <div className="editor-empty-canvas" role="status" aria-live="polite"><span className="editor-upload-icon"><Upload aria-hidden="true" size={24} strokeWidth={1.8} /></span><strong>{currentMediaPreparationLabel}{mediaPreparation.percentage !== undefined ? ` ${mediaPreparation.percentage}%` : ""}</strong><p>{mediaPreparation.percentage === undefined ? "Your recording stays on this device." : "Converting locally on this device. Your recording is not uploaded."}</p>{mediaPreparation.percentage !== undefined && <div className="editor-media-preparation-progress"><div className="editor-generation-progress-track" role="progressbar" aria-label={currentMediaPreparationLabel ?? "Local media preparation progress"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={mediaPreparation.percentage}><span style={{ width: `${mediaPreparation.percentage}%` }} /></div></div>}</div> : <label className={`editor-empty-canvas ${isDraggingMedia ? "is-dragging" : ""}`} tabIndex={0} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.currentTarget.querySelector<HTMLInputElement>("input")?.click(); } }} onDragEnter={(event) => { event.preventDefault(); setIsDraggingMedia(true); }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; setIsDraggingMedia(true); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsDraggingMedia(false); }} onDrop={(event) => { event.preventDefault(); setIsDraggingMedia(false); const file = event.dataTransfer.files.item(0); if (file) onVideoDrop(file); }}><span className="editor-upload-icon"><Upload aria-hidden="true" size={24} strokeWidth={1.8} /></span><strong>{mediaCompatibilityError ? "Choose another recording" : "Upload your recitation"}</strong><p>{mediaCompatibilityError ? "Choose the original recording or another local media file to try again." : "Add a Quran recitation and we&apos;ll detect the verses, sync the captions, and prepare them for editing."}</p><b>Drop your recitation here</b><small>or click to choose a file</small><em>MP4, MOV, MP3, WAV, M4A and more</em><input accept={MEDIA_FILE_ACCEPT} type="file" onChange={onVideoSelect} /></label>}
         </div>
         {videoUrl && <div className="editor-timeline-panel"><button className="editor-timeline-resize" type="button" aria-label="Resize timeline" title="Drag to resize · double-click to reset" onPointerDown={onTimelineResizeDown} onPointerMove={onTimelineResizeMove} onPointerUp={onTimelineResizeUp} onDoubleClick={() => setTimelineHeight(WORKSPACE_LAYOUT_DEFAULTS.timelineHeight)} /><div className="editor-timeline-heading"><div><SectionLabel>Timeline</SectionLabel><strong>{segments.length} caption segments</strong></div><div className="editor-timeline-controls"><button type="button" aria-label={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} title={timelineCollapsed ? "Expand timeline" : "Collapse timeline"} onClick={toggleTimeline}>{timelineCollapsed ? "↑" : "↓"}</button><button type="button" aria-label="Zoom out timeline" title="Zoom out" onClick={() => onTimelineZoom(timelineViewport.zoom / 2)}>−</button><input aria-label="Timeline zoom" title="Timeline zoom" type="range" min="1" max="128" step="1" value={timelineViewport.zoom} onChange={(event) => onTimelineZoom(Number(event.target.value))} /><button type="button" aria-label="Zoom in timeline" title="Zoom in" onClick={() => onTimelineZoom(timelineViewport.zoom * 2)}>+</button><button type="button" title="Fit the full project in the timeline" onClick={() => onTimelineZoom(1)}>Fit</button><button type="button" title="Reset media trim" onClick={onResetMediaTrim}>Reset trim</button></div><span>{formatDuration(currentTimeMs / 1000)} / {formatDuration(durationMs / 1000)}</span></div><div className="editor-timeline">
           <div className="editor-timeline-labels">{tracks.map((track) => <span className="editor-track-label" key={track.kind}>{track.label}</span>)}</div>
@@ -567,8 +580,13 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
             {timelineTooltip && timelineTooltip.position >= 0 && timelineTooltip.position <= 1 && <div className="editor-timeline-tooltip" role="status" style={{ left: `${timelineTooltip.position * 100}%` }}>{timelineTooltip.label}</div>}
           </div>
         </div>{timelineViewport.zoom > 1 && <input className="editor-timeline-pan" aria-label="Pan timeline" type="range" min="0" max={Math.max(0, durationMs - visibleDuration)} value={Math.min(timelineViewport.visibleStartMs, Math.max(0, durationMs - visibleDuration))} onChange={(event) => onTimelinePan(Number(event.target.value))} />}</div>}
-        {(busy || (stage === "complete" && alignments.length > 0) || showCorrection || errorMessage || timingWarning || exportState) && <div className="editor-notices">
-          {busy && progress && <div className="editor-generation-progress" aria-live="polite">
+        {(busy || mediaPreparation || (stage === "complete" && alignments.length > 0) || showCorrection || errorMessage || timingWarning || exportState) && <div className="editor-notices">
+          {mediaPreparation && <div className="editor-generation-progress editor-media-preparation-notice" aria-live="polite">
+            <div className="editor-generation-progress-heading"><strong>{currentMediaPreparationLabel}</strong>{mediaPreparation.percentage !== undefined && <output>{mediaPreparation.percentage}%</output>}</div>
+            {mediaPreparation.percentage !== undefined && <div className="editor-generation-progress-track" role="progressbar" aria-label={currentMediaPreparationLabel ?? "Local media preparation progress"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={mediaPreparation.percentage}><span style={{ width: `${mediaPreparation.percentage}%` }} /></div>}
+            <span>Your recording stays in this browser.</span>
+          </div>}
+          {busy && progress && !mediaPreparation && <div className="editor-generation-progress" aria-live="polite">
             <div className="editor-generation-progress-heading"><strong>Generating Quran captions</strong><output>{Math.round(progress.progress * 100)}%</output></div>
             <div className="editor-generation-progress-track" role="progressbar" aria-label="Caption generation progress" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress.progress * 100)}><span style={{ width: `${Math.round(progress.progress * 100)}%` }} /></div>
             <strong className="editor-generation-progress-label">{progress.label}</strong>

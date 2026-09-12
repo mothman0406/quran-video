@@ -29,7 +29,7 @@ test("iPhone-style MOV selection is accepted without File System Access", () => 
 test("playable MOV with AAC audio routes to audio-only fallback without requiring a video decoder", () => {
   assert.equal(routeMediaCompatibility(250 * 1024 * 1024, inspection({ nativeRecognitionAudio: false, durationMs: 30_000, videoCodec: "hevc", audioCodec: "aac" })), "audio-fallback");
   assert.match(editor, /decodeAudioChannels\(sourceFile\)/);
-  assert.match(editor, /decodeRecognitionAudioFallback\(sourceFile\)/);
+  assert.match(editor, /decodeRecognitionAudioFallback\(sourceFile, abort\.signal/);
   assert.match(editor, /compatibility: "audio-fallback"/);
   assert.match(fallback, /"-map", "0:a:0"/);
   assert.match(fallback, /"-vn"/);
@@ -37,7 +37,7 @@ test("playable MOV with AAC audio routes to audio-only fallback without requirin
   assert.doesNotMatch(fallback, /decodeRecognitionAudioFallback[\s\S]*?"-map", "0:v:0"/);
   assert.match(fallback, /mount\("WORKERFS", \{ files: \[file\] \}/);
   assert.doesNotMatch(fallback, /file\.arrayBuffer\(\)/);
-  assert.match(editor, /Preparing the audio for detection/);
+  assert.match(workspace, /Preparing audio for detection/);
 });
 
 test("unplayable HEVC/MOV selects full normalization only after a local probe", () => {

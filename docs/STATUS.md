@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Show local media conversion progress
+
+Complete:
+
+- Added job-owned local-media preparation status for checking, converter startup, probe, full recording conversion, audio-only recognition preparation, and editor handoff. These stages remain indeterminate until a measurable FFmpeg command starts.
+- Used `@ffmpeg/ffmpeg` 0.12.15 `progress` events only while the full normalization or PCM extraction command is active. Its processed timestamp is converted from microseconds and divided by the inspected source duration; values are clamped, monotonic per operation, and coalesced to at most one visual update every 150 ms (except real stage changes and completion).
+- Kept full H.264/AAC normalization and the playable-video audio fallback intact. Full normalization shows **Converting recording... X%**; recognition-only PCM extraction shows **Preparing audio for detection... X%** while preserving the original preview/export source.
+- Cleared media progress on completion, failure, cancellation, source replacement, clear-project actions, and component cleanup. Active-command progress listeners are removed in `finally`, and stale job events cannot update a replacement source. Recognition progress remains a distinct UI surface.
+- Added focused coverage for native indeterminate preparation, full and audio-only percentages, clamping, monotonicity, source replacement, clear behavior, completion handoff, throttling, listener cleanup, stage labels, and recognition separation.
+
+Verification: `npm run regression:quran` passes its production invariant probes and refreshed `docs/regression/results/20260912.md`; its optional real quran-align/EveryAyah timing benchmark remains unavailable in this workspace. `npm test` (397 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-import warnings and optional TikTok configuration reminder.
+
 ## Current milestone: Fix production FFmpeg initialization
 
 Complete:

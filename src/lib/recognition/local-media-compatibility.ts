@@ -16,6 +16,13 @@ type PreparedEditorMedia = {
   original: Pick<File, "name" | "type" | "size">;
 };
 
+export type LocalMediaPreparationEvent = {
+  stage: "preparing-converter" | "inspecting-recording" | "converting-recording" | "preparing-audio" | "preparing-editor";
+  processedTimeMs?: number;
+  sourceDurationMs?: number;
+  complete?: boolean;
+};
+
 type FfmpegRuntime = {
   exec(args: string[], timeout?: number, options?: { signal?: AbortSignal }): Promise<number>;
   readFile(path: string, encoding?: "utf8", options?: { signal?: AbortSignal }): Promise<Uint8Array | string>;
@@ -25,7 +32,9 @@ type FfmpegRuntime = {
   mount(fsType: "WORKERFS", options: { files: File[] }, mountPoint: string): Promise<boolean>;
   unmount(mountPoint: string): Promise<boolean>;
   on(event: "log", callback: (event: { type: string; message: string }) => void): void;
+  on(event: "progress", callback: (event: { progress: number; time: number }) => void): void;
   off(event: "log", callback: (event: { type: string; message: string }) => void): void;
+  off(event: "progress", callback: (event: { progress: number; time: number }) => void): void;
   terminate(): void;
   load(config?: { classWorkerURL?: string; coreURL?: string; wasmURL?: string; workerURL?: string }, options?: { signal?: AbortSignal }): Promise<boolean>;
 };
@@ -281,10 +290,23 @@ export function mediaFailureFromFfmpegLog(lines: readonly string[], fallback: "a
   return new MediaCompatibilityError(fallback);
 }
 
-async function runFfmpeg(runtime: FfmpegRuntime, args: string[], fallback: "audioDecodeFailed" | "pcmExtractionFailed", signal?: AbortSignal) {
+async function runFfmpeg(
+  runtime: FfmpegRuntime,
+  args: string[],
+  fallback: "audioDecodeFailed" | "pcmExtractionFailed",
+  signal?: AbortSignal,
+  onProgress?: (processedTimeMs: number) => void,
+) {
   const lines: string[] = [];
   const onLog = ({ message }: { type: string; message: string }) => lines.push(message);
+  // @ffmpeg/ffmpeg 0.12.15 forwards FFmpeg's media timestamp in microseconds.
+  // Derive the visible value from it and the inspected source duration rather
+  // than trusting the wrapper's generic `progress` fraction.
+  const onFfmpegProgress = ({ time }: { progress: number; time: number }) => {
+    if (Number.isFinite(time) && time >= 0) onProgress?.(time / 1_000);
+  };
   runtime.on("log", onLog);
+  if (onProgress) runtime.on("progress", onFfmpegProgress);
   try {
     if (await runtime.exec(args, undefined, { signal }) !== 0) throw mediaFailureFromFfmpegLog(lines, fallback);
   } catch (error) {
@@ -292,6 +314,7 @@ async function runFfmpeg(runtime: FfmpegRuntime, args: string[], fallback: "audi
     throw mediaFailureFromFfmpegLog(lines, fallback);
   } finally {
     runtime.off("log", onLog);
+    if (onProgress) runtime.off("progress", onFfmpegProgress);
   }
 }
 
@@ -307,7 +330,7 @@ function temporaryName(file: File, suffix: string) {
   return `quran-source-${crypto.randomUUID()}${suffix}`;
 }
 
-export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPreparing?: (state: "converting") => void): Promise<PreparedEditorMedia> {
+export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPreparation?: (event: LocalMediaPreparationEvent) => void): Promise<PreparedEditorMedia> {
   const inspection = await inspectLocalMedia(file);
   const route = routeMediaCompatibility(file.size, inspection);
   mediaDebug("route", { selected: route });
@@ -316,7 +339,7 @@ export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPrep
     return { file, kind: inspection.kind, route, inspection, original: file };
   }
 
-  onPreparing?.("converting");
+  onPreparation?.({ stage: "preparing-converter" });
   const runtime = await loadFfmpeg(signal);
   let mountPoint: string | null = null;
   const audioOnly = inspection.kind === "audio";
@@ -325,12 +348,27 @@ export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPrep
     const mounted = await mountSource(runtime, file, signal);
     mountPoint = mounted.mountPoint;
     const { inputName } = mounted;
+    onPreparation?.({ stage: "inspecting-recording" });
     await probeFfmpeg(runtime, inputName, audioOnly ? "audio" : "media", signal);
     assertNotAborted(signal);
     const command = audioOnly
       ? ["-i", inputName, "-map", "0:a:0", "-c:a", "aac", "-movflags", "+faststart", outputName]
       : ["-i", inputName, "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", outputName];
-    await runFfmpeg(runtime, command, "pcmExtractionFailed", signal);
+    const progressStage = "converting-recording" as const;
+    let lastDebugPercentage = -1;
+    mediaDebug("conversion-start", { route, sourceDurationMs: inspection.durationMs ?? null });
+    onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs });
+    await runFfmpeg(runtime, command, "pcmExtractionFailed", signal, (processedTimeMs) => {
+      onPreparation?.({ stage: progressStage, processedTimeMs, sourceDurationMs: inspection.durationMs });
+      const percentage = inspection.durationMs && inspection.durationMs > 0 ? Math.min(100, Math.max(0, Math.round((processedTimeMs / inspection.durationMs) * 100))) : null;
+      if (percentage !== null && percentage >= lastDebugPercentage + 10) {
+        lastDebugPercentage = percentage;
+        mediaDebug("conversion-progress", { route, percentage });
+      }
+    });
+    onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs, complete: true });
+    mediaDebug("conversion-complete", { route });
+    onPreparation?.({ stage: "preparing-editor" });
     const data = await runtime.readFile(outputName, undefined, { signal }) as Uint8Array;
     const normalizedBytes = new Uint8Array(data.byteLength);
     normalizedBytes.set(data);
@@ -349,11 +387,12 @@ export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPrep
 }
 
 /** Called only after Web Audio fails; the original playable video remains the editor source. */
-export async function decodeRecognitionAudioFallback(file: File, signal?: AbortSignal): Promise<DecodedAudioChannels> {
+export async function decodeRecognitionAudioFallback(file: File, signal?: AbortSignal, onPreparation?: (event: LocalMediaPreparationEvent) => void): Promise<DecodedAudioChannels> {
   const inspection = await inspectLocalMedia(file);
   const route = routeMediaCompatibility(file.size, { ...inspection, nativeRecognitionAudio: false, browserPlayback: true });
   mediaDebug("route", { selected: route });
   if (route !== "audio-fallback") throw new MediaCompatibilityError("audioDecodeFailed");
+  onPreparation?.({ stage: "preparing-converter" });
   const runtime = await loadFfmpeg(signal);
   let mountPoint: string | null = null;
   const outputName = temporaryName(file, ".f32");
@@ -361,10 +400,24 @@ export async function decodeRecognitionAudioFallback(file: File, signal?: AbortS
     const mounted = await mountSource(runtime, file, signal);
     mountPoint = mounted.mountPoint;
     const { inputName } = mounted;
+    onPreparation?.({ stage: "inspecting-recording" });
     await probeFfmpeg(runtime, inputName, "audio", signal);
+    const progressStage = "preparing-audio" as const;
+    let lastDebugPercentage = -1;
+    mediaDebug("conversion-start", { route, sourceDurationMs: inspection.durationMs ?? null });
+    onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs });
     await runFfmpeg(runtime, [
       "-i", inputName, "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-acodec", "pcm_f32le", outputName,
-    ], "pcmExtractionFailed", signal);
+    ], "pcmExtractionFailed", signal, (processedTimeMs) => {
+      onPreparation?.({ stage: progressStage, processedTimeMs, sourceDurationMs: inspection.durationMs });
+      const percentage = inspection.durationMs && inspection.durationMs > 0 ? Math.min(100, Math.max(0, Math.round((processedTimeMs / inspection.durationMs) * 100))) : null;
+      if (percentage !== null && percentage >= lastDebugPercentage + 10) {
+        lastDebugPercentage = percentage;
+        mediaDebug("conversion-progress", { route, percentage });
+      }
+    });
+    onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs, complete: true });
+    mediaDebug("conversion-complete", { route });
     const bytes = await runtime.readFile(outputName, undefined, { signal }) as Uint8Array;
     const copy = new Uint8Array(bytes.byteLength);
     copy.set(bytes);

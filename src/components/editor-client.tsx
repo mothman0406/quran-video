@@ -23,6 +23,7 @@ import {
 } from "@/lib/editor/caption-generation-progress";
 import { RecognitionJobController } from "@/lib/editor/recognition-job";
 import { LocalRecognitionWorkerClient, RecognitionJobCancelledError } from "@/lib/recognition/recognition-worker-client";
+import { LocalMediaPreparationProgressCoalescer, LocalMediaPreparationProgressController, type LocalMediaPreparationProgress, type LocalMediaPreparationStage } from "@/lib/recognition/local-media-progress";
 import {
   recognitionToVerseAlignments,
   AutomaticRecognitionController,
@@ -254,7 +255,7 @@ export default function Home() {
   const recognitionStatusLabel = recognitionStageLabel(stage);
   const [progress, setProgress] = useState<CaptionGenerationProgress | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [mediaPreparation, setMediaPreparation] = useState<"checking" | "converting" | null>(null);
+  const [mediaPreparation, setMediaPreparation] = useState<LocalMediaPreparationProgress | null>(null);
   const [mediaCompatibilityError, setMediaCompatibilityError] = useState(false);
   const [timingWarning, setTimingWarning] = useState<string | null>(null);
   const [support, setSupport] = useState<{
@@ -353,6 +354,9 @@ export default function Home() {
   const recognitionWorker = useRef<LocalRecognitionWorkerClient | null>(null);
   const recognitionProgressCoalescer = useRef(new CaptionGenerationProgressCoalescer());
   const mediaPreparationAbort = useRef<AbortController | null>(null);
+  const mediaPreparationGeneration = useRef(0);
+  const mediaPreparationProgress = useRef(new LocalMediaPreparationProgressController());
+  const mediaPreparationCoalescer = useRef(new LocalMediaPreparationProgressCoalescer());
   const automaticRecognition = useRef(new AutomaticRecognitionController());
   const captionProgress = useRef(new CaptionGenerationProgressController());
   const alignmentDebug = useRef<AlignmentDebug | null>(null);
@@ -422,6 +426,45 @@ export default function Home() {
     generation.current += 1;
     captionProgress.current.reset();
     recognitionProgressCoalescer.current.reset();
+  }
+  function beginMediaPreparation(stage: LocalMediaPreparationStage = "checking") {
+    const job = ++mediaPreparationGeneration.current;
+    mediaPreparationCoalescer.current.reset();
+    setMediaPreparation(mediaPreparationProgress.current.start(job, stage));
+    return job;
+  }
+  function publishMediaPreparation(
+    job: number,
+    event: { stage: LocalMediaPreparationStage; processedTimeMs?: number; sourceDurationMs?: number; complete?: boolean },
+  ) {
+    const measurable = event.stage === "converting-recording" || event.stage === "preparing-audio";
+    let next;
+    if (event.stage === "converting-recording" || event.stage === "preparing-audio") {
+      next = event.complete
+        ? mediaPreparationProgress.current.complete(job, event.stage, event.sourceDurationMs)
+        : event.processedTimeMs !== undefined
+          ? mediaPreparationProgress.current.reportProcessedTime(job, event.stage, event.processedTimeMs, event.sourceDurationMs)
+          : mediaPreparationProgress.current.stage(job, event.stage);
+    } else {
+      next = mediaPreparationProgress.current.stage(job, event.stage);
+    }
+    // A duration can be unavailable from container metadata. Keep that truthful
+    // stage indeterminate instead of inventing a percentage.
+    if (!next && measurable) next = mediaPreparationProgress.current.stage(job, event.stage);
+    if (next && mediaPreparationCoalescer.current.shouldPublish(next)) setMediaPreparation(next);
+  }
+  function clearMediaPreparation(job: number) {
+    mediaPreparationProgress.current.clear(job);
+    mediaPreparationCoalescer.current.reset();
+    if (job === mediaPreparationGeneration.current) setMediaPreparation(null);
+  }
+  function cancelMediaPreparation() {
+    mediaPreparationAbort.current?.abort();
+    mediaPreparationAbort.current = null;
+    mediaPreparationGeneration.current += 1;
+    mediaPreparationProgress.current.reset();
+    mediaPreparationCoalescer.current.reset();
+    setMediaPreparation(null);
   }
   projectHistoryStateRef.current = {
     segments,
@@ -666,6 +709,8 @@ export default function Home() {
   useEffect(() => () => {
     exportAbort.current?.abort();
     mediaPreparationAbort.current?.abort();
+    mediaPreparationProgress.current.reset();
+    mediaPreparationCoalescer.current.reset();
     void import("@/lib/recognition/local-media-compatibility").then(({ releaseLocalMediaRuntime }) => releaseLocalMediaRuntime());
     const previous = completedExport.current;
     if (previous) URL.revokeObjectURL(previous.objectUrl);
@@ -867,6 +912,7 @@ export default function Home() {
   }
   function resetEditorState() {
     exportAbort.current?.abort();
+    cancelMediaPreparation();
     clearCompletedExport();
     setProjectFormatExplicitlyChosen(false);
     invalidateRecognitionForSourceChange();
@@ -1207,15 +1253,15 @@ export default function Home() {
       setMediaCompatibilityError(true);
       return;
     }
-    mediaPreparationAbort.current?.abort();
+    cancelMediaPreparation();
     const abort = new AbortController();
     mediaPreparationAbort.current = abort;
-    setMediaPreparation("checking");
+    const mediaJob = beginMediaPreparation();
     setMediaCompatibilityError(false);
     setErrorMessage(null);
     try {
       const { prepareLocalMedia } = await import("@/lib/recognition/local-media-compatibility");
-      const prepared = await prepareLocalMedia(next, abort.signal, () => setMediaPreparation("converting"));
+      const prepared = await prepareLocalMedia(next, abort.signal, (event) => publishMediaPreparation(mediaJob, event));
       if (abort.signal.aborted) return;
       const assetId = crypto.randomUUID();
       const source = mediaSourceFromFile(prepared.file, prepared.kind, {
@@ -1240,7 +1286,7 @@ export default function Home() {
     } finally {
       if (mediaPreparationAbort.current === abort) {
         mediaPreparationAbort.current = null;
-        setMediaPreparation(null);
+        clearMediaPreparation(mediaJob);
       }
     }
   }
@@ -1362,9 +1408,20 @@ export default function Home() {
       try {
         decoded = await decodeAudioChannels(sourceFile);
       } catch {
-        reportProgress("preparing-media", undefined, "Preparing the audio for detection");
         const { decodeRecognitionAudioFallback } = await import("@/lib/recognition/local-media-compatibility");
-        decoded = await decodeRecognitionAudioFallback(sourceFile);
+        const abort = new AbortController();
+        mediaPreparationAbort.current?.abort();
+        mediaPreparationAbort.current = abort;
+        const mediaJob = beginMediaPreparation("preparing-converter");
+        try {
+          decoded = await decodeRecognitionAudioFallback(sourceFile, abort.signal, (event) => publishMediaPreparation(mediaJob, event));
+        } finally {
+          if (mediaPreparationAbort.current === abort) {
+            mediaPreparationAbort.current = null;
+            clearMediaPreparation(mediaJob);
+          }
+        }
+        if (abort.signal.aborted) return;
         setMediaSource((current) => current?.compatibility === "native" ? { ...current, compatibility: "audio-fallback" } : current);
       }
       if (job !== generation.current) return;
@@ -1694,6 +1751,7 @@ export default function Home() {
   }
   function clearVideo() {
     exportAbort.current?.abort();
+    cancelMediaPreparation();
     clearCompletedExport();
     invalidateRecognitionForSourceChange();
     waveformGeneration.current += 1;
