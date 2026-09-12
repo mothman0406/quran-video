@@ -1362,7 +1362,7 @@ export default function Home() {
       try {
         decoded = await decodeAudioChannels(sourceFile);
       } catch {
-        reportProgress("preparing-media", undefined, "Preparing this recording for your browser");
+        reportProgress("preparing-media", undefined, "Preparing the audio for detection");
         const { decodeRecognitionAudioFallback } = await import("@/lib/recognition/local-media-compatibility");
         decoded = await decodeRecognitionAudioFallback(sourceFile);
         setMediaSource((current) => current?.compatibility === "native" ? { ...current, compatibility: "audio-fallback" } : current);

@@ -61,7 +61,6 @@ export function timelineCaptionText(segment: CaptionSegment): string {
 /** Screen-space threshold keeps caption/playhead snapping stable across zoom. */
 export const CAPTION_PLAYHEAD_SNAP_THRESHOLD_PX = 8;
 export const minimumMediaTrimDurationMs = 250;
-export const MAX_LOCAL_MEDIA_BYTES = 500 * 1024 * 1024;
 export const TIMELINE_MIN_ZOOM = 1;
 export const TIMELINE_MAX_ZOOM = 128;
 
@@ -152,7 +151,6 @@ export function mediaKindForFile(file: Pick<File, "type"> & Partial<Pick<File, "
 /** Validates the local-only source contract shared by browsing and drag/drop. */
 export function mediaFileError(file: Pick<File, "type" | "size"> & Partial<Pick<File, "name">>): string | null {
   if (!mediaKindForFile(file)) return "Choose an MP4, MOV, MP3, WAV, M4A, or another browser-supported video or audio file.";
-  if (file.size > MAX_LOCAL_MEDIA_BYTES) return "Choose a recitation up to 500 MB.";
   return null;
 }
 

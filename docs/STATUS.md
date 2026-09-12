@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Handle large local media by operation
+
+Complete:
+
+- Removed the arbitrary 500 MB picker/native-source rejection. Native playback and native recognition retain the user-selected `File`/object URL without a whole-file JavaScript copy, so capability checks govern that route.
+- Replaced the blanket 100 MB fallback guard with operation-specific policy. Playable video whose native audio decoding fails takes recognition-only audio extraction regardless of video-track byte size; it keeps the original source and absolute timebase for preview, timeline, captions, and export.
+- Changed FFmpeg-WASM input from a whole-file `arrayBuffer()`/MEMFS write to a temporary `WORKERFS` File mount. Audio fallback maps only `0:a:0` to 16 kHz mono float PCM, processes no video frames, and removes the mount/output immediately afterward.
+- Kept full-video normalization fail-fast and separate: it is limited before execution to 250 MiB source size, 15 minutes, and 3840×2160 coded pixels because it materializes encoded output and video working surfaces. Recognition PCM is independently capped at 256 MiB, based on audio duration rather than video bitrate.
+- Updated compatibility architecture/customer copy and added regression coverage for large native media, large playable audio-only fallback, no full-video transcoding in that route, WorkerFS cleanup, and unsafe full normalization.
+
+Verification: `npm run regression:quran` passes production invariant probes and refreshed `docs/regression/results/20260912.md`; its optional local real `quran-align`/EveryAyah benchmark remains unavailable in this workspace. `npm test` (383 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-require and Transformers `import.meta` warnings, plus the optional TikTok configuration reminder.
+
 ## Current milestone: Add local media compatibility fallback
 
 Complete:

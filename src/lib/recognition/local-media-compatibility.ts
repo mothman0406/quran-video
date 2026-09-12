@@ -17,9 +17,12 @@ type PreparedEditorMedia = {
 
 type FfmpegRuntime = {
   exec(args: string[], timeout?: number, options?: { signal?: AbortSignal }): Promise<number>;
-  writeFile(path: string, data: Uint8Array, options?: { signal?: AbortSignal }): Promise<boolean>;
   readFile(path: string, encoding?: "utf8", options?: { signal?: AbortSignal }): Promise<Uint8Array | string>;
   deleteFile(path: string, options?: { signal?: AbortSignal }): Promise<boolean>;
+  createDir(path: string): Promise<boolean>;
+  deleteDir(path: string): Promise<boolean>;
+  mount(fsType: "WORKERFS", options: { files: File[] }, mountPoint: string): Promise<boolean>;
+  unmount(mountPoint: string): Promise<boolean>;
   terminate(): void;
   load(config?: { coreURL?: string; wasmURL?: string; workerURL?: string }, options?: { signal?: AbortSignal }): Promise<boolean>;
 };
@@ -47,11 +50,13 @@ async function inspectTracks(file: File): Promise<MediaInspection> {
       input.getDurationFromMetadata(),
       input.getMimeType(),
     ]);
-    const [audioCodec, videoCodec, nativeRecognitionAudio, browserPlayback] = await Promise.all([
+    const [audioCodec, videoCodec, nativeRecognitionAudio, browserPlayback, width, height] = await Promise.all([
       audioTrack?.getCodec() ?? null,
       videoTrack?.getCodec() ?? null,
       audioTrack?.canDecode() ?? false,
       browserCanPlay(file, mimeType, Boolean(videoTrack)),
+      videoTrack?.getCodedWidth(),
+      videoTrack?.getCodedHeight(),
     ]);
     const kind = videoTrack ? "video" : "audio";
     return {
@@ -62,6 +67,8 @@ async function inspectTracks(file: File): Promise<MediaInspection> {
       browserPlayback,
       nativeRecognitionAudio,
       durationMs: duration == null ? undefined : Math.round(duration * 1_000),
+      width,
+      height,
       videoCodec,
       audioCodec,
     };
@@ -73,7 +80,7 @@ async function inspectTracks(file: File): Promise<MediaInspection> {
   }
 }
 
-/** Fast, lazy local preflight. It reads container metadata before any FFmpeg input copy or conversion. */
+/** Fast, lazy local preflight. It reads container metadata before FFmpeg work. */
 export async function inspectLocalMedia(file: File): Promise<MediaInspection> {
   return inspectTracks(file);
 }
@@ -102,9 +109,20 @@ async function getFfmpeg(signal?: AbortSignal): Promise<FfmpegRuntime> {
   }
 }
 
-async function writeSource(runtime: FfmpegRuntime, file: File, inputName: string, signal?: AbortSignal) {
+/**
+ * WORKERFS gives FFmpeg a File-backed input. Unlike MEMFS writeFile(), it does
+ * not first materialize the whole source as an ArrayBuffer or a second source
+ * file in WASM; FFmpeg reads the required file ranges as it demuxes them.
+ */
+async function mountSource(runtime: FfmpegRuntime, file: File, signal?: AbortSignal) {
   assertNotAborted(signal);
-  await runtime.writeFile(inputName, new Uint8Array(await file.arrayBuffer()), { signal });
+  const mountPoint = `/quran-source-${crypto.randomUUID()}`;
+  if (!await runtime.createDir(mountPoint)) throw new MediaCompatibilityError("unsupported");
+  if (!await runtime.mount("WORKERFS", { files: [file] }, mountPoint)) {
+    await Promise.allSettled([runtime.deleteDir(mountPoint)]);
+    throw new MediaCompatibilityError("unsupported");
+  }
+  return { mountPoint, inputName: `${mountPoint}/${file.name}` };
 }
 
 async function probeFfmpeg(runtime: FfmpegRuntime, inputName: string, stream: "audio" | "media", signal?: AbortSignal) {
@@ -128,11 +146,13 @@ export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPrep
 
   onPreparing?.("converting");
   const runtime = await getFfmpeg(signal);
-  const inputName = temporaryName(file, ".input");
+  let mountPoint: string | null = null;
   const audioOnly = inspection.kind === "audio";
   const outputName = temporaryName(file, audioOnly ? ".m4a" : ".mp4");
   try {
-    await writeSource(runtime, file, inputName, signal);
+    const mounted = await mountSource(runtime, file, signal);
+    mountPoint = mounted.mountPoint;
+    const { inputName } = mounted;
     await probeFfmpeg(runtime, inputName, audioOnly ? "audio" : "media", signal);
     assertNotAborted(signal);
     const exitCode = await runtime.exec(audioOnly
@@ -149,7 +169,11 @@ export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPrep
     if (error instanceof MediaCompatibilityError || (error instanceof DOMException && error.name === "AbortError")) throw error;
     throw compatibilityErrorFromUnknown(error, "unsupported");
   } finally {
-    await Promise.allSettled([runtime.deleteFile(inputName, { signal }), runtime.deleteFile(outputName, { signal })]);
+    await Promise.allSettled([runtime.deleteFile(outputName, { signal })]);
+    if (mountPoint) {
+      await Promise.allSettled([runtime.unmount(mountPoint)]);
+      await Promise.allSettled([runtime.deleteDir(mountPoint)]);
+    }
   }
 }
 
@@ -159,10 +183,12 @@ export async function decodeRecognitionAudioFallback(file: File, signal?: AbortS
   const route = routeMediaCompatibility(file.size, { ...inspection, nativeRecognitionAudio: false, browserPlayback: true });
   if (route !== "audio-fallback") throw new MediaCompatibilityError("unsupported");
   const runtime = await getFfmpeg(signal);
-  const inputName = temporaryName(file, ".input");
+  let mountPoint: string | null = null;
   const outputName = temporaryName(file, ".f32");
   try {
-    await writeSource(runtime, file, inputName, signal);
+    const mounted = await mountSource(runtime, file, signal);
+    mountPoint = mounted.mountPoint;
+    const { inputName } = mounted;
     await probeFfmpeg(runtime, inputName, "audio", signal);
     const exitCode = await runtime.exec([
       "-i", inputName, "-map", "0:a:0", "-ac", "1", "-ar", "16000", "-f", "f32le", "-acodec", "pcm_f32le", outputName,
@@ -176,7 +202,11 @@ export async function decodeRecognitionAudioFallback(file: File, signal?: AbortS
     if (error instanceof MediaCompatibilityError || (error instanceof DOMException && error.name === "AbortError")) throw error;
     throw compatibilityErrorFromUnknown(error, "unsupported");
   } finally {
-    await Promise.allSettled([runtime.deleteFile(inputName, { signal }), runtime.deleteFile(outputName, { signal })]);
+    await Promise.allSettled([runtime.deleteFile(outputName, { signal })]);
+    if (mountPoint) {
+      await Promise.allSettled([runtime.unmount(mountPoint)]);
+      await Promise.allSettled([runtime.deleteDir(mountPoint)]);
+    }
   }
 }
 

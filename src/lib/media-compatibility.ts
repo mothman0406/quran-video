@@ -1,14 +1,24 @@
 import type { MediaKind } from "./editor/media.ts";
 
-/** The fallback keeps the original 500 MB native-file allowance, but avoids duplicating large files in mobile RAM. */
-export const MAX_LOCAL_FALLBACK_BYTES = 100 * 1024 * 1024;
+/**
+ * Full H.264 normalization keeps an encoded output in WASM memory before it
+ * becomes a browser File. These limits protect that operation only; they do
+ * not apply to native playback or recognition-only audio extraction.
+ */
+export const MAX_FULL_NORMALIZATION_BYTES = 250 * 1024 * 1024;
+export const MAX_FULL_NORMALIZATION_DURATION_MS = 15 * 60 * 1_000;
+export const MAX_FULL_NORMALIZATION_PIXELS = 3_840 * 2_160;
+
+/** 16 kHz mono f32 recognition PCM uses 64 bytes per millisecond. */
+export const MAX_RECOGNITION_PCM_BYTES = 256 * 1024 * 1024;
 
 export const MEDIA_COMPATIBILITY_ERRORS = {
   noAudio: "This video doesn't contain an audio track. Choose a recording where the recitation can be heard.",
   unreadable: "We couldn't read this recording. It may be damaged or incomplete. Try selecting the original file again.",
   protected: "This recording is protected and can't be processed in the browser. Try the original unprotected video from your Photos library.",
   unsupported: "We can't process this recording on this device yet. Try another copy of the video or export it from Photos and try again.",
-  tooLarge: "This recording is too large to convert safely in your browser. Trim it to the part you want to caption and try again.",
+  fullNormalizationTooLarge: "This recording needs more conversion than this browser can safely handle. Try trimming it to the part you want to caption, or choose a smaller copy.",
+  recognitionAudioTooLarge: "This recording's audio is too long for this browser to prepare safely. Try trimming it to the part you want to caption, or choose a shorter copy.",
 } as const;
 
 export type MediaCompatibilityErrorCode = keyof typeof MEDIA_COMPATIBILITY_ERRORS;
@@ -31,11 +41,24 @@ export type MediaInspection = {
   browserPlayback: boolean;
   nativeRecognitionAudio: boolean;
   durationMs?: number;
+  width?: number;
+  height?: number;
   videoCodec?: string | null;
   audioCodec?: string | null;
 };
 
 export type MediaCompatibilityRoute = "native" | "audio-fallback" | "full-normalization";
+
+export function recognitionPcmBytes(durationMs?: number): number {
+  return Math.max(0, Math.round(durationMs ?? 0)) * 16_000 * Float32Array.BYTES_PER_ELEMENT / 1_000;
+}
+
+export function canSafelyNormalizeFullVideo(fileSize: number, inspection: MediaInspection): boolean {
+  const pixels = Math.max(0, inspection.width ?? 0) * Math.max(0, inspection.height ?? 0);
+  return fileSize <= MAX_FULL_NORMALIZATION_BYTES
+    && (inspection.durationMs == null || inspection.durationMs <= MAX_FULL_NORMALIZATION_DURATION_MS)
+    && pixels <= MAX_FULL_NORMALIZATION_PIXELS;
+}
 
 /** Pure route selection keeps the safety and first-class Camera Roll policy testable without browser APIs. */
 export function routeMediaCompatibility(fileSize: number, inspection: MediaInspection): MediaCompatibilityRoute {
@@ -43,10 +66,10 @@ export function routeMediaCompatibility(fileSize: number, inspection: MediaInspe
   if (!inspection.hasAudio) throw new MediaCompatibilityError("noAudio");
   if (inspection.browserPlayback && inspection.nativeRecognitionAudio) return "native";
   if (inspection.browserPlayback) {
-    if (fileSize > MAX_LOCAL_FALLBACK_BYTES) throw new MediaCompatibilityError("tooLarge");
+    if (recognitionPcmBytes(inspection.durationMs) > MAX_RECOGNITION_PCM_BYTES) throw new MediaCompatibilityError("recognitionAudioTooLarge");
     return "audio-fallback";
   }
-  if (fileSize > MAX_LOCAL_FALLBACK_BYTES) throw new MediaCompatibilityError("tooLarge");
+  if (!canSafelyNormalizeFullVideo(fileSize, inspection)) throw new MediaCompatibilityError("fullNormalizationTooLarge");
   return "full-normalization";
 }
 
