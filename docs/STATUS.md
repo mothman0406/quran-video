@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Load local FFmpeg runtime in production
+
+Complete:
+
+- Traced the production `runtimeLoad` failure to the pre-media FFmpeg bootstrap: the lazy wrapper downloaded the core JS and WASM from jsDelivr through `toBlobURL`, then initialized the wrapper's Next-bundled worker with blob URLs. The diagnostic could only report one generic runtime failure, so it could not identify the failing fetch, worker, or initialization operation. The 155 MB MOV had not been mounted, probed, or decoded.
+- Replaced that off-origin/blob runtime chain with exact package-matched, same-origin runtime files in `public/ffmpeg`: wrapper worker support from `@ffmpeg/ffmpeg` 0.12.15 and single-thread core JS/WASM from `@ffmpeg/core` 0.12.10. Runtime asset URLs are root-relative, canonical-domain agnostic, and resolve to `/ffmpeg/...` from every editor route; no retired Netlify hostname or CDN is used.
+- Kept FFmpeg lazy: native media returns before the runtime loader. A compatibility fallback now traces wrapper import, a real pinned worker module startup handshake, core response validation, WASM status/MIME/magic-byte validation, and final FFmpeg initialization separately. Each failure has a distinct internal code while retaining the existing friendly setup error.
+- Added package-byte checks before and after the production build and focused tests for same-origin route resolution, no old host/CDN/blob strategy, pinned asset presence, separate runtime stages, native laziness, fallback initialization-before-normalization, and the existing no-upload and resource-policy constraints.
+
+Verification: `npm run regression:quran` passes production invariant probes and refreshed `docs/regression/results/20260912.md`; its optional local real quran-align/EveryAyah benchmark remains unavailable in this workspace. `npm test` (389 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. The production build served locally returns HTTP 200 `application/javascript` for the core and wrapper worker, plus HTTP 206 `application/wasm` with the `00 61 73 6d` WASM header for the range probe. The build retains the existing non-fatal VAD/ONNX Runtime dynamic-import warnings and optional TikTok configuration reminder.
+
 ## Current milestone: Decode audio from playable Apple recordings
 
 Complete:

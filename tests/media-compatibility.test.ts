@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { MAX_FULL_NORMALIZATION_BYTES, MAX_RECOGNITION_PCM_BYTES, MEDIA_COMPATIBILITY_ERRORS, MediaCompatibilityError, mediaCompatibilityErrorMessage, recognitionPcmBytes, routeMediaCompatibility, type MediaInspection } from "../src/lib/media-compatibility.ts";
 import { MEDIA_FILE_ACCEPT, mediaFileError, mediaKindForFile } from "../src/lib/editor/media.ts";
-import { mediaFailureFromFfmpegLog } from "../src/lib/recognition/local-media-compatibility.ts";
+import { FFMPEG_RUNTIME_ASSETS, mediaFailureFromFfmpegLog, resolveFfmpegRuntimeAssetUrl } from "../src/lib/recognition/local-media-compatibility.ts";
 import { mediaDebugEnabled, visibleFileExtension } from "../src/lib/recognition/media-debug.ts";
 
 const editor = readFileSync("src/components/editor-client.tsx", "utf8");
@@ -48,6 +48,47 @@ test("unplayable HEVC/MOV selects full normalization only after a local probe", 
   assert.match(fallback, /"-movflags", "\+faststart"/);
   assert.match(fallback, /audioOnly \? "audio" : "media"/);
   assert.match(fallback, /audioOnly \? "audio" : "video"/);
+});
+
+test("FFmpeg runtime assets are pinned same-origin paths from every editor route", () => {
+  assert.deepEqual(FFMPEG_RUNTIME_ASSETS, {
+    worker: "/ffmpeg/ffmpeg-worker.js",
+    core: "/ffmpeg/ffmpeg-core.js",
+    wasm: "/ffmpeg/ffmpeg-core.wasm",
+  });
+  assert.equal(resolveFfmpegRuntimeAssetUrl("worker", "https://qurancaptions.com/editor?debugMedia=1"), "https://qurancaptions.com/ffmpeg/ffmpeg-worker.js");
+  assert.equal(resolveFfmpegRuntimeAssetUrl("core", "https://qurancaptions.com/editor"), "https://qurancaptions.com/ffmpeg/ffmpeg-core.js");
+  assert.equal(resolveFfmpegRuntimeAssetUrl("wasm", "https://qurancaptions.com/editor"), "https://qurancaptions.com/ffmpeg/ffmpeg-core.wasm");
+  assert.doesNotMatch(fallback, /quran-autocaption\.netlify\.app|cdn\.jsdelivr\.net|unpkg\.com|toBlobURL/);
+  assert.match(fallback, /classWorkerURL: FFMPEG_RUNTIME_ASSETS\.worker/);
+  assert.match(fallback, /coreURL: FFMPEG_RUNTIME_ASSETS\.core/);
+  assert.match(fallback, /wasmURL: FFMPEG_RUNTIME_ASSETS\.wasm/);
+});
+
+test("FFmpeg runtime setup reports distinct wrapper, worker, core, WASM, and initialization stages", () => {
+  for (const event of ["runtime-wrapper-import-start", "runtime-wrapper-import-ok", "worker-create-start", "worker-create-ok", "ffmpeg-initialize-ok"]) {
+    assert.match(fallback, new RegExp(`mediaDebug\\("${event}"`));
+  }
+  assert.match(fallback, /const event = asset === "core" \? "core-load" : "wasm-load"/);
+  assert.match(fallback, /mediaDebug\(`\$\{event\}-start`, \{\}\)/);
+  assert.match(fallback, /mediaDebug\(`\$\{event\}-ok`, \{\}\)/);
+  for (const code of ["ffmpeg-wrapper-import-failed", "ffmpeg-worker-create-failed", "ffmpeg-core-load-failed", "ffmpeg-wasm-load-failed", "ffmpeg-initialize-failed"]) {
+    assert.equal(MEDIA_COMPATIBILITY_ERRORS[code as keyof typeof MEDIA_COMPATIBILITY_ERRORS], MEDIA_COMPATIBILITY_ERRORS.runtimeLoad);
+    assert.match(fallback, new RegExp(`"${code}"`));
+  }
+  assert.match(fallback, /Range: "bytes=0-15"/);
+  assert.match(fallback, /application\/wasm/);
+  assert.match(fallback, /value\[0\] !== 0/);
+  assert.match(fallback, /await runtime\.load\([\s\S]*?mediaDebug\("ffmpeg-initialize-ok"/);
+});
+
+test("pinned FFmpeg static files are package-matched and build-checked", () => {
+  for (const asset of ["ffmpeg-core.js", "ffmpeg-core.wasm", "ffmpeg-worker.js", "const.js", "errors.js"]) {
+    assert.equal(readFileSync(`public/ffmpeg/${asset}`).byteLength > 0, true, `${asset} must be shipped from public/ffmpeg`);
+  }
+  const assetCheck = readFileSync("scripts/check-ffmpeg-assets.mjs", "utf8");
+  assert.match(assetCheck, /readFileSync\(resolve\(published\)\)\.equals/);
+  assert.match(readFileSync("package.json", "utf8"), /check:ffmpeg-assets/);
 });
 
 test("unreadable, no-audio, oversized PCM, and unsafe full normalization fail during preflight", () => {
@@ -98,6 +139,12 @@ test("fallback work is local, cancellable, cleaned up, and cannot introduce a ba
   assert.match(editor, /AutomaticRecognitionController/);
   assert.match(workspace, /Choose another recording/);
   assert.doesNotMatch(fallback, /fetch\([^)]*(upload|convert)|\/api\/(media|convert|transcode)|Railway|Render|Fly\.io/i);
+});
+
+test("native media remains FFmpeg-free while a successful fallback initializes before normalization", () => {
+  assert.match(fallback, /if \(route !== "full-normalization"\) \{\s*return \{ file, kind: inspection\.kind, route, inspection, original: file \};\s*\}/);
+  assert.match(fallback, /const runtime = await loadFfmpeg\(signal\);[\s\S]*?await probeFfmpeg\(runtime, inputName/);
+  assert.equal(routeMediaCompatibility(2 * 1024 * 1024 * 1024, inspection()), "native");
 });
 
 test("ordinary extension-only picker files have no blanket native size limit", () => {

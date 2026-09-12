@@ -27,10 +27,21 @@ type FfmpegRuntime = {
   on(event: "log", callback: (event: { type: string; message: string }) => void): void;
   off(event: "log", callback: (event: { type: string; message: string }) => void): void;
   terminate(): void;
-  load(config?: { coreURL?: string; wasmURL?: string; workerURL?: string }, options?: { signal?: AbortSignal }): Promise<boolean>;
+  load(config?: { classWorkerURL?: string; coreURL?: string; wasmURL?: string; workerURL?: string }, options?: { signal?: AbortSignal }): Promise<boolean>;
 };
 
 let runtimePromise: Promise<FfmpegRuntime> | null = null;
+
+/** Pinned, same-origin browser runtime files copied from the installed FFmpeg packages. */
+export const FFMPEG_RUNTIME_ASSETS = {
+  worker: "/ffmpeg/ffmpeg-worker.js",
+  core: "/ffmpeg/ffmpeg-core.js",
+  wasm: "/ffmpeg/ffmpeg-core.wasm",
+} as const;
+
+export function resolveFfmpegRuntimeAssetUrl(asset: keyof typeof FFMPEG_RUNTIME_ASSETS, baseUrl: string): string {
+  return new URL(FFMPEG_RUNTIME_ASSETS[asset], baseUrl).toString();
+}
 
 function abortError() { return new DOMException("Media preparation cancelled.", "AbortError"); }
 function assertNotAborted(signal?: AbortSignal) { if (signal?.aborted) throw abortError(); }
@@ -102,22 +113,122 @@ export async function inspectLocalMedia(file: File): Promise<MediaInspection> {
   return inspection;
 }
 
-async function getFfmpeg(signal?: AbortSignal): Promise<FfmpegRuntime> {
-  runtimePromise ??= (async () => {
-    const [{ FFmpeg }, { toBlobURL }] = await Promise.all([import("@ffmpeg/ffmpeg"), import("@ffmpeg/util")]);
-    const runtime = new FFmpeg() as unknown as FfmpegRuntime;
+function runtimeFailure(code: "ffmpeg-wrapper-import-failed" | "ffmpeg-worker-create-failed" | "ffmpeg-core-load-failed" | "ffmpeg-wasm-load-failed" | "ffmpeg-initialize-failed") {
+  return new MediaCompatibilityError(code);
+}
+
+function isJavaScriptContentType(contentType: string | null): boolean {
+  return Boolean(contentType && /(?:java|ecma)script/iu.test(contentType));
+}
+
+async function verifyRuntimeAsset(asset: "core" | "wasm", signal?: AbortSignal): Promise<void> {
+  const stage = asset === "core" ? "ffmpeg-core-load-failed" : "ffmpeg-wasm-load-failed";
+  const event = asset === "core" ? "core-load" : "wasm-load";
+  mediaDebug(`${event}-start`, {});
+  try {
+    const response = await fetch(FFMPEG_RUNTIME_ASSETS[asset], { signal, headers: { Range: "bytes=0-15" } });
+    const contentType = response.headers.get("content-type");
+    if (!response.ok || (asset === "core" ? !isJavaScriptContentType(contentType) : contentType?.split(";", 1)[0]?.trim().toLowerCase() !== "application/wasm")) {
+      throw runtimeFailure(stage);
+    }
+    if (asset === "wasm") {
+      const reader = response.body?.getReader();
+      if (!reader) throw runtimeFailure(stage);
+      try {
+        const { value } = await reader.read();
+        if (!value || value.length < 4 || value[0] !== 0 || value[1] !== 0x61 || value[2] !== 0x73 || value[3] !== 0x6d) throw runtimeFailure(stage);
+      } finally {
+        await reader.cancel();
+      }
+    }
+    mediaDebug(`${event}-ok`, {});
+  } catch (error) {
+    if (isAbort(error)) throw error;
+    mediaDebug(`${event}-failed`, { errorCode: stage });
+    throw error instanceof MediaCompatibilityError ? error : runtimeFailure(stage);
+  }
+}
+
+/**
+ * FFmpeg creates a module worker internally. Exercise the pinned worker first
+ * so a worker-construction/import failure is observable separately from core
+ * initialization. Its unknown-message response proves the module ran.
+ */
+async function verifyFfmpegWorker(signal?: AbortSignal): Promise<void> {
+  mediaDebug("worker-create-start", {});
+  try {
+    await new Promise<void>((resolve, reject) => {
+      let worker: Worker | null = null;
+      let settled = false;
+      let timeout: number | null = null;
+      const onAbort = () => fail(abortError());
+      const cleanup = () => {
+        if (timeout != null) window.clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+        worker?.terminate();
+      };
+      const fail = (error: unknown = runtimeFailure("ffmpeg-worker-create-failed")) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      try {
+        worker = new Worker(FFMPEG_RUNTIME_ASSETS.worker, { type: "module" });
+      } catch (error) {
+        fail(error);
+        return;
+      }
+      timeout = window.setTimeout(() => fail(), 10_000);
+      worker.addEventListener("error", () => fail());
+      worker.addEventListener("message", () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      }, { once: true });
+      signal?.addEventListener("abort", onAbort, { once: true });
+      worker.postMessage({ id: "runtime-check", type: "RUNTIME_CHECK" });
+    });
+    mediaDebug("worker-create-ok", {});
+  } catch (error) {
+    if (isAbort(error)) throw error;
+    mediaDebug("worker-create-failed", { errorCode: "ffmpeg-worker-create-failed" });
+    throw runtimeFailure("ffmpeg-worker-create-failed");
+  }
+}
+
+async function createFfmpegRuntime(signal?: AbortSignal): Promise<FfmpegRuntime> {
+  let FFmpeg: (new () => FfmpegRuntime);
+  mediaDebug("runtime-wrapper-import-start", {});
+  try {
+    ({ FFmpeg } = await import("@ffmpeg/ffmpeg") as { FFmpeg: new () => FfmpegRuntime });
+    mediaDebug("runtime-wrapper-import-ok", {});
+  } catch (error) {
+    if (isAbort(error)) throw error;
+    mediaDebug("runtime-wrapper-import-failed", { errorCode: "ffmpeg-wrapper-import-failed" });
+    throw runtimeFailure("ffmpeg-wrapper-import-failed");
+  }
+  await verifyFfmpegWorker(signal);
+  await verifyRuntimeAsset("core", signal);
+  await verifyRuntimeAsset("wasm", signal);
+  const runtime = new FFmpeg();
+  mediaDebug("ffmpeg-initialize-start", {});
+  try {
     // The default @ffmpeg/core package is single-threaded and therefore does not require SharedArrayBuffer/COOP/COEP.
-    const coreBaseUrl = "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm";
-    const [coreURL, wasmURL] = await Promise.all([
-      toBlobURL(`${coreBaseUrl}/ffmpeg-core.js`, "text/javascript"),
-      toBlobURL(`${coreBaseUrl}/ffmpeg-core.wasm`, "application/wasm"),
-    ]);
-    await runtime.load({
-      coreURL,
-      wasmURL,
-    }, { signal });
+    await runtime.load({ classWorkerURL: FFMPEG_RUNTIME_ASSETS.worker, coreURL: FFMPEG_RUNTIME_ASSETS.core, wasmURL: FFMPEG_RUNTIME_ASSETS.wasm }, { signal });
+    mediaDebug("ffmpeg-initialize-ok", {});
     return runtime;
-  })();
+  } catch (error) {
+    runtime.terminate();
+    if (isAbort(error)) throw error;
+    mediaDebug("ffmpeg-initialize-failed", { errorCode: "ffmpeg-initialize-failed" });
+    throw runtimeFailure("ffmpeg-initialize-failed");
+  }
+}
+
+async function getFfmpeg(signal?: AbortSignal): Promise<FfmpegRuntime> {
+  runtimePromise ??= createFfmpegRuntime(signal);
   try {
     return await runtimePromise;
   } catch (error) {
@@ -133,8 +244,9 @@ async function loadFfmpeg(signal?: AbortSignal): Promise<FfmpegRuntime> {
     return runtime;
   } catch (error) {
     if (isAbort(error)) throw error;
-    mediaDebug("runtime", { loaded: false, errorCode: "runtimeLoad" });
-    throw compatibilityErrorFromUnknown(error, "runtimeLoad");
+    const compatible = error instanceof MediaCompatibilityError ? error : compatibilityErrorFromUnknown(error, "runtimeLoad");
+    mediaDebug("runtime", { loaded: false, errorCode: compatible.code });
+    throw compatible;
   }
 }
 
