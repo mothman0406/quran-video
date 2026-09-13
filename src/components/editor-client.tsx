@@ -16,6 +16,7 @@ import { FASTCONFORMER_MODEL, FASTCONFORMER_MODEL_ARTIFACT, FASTCONFORMER_MODEL_
 import { comparePassageIdentification } from "@/lib/recognition/fastconformer-identification";
 import { decideFastConformerPassage } from "@/lib/recognition/passage-decision";
 import { createPassageIdentificationDebugReport } from "@/lib/recognition/passage-identification-debug";
+import { recoveryDiagnosticsForNativeAttempt, shouldRetryFfmpegRecognitionPcm } from "@/lib/recognition/pcm-recovery";
 import {
   CaptionGenerationProgressController,
   CaptionGenerationProgressCoalescer,
@@ -424,6 +425,7 @@ export default function Home() {
     setExportResult(next);
   }
   function invalidateRecognitionForSourceChange() {
+    cancelMediaPreparation();
     recognitionWorker.current?.cancel(generation.current);
     recognitionJobs.current.invalidateSource();
     generation.current += 1;
@@ -1418,6 +1420,7 @@ export default function Home() {
       const { decodeAudioChannels } = await import("@/lib/recognition/local-audio-decode");
       reportProgress("preparing-media");
       let decoded;
+      let usingFfmpegRecognitionPcm = false;
       try {
         decoded = await decodeAudioChannels(sourceFile);
       } catch {
@@ -1435,6 +1438,7 @@ export default function Home() {
           }
         }
         if (abort.signal.aborted) return;
+        usingFfmpegRecognitionPcm = true;
         setMediaSource((current) => current?.compatibility === "native" ? { ...current, compatibility: "audio-fallback" } : current);
       }
       if (job !== generation.current) return;
@@ -1442,21 +1446,74 @@ export default function Home() {
       recognitionJobs.current.update(job, "processing");
       reportProgress("analyzing-speech");
       const worker = recognitionWorker.current ?? (recognitionWorker.current = new LocalRecognitionWorkerClient());
-      const workerPrepared = await worker.prepare(job, decoded.sampleRate, decoded.frameCount, decoded.channelBuffers);
+      let workerPrepared = await worker.prepare(job, decoded.sampleRate, decoded.frameCount, decoded.channelBuffers);
       if (!workerPrepared.speechRegions.length) throw new Error("No credible human speech was detected in this recording, so Quran captions were not timed from background audio.");
-      const prepared = {
-        run: { analysisRunId: crypto.randomUUID(), sourceIdentity, sourceObjectUrl: sourceUrl, sourceDurationMs: workerPrepared.durationMs, sampleRate: 16_000, pcmIdentity: crypto.randomUUID() },
+      const preparedFor = (value: typeof workerPrepared) => ({
+        run: { analysisRunId: crypto.randomUUID(), sourceIdentity, sourceObjectUrl: sourceUrl, sourceDurationMs: value.durationMs, sampleRate: 16_000, pcmIdentity: crypto.randomUUID() },
         chunks: [], rawTranscript: "", backend: "wasm" as const, timestampMode: "chunk-fallback" as const,
         timestampValidation: { asrWordCount: 0, timestampedWordCount: 0, zeroDurationCount: 0, rangeMs: null },
-        modelLoadMs: 0, transcriptionMs: 0, durationMs: workerPrepared.durationMs,
-        audioAnalysis: workerPrepared.audioAnalysis, speechRegions: workerPrepared.speechRegions,
-      };
+        modelLoadMs: 0, transcriptionMs: 0, durationMs: value.durationMs,
+        audioAnalysis: value.audioAnalysis, speechRegions: value.speechRegions,
+      });
+      let prepared = preparedFor(workerPrepared);
       setStage("matching");
       reportProgress("identifying-passage");
-      const fastConformerIdentification = await worker.identify(job, reportFastConformerProgress);
+      let fastConformerIdentification = await worker.identify(job, reportFastConformerProgress);
       if (job !== generation.current) return;
-      const fastConformerSpan = canonicalSpanFromFastConformerIdentification(fastConformerIdentification?.canonicalSpan ?? null);
-      const fastConformerDecision = decideFastConformerPassage(fastConformerIdentification, fastConformerSpan);
+      let fastConformerSpan = canonicalSpanFromFastConformerIdentification(fastConformerIdentification?.canonicalSpan ?? null);
+      let fastConformerDecision = decideFastConformerPassage(fastConformerIdentification, fastConformerSpan);
+      const pcmRecoveryDiagnostics = recoveryDiagnosticsForNativeAttempt(
+        fastConformerDecision,
+        workerPrepared.durationMs,
+        workerPrepared.speechRegions.length,
+      );
+      if (shouldRetryFfmpegRecognitionPcm(fastConformerDecision.accepted, usingFfmpegRecognitionPcm)) {
+        // A valid native decode can still have materially different resampling
+        // characteristics. Keep the same evidence gate, but retry once with
+        // FFmpeg's independent local decoder before falling back to Whisper.
+        try {
+          const { decodeRecognitionAudioFallback } = await import("@/lib/recognition/local-media-compatibility");
+          const abort = new AbortController();
+          mediaPreparationAbort.current?.abort();
+          mediaPreparationAbort.current = abort;
+          const mediaJob = beginMediaPreparation("preparing-converter");
+          pcmRecoveryDiagnostics.recovery = { state: "recovery-started", voicedCoverage: null, durationMs: null, speechRegionCount: null };
+          let recovered;
+          try {
+            recovered = await decodeRecognitionAudioFallback(sourceFile, abort.signal, (event) => publishMediaPreparation(mediaJob, event));
+          } finally {
+            if (mediaPreparationAbort.current === abort) {
+              mediaPreparationAbort.current = null;
+              clearMediaPreparation(mediaJob);
+            }
+          }
+          if (job !== generation.current) return;
+          workerPrepared = await worker.prepare(job, recovered.sampleRate, recovered.frameCount, recovered.channelBuffers);
+          pcmRecoveryDiagnostics.recovery = { state: "recovery-complete", voicedCoverage: null, durationMs: workerPrepared.durationMs, speechRegionCount: workerPrepared.speechRegions.length };
+          if (workerPrepared.speechRegions.length) {
+            usingFfmpegRecognitionPcm = true;
+            prepared = preparedFor(workerPrepared);
+            reportProgress("identifying-passage");
+            fastConformerIdentification = await worker.identify(job, reportFastConformerProgress);
+            if (job !== generation.current) return;
+            fastConformerSpan = canonicalSpanFromFastConformerIdentification(fastConformerIdentification?.canonicalSpan ?? null);
+            fastConformerDecision = decideFastConformerPassage(fastConformerIdentification, fastConformerSpan);
+            pcmRecoveryDiagnostics.recovery = {
+              state: fastConformerDecision.accepted ? "recovery-accepted" : "recovery-rejected",
+              voicedCoverage: fastConformerDecision.evidence.voicedAudioExplained,
+              durationMs: workerPrepared.durationMs,
+              speechRegionCount: workerPrepared.speechRegions.length,
+            };
+            setMediaSource((current) => current?.compatibility === "native" ? { ...current, compatibility: "audio-fallback" } : current);
+          } else {
+            pcmRecoveryDiagnostics.recovery = { state: "recovery-rejected", voicedCoverage: null, durationMs: workerPrepared.durationMs, speechRegionCount: 0 };
+          }
+        } catch {
+          pcmRecoveryDiagnostics.recovery = { state: "recovery-rejected", voicedCoverage: null, durationMs: null, speechRegionCount: null };
+          if (job !== generation.current) return;
+          // Preserve the original native evidence and normal Whisper fallback.
+        }
+      }
       // Development comparison keeps both engines observable. Production does
       // not pay Whisper's model/inference cost after accepted FC evidence.
       const runWhisperComparison = process.env.NODE_ENV !== "production";
@@ -1508,13 +1565,13 @@ export default function Home() {
         ? await worker.align(job, hafsVerses.filter((verse) => selectedCanonicalSpan!.coveredVerseKeys.includes(verse.verseKey)), alignmentMatches, prepared.run.analysisRunId, reportFastConformerProgress)
         : null;
       const analysis = useFastConformer
-        ? analyzeTranscript(primaryTranscript, { audioAnalysis: result.audioAnalysis, speechRegions: result.speechRegions, fastConformerResult: fastConformerAlignment, passageOverride: { canonicalSpan: fastConformerSpan, passageSource: "fastconformer-quran" } })
+        ? analyzeTranscript(primaryTranscript, { audioAnalysis: result.audioAnalysis, speechRegions: result.speechRegions, fastConformerResult: fastConformerAlignment, passageOverride: { canonicalSpan: fastConformerSpan!, passageSource: "fastconformer-quran" } })
         : selectedCanonicalSpan
           ? analyzeTranscript(primaryTranscript, { audioAnalysis: result.audioAnalysis, speechRegions: result.speechRegions, fastConformerResult: fastConformerAlignment, passageOverride: { canonicalSpan: selectedCanonicalSpan, passageSource: "whisper-fallback" } })
           : whisperAnalysis;
       if (analysis.matches.length === 0) {
         alignmentDebug.current = {
-          PASSAGE_IDENTIFICATION_DECISION: { selectedEngine: "manual", acceptedSpan: null, decisionReason: fastConformerDecision.reason, fastConformer: { identification: fastConformerIdentification, evidenceGate: fastConformerDecision }, whisper: { attempted: result !== prepared, state: whisperAnalysis.passage.state, span: whisperAnalysis.passage.canonicalSpan, confidence: whisperAnalysis.passage.identityConfidence }, disagreement: passageComparison },
+          PASSAGE_IDENTIFICATION_DECISION: { selectedEngine: "manual", acceptedSpan: null, decisionReason: fastConformerDecision.reason, fastConformer: { identification: fastConformerIdentification, evidenceGate: fastConformerDecision }, pcmRecovery: pcmRecoveryDiagnostics, whisper: { attempted: result !== prepared, state: whisperAnalysis.passage.state, span: whisperAnalysis.passage.canonicalSpan, confidence: whisperAnalysis.passage.identityConfidence }, disagreement: passageComparison },
           CROSS_SURAH_CANDIDATES_REJECTED: fastConformerIdentification?.CROSS_SURAH_CANDIDATES_REJECTED ?? 0,
           WHISPER_VS_FASTCONFORMER: passageComparison,
           passage: analysis.passage,
@@ -1613,6 +1670,7 @@ export default function Home() {
             })),
           })) ?? [],
           fastConformer: { status: fastConformerIdentification?.status ?? "not-run", span: fastConformerIdentification?.canonicalSpan ?? null, evidenceGate: fastConformerDecision, confidence: fastConformerIdentification?.confidence ?? null, selectedSurah: fastConformerIdentification?.selectedSurah ?? null, optionalPrelude: fastConformerIdentification?.optionalPrelude ?? null },
+          pcmRecovery: pcmRecoveryDiagnostics,
           whisper: { attempted: result !== prepared, state: whisperAnalysis.passage.state, span: whisperAnalysis.passage.canonicalSpan, confidence: whisperAnalysis.passage.identityConfidence },
           disagreement: passageComparison,
         },

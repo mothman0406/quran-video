@@ -1,15 +1,34 @@
 # Quran passage-identification audit
 
-Date: 2026-09-12. Scope: passage identity only; word timing is deliberately a
+Date: 2026-09-13. Scope: passage identity only; word timing is deliberately a
 separate concern. Wrong canonical Quran text is worse than abstention.
 
 ## Result
 
-The supplied failure clip is not retained in this workspace. Therefore neither
-the reported wrong selection nor a historical regression can be reproduced or
-attributed to a commit. The current harness records that limitation rather than
-inventing a score, rank, or before/after result. No production selection logic
-was changed.
+The supplied private recording was evaluated without adding the media, PCM, or
+transcript to Git. Its expected passage is **Surat Al-Muddaththir 74:1–9**. It
+is a 22.10-second H.264/AAC MP4 with a 44.1 kHz stereo audio stream.
+
+The controlled native-path reconstruction (decode to stereo PCM, then the
+worker's linear mono/16 kHz conversion) produces a correct opening candidate
+but abstains: with three full-window speech regions (the controlled
+VAD-qualified upper bound), the winning Surah 74 path contains only the first
+12-second window, ends at 74:6, and explains 35.19% of the audio. The browser
+VAD runtime itself requires the final browser retest below.
+The existing evidence gate correctly rejects it for insufficient voiced-path
+coverage; it is not a retrieval, threshold, or forced-alignment failure.
+
+The same source through the existing local FFmpeg audio extraction produces a
+Surah 74 path from 74:1 through 74:9, 64.81% explained voiced coverage, and a
+passing production evidence gate. Native and FFmpeg PCM have matching duration
+(22,104 ms) and 0.999988 sample correlation, but differ enough in downmix and
+resampling to change the noisy final-window CTC evidence.
+
+Production now makes exactly one local FFmpeg PCM retry only after a native
+FastConformer decision fails. It reruns VAD and the unchanged Quran-wide
+identification/evidence gate on that independent decode. An accepted native
+result, already-FFmpeg PCM, and failed recovery retain their existing paths;
+Whisper remains the later fallback.
 
 The current code is already a two-stage local design: recall-first Quran-wide
 retrieval followed by candidate-specific CTC verification and whole-recording
@@ -25,7 +44,7 @@ uniqueness, or invalid coordinates.
 | Stage | Implementation | Input → output / guard |
 | --- | --- | --- |
 | Decode | `local-audio-decode.ts`, `local-media-compatibility.ts` | Native `AudioContext` PCM or FFmpeg `f32le`, mono, 16 kHz fallback → transferable channel buffers. |
-| Prepare/VAD | `recognition-worker.ts`, `vad.ts`, `speech-regions.ts` | Channel average + linear 16 kHz resample → PCM, RMS analysis, speech regions. VAD qualifies identification windows; it is not identity authority. |
+| Prepare/VAD | `recognition-worker.ts`, `vad.ts`, `speech-regions.ts` | Native channel-average/linear 16 kHz PCM, with one FFmpeg PCM recovery only after a rejected native FastConformer decision → RMS analysis, speech regions. VAD qualifies identification windows; it is not identity authority. |
 | CTC | `local-fastconformer.ts#createFastConformerIdentificationRunner` | 12 s windows / 6 s hop with >=1.2 s voiced audio → FastConformer logits. |
 | Retrieve | `fastconformer-identification.ts#greedyDecodeCtc`, `retrieveQuranCandidates` | Normalized greedy CTC lexical tokens; initial basmalah excluded from location lookup → up to 48 same-surah contiguous ranges, using 1–3 gram anchors and length/drift expansions. |
 | Verify/rerank | `rerankQuranCandidates` | Exact forward CTC likelihood for canonical target and optional prelude; per-frame normalized score. First 24 retrieval candidates only. |
@@ -44,23 +63,23 @@ transcript.
 
 ## History and preprocessing
 
-- `a8825e8` prevents both ngrams and expanded candidates crossing a surah;
-  static inspection finds no regression in that change.
-- `2b743ab` adds global competing-surah paths, lexical uniqueness, short-target
-  penalties, and single-window ambiguity rejection. It is a false-positive
-  hardening change, not evidence of a regression.
-- `cd0ca24`, `ac3699b`, and `1ceea5d` concern timing benchmarks/end boundaries,
-  not passage choice.
-- Recent FFmpeg compatibility commits occur after the identification work.
-  The audio fallback emits 16 kHz mono `pcm_f32le`; native decode is then mixed
-  and resampled in the worker to the same format/rate. No gain normalization or
-  intentional trim is applied. However the two resamplers differ (browser
-  linear worker resampler vs FFmpeg), so exact acoustic equivalence is not yet
-  demonstrated. This remains an open test, not a proven regression.
-- Identification windows start at source zero and overlap. VAD only determines
-  whether a full window is eligible; a low-energy opening can still make the
-  first window ineligible. That is the highest-value clip-level diagnostic to
-  capture for the real failure.
+- `a8825e8`, `1ceea5d`, and `2b743ab` all reproduce the same native PCM
+  outcome: Surah 74 opening selected, 35.19% coverage, and no coherent final
+  Surah 74 window. `2b743ab` changes the global margin (0.030419 → 1.8926),
+  not the selected native path. The correct opening candidate remains in the
+  top 48 and top 24 (retrieval rank 9; rerank rank 21).
+- Therefore there is no defensible Git `last-good` / `first-bad` pair for this
+  media in the recorded FastConformer history: the earliest runnable
+  identification checkpoint already abstains on this PCM. The historical
+  user-reported successful output has no retained commit/debug report, so a
+  commit must not be invented.
+- The first material divergence is PCM preprocessing, not CTC identity:
+  FFmpeg's local 16 kHz extraction yields the accepted 74:1–9 path while the
+  native worker conversion yields only 74:1–6. Window 0 is strong in both;
+  window 1 has weak partial Surah 74 evidence, and window 2 changes from a
+  wrong Surah 23 local winner on native PCM to a coherent Surah 74:6–9 path on
+  FFmpeg PCM. VAD remains a window qualifier and is never used as identity;
+  browser VAD output was not fabricated in the Node diagnostic.
 
 ## Public comparison
 
@@ -97,16 +116,13 @@ repeated/similar language, noise, short clips, and multi-ayah clips. The metric
 utility measures exact surah/start/end, top-3/top-5 recall, false confident
 acceptance, and abstention once a retained licensed fixture supplies results.
 
-Current result: 8 logical fixture specifications, no runnable retained identity
-audio, so no meaningful current-vs-historical accuracy number exists.
+Current result: 8 logical fixture specifications plus the deterministic safe
+`muddaththir-74-1-9-native-pcm-recovery` fixture. It records no private media,
+PCM, logits, transcript, filename, or path; it asserts that a native abstention
+gets one local recovery attempt and that the recovered evidence is 74:1–9 and
+accepted. Runtime accuracy metrics still require a retained licensed fixture.
 
-Recommended next experiment: obtain the failing recording with permission;
-run it unchanged through current HEAD and `2b743ab^` in an isolated worktree,
-export the new report, and classify it strictly by correct candidate rank. If
-correct is top 2, investigate Viterbi/evidence scoring; if absent from top 10,
-expand or diversify Stage-A retrieval before changing the gate; if it wins but
-captions differ, trace propagation. Also compare native and FFmpeg fallback PCM
-fingerprints/spectral summaries for the same source. Do not add Gemini until
-that local experiment fails: a cloud model may improve broad retrieval, but
-adds privacy transfer, API cost, and opaque false-positive behavior. It should
-only ever be an opt-in Stage-A hypothesis, still locally Quran-verified.
+The local-only diagnostic is `tools/regression/diagnose-real-quran-id.ts`; it
+accepts derived 16 kHz float PCM and pinned public Tilawa assets, emitting only
+candidate and gate evidence. It is suitable for future bisects without adding
+customer media to the repository.

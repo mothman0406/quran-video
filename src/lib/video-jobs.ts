@@ -56,6 +56,7 @@ type RuntimeEntry = VideoRuntime & {
   entitlements: AccountEntitlements;
   runToken: number;
   workerJobId: number | null;
+  abort: AbortController;
 };
 
 type PersistedVideoJob = Pick<VideoJob, "id" | "status" | "error" | "cloudSaved" | "cloudError">;
@@ -121,7 +122,11 @@ class VideoJobManager {
   start(input: StartVideoJobInput): string {
     const id = input.project.id;
     const previous = this.runtimes.get(id);
-    if (previous) this.revokeRuntime(previous);
+    if (previous) {
+      previous.abort.abort();
+      if (previous.workerJobId !== null) this.worker?.cancel(previous.workerJobId);
+      this.revokeRuntime(previous);
+    }
     const sourceUrl = URL.createObjectURL(input.file);
     this.runtimes.set(id, {
       file: input.file,
@@ -133,6 +138,7 @@ class VideoJobManager {
       entitlements: input.entitlements,
       runToken: (previous?.runToken ?? 0) + 1,
       workerJobId: null,
+      abort: new AbortController(),
     });
     this.jobs.set(id, { id, project: input.project, status: "generating", progress: null, error: null, cloudSaved: false, cloudError: null });
     this.publish();
@@ -147,8 +153,11 @@ class VideoJobManager {
     const job = this.jobs.get(id);
     const runtime = this.runtimes.get(id);
     if (!job || !runtime || (job.status !== "failed" && job.status !== "interrupted")) return false;
+    runtime.abort.abort();
+    if (runtime.workerJobId !== null) this.worker?.cancel(runtime.workerJobId);
     runtime.runToken += 1;
     runtime.workerJobId = null;
+    runtime.abort = new AbortController();
     this.jobs.set(id, { ...job, status: "generating", progress: null, error: null, cloudError: null });
     this.publish();
     this.queue = this.queue.catch(() => undefined).then(() => this.run(id));
@@ -173,6 +182,7 @@ class VideoJobManager {
       entitlements: { plan: "free", maxExportQuality: "basic", watermarkRequiredForBasic: true, canExportStandard: false, canExportUltra: false, cloudProjectLimit: 3 },
       runToken: 0,
       workerJobId: null,
+      abort: new AbortController(),
     };
     this.runtimes.set(id, runtime);
     return { file, sourceUrl, posterUrl: null };
@@ -180,6 +190,7 @@ class VideoJobManager {
 
   async remove(id: string, removeCloud = false): Promise<void> {
     const runtime = this.runtimes.get(id);
+    runtime?.abort.abort();
     if (runtime?.workerJobId !== null && runtime?.workerJobId !== undefined) this.worker?.cancel(runtime.workerJobId);
     if (runtime) this.revokeRuntime(runtime);
     this.runtimes.delete(id);
@@ -204,7 +215,7 @@ class VideoJobManager {
       runtime.preparedAudio = undefined;
       if (!preparedAudio && job.project.sourceMedia?.compatibility === "audio-fallback") {
         const { decodeRecognitionAudioFallback } = await import("./recognition/local-media-compatibility.ts");
-        preparedAudio = await decodeRecognitionAudioFallback(runtime.file);
+        preparedAudio = await decodeRecognitionAudioFallback(runtime.file, runtime.abort.signal);
       }
       const { generateVideoCaptions } = await import("./video-generation.ts");
       const result = await generateVideoCaptions({
@@ -212,6 +223,7 @@ class VideoJobManager {
         file: runtime.file,
         sourceUrl: runtime.sourceUrl,
         preparedAudio,
+        signal: runtime.abort.signal,
         worker: this.worker ??= new LocalRecognitionWorkerClient(),
         onProgress: (progress) => {
           const current = this.jobs.get(id);

@@ -7,8 +7,9 @@ Recognition is a browser-local, accuracy-first hybrid pipeline:
 1. Decode the selected media once to mono PCM and build a 10 ms RMS envelope.
 2. Run FastConformer Quran-wide CTC retrieval/reranking over VAD-qualified windows, solve a surah-aware continuity path, and pass it through the centralized production evidence gate.
 3. Adapt an accepted FastConformer word-level range to `FinalCanonicalSpan`. Canonical display ranges remain full ayat; identifier word boundaries remain evidence only.
-4. Only when FastConformer is insufficient, ambiguous, or structurally invalid, run lazy-loaded local Whisper Base Timestamped and retain its whole-recording matcher as the fallback passage engine.
-5. Run the existing canonical-first FastConformer forced alignment. It remains the sole automatic timing authority regardless of passage source.
+4. When a native-decoded FastConformer result is insufficient, make one local FFmpeg 16 kHz PCM recovery attempt and rerun VAD plus the same FastConformer gate. This is independent preprocessing, not a lower threshold.
+5. Only when FastConformer remains insufficient, ambiguous, or structurally invalid, run lazy-loaded local Whisper Base Timestamped and retain its whole-recording matcher as the fallback passage engine.
+6. Run the existing canonical-first FastConformer forced alignment. It remains the sole automatic timing authority regardless of passage source.
 7. If word timestamps are unavailable, or an ayah has no direct anchor, trim the timing search to detected speech regions and run bounded overlapping local micro-ASR windows against the already-known passage. Micro-ASR is timing-only evidence and cannot replace the primary passage. The first verified Quran-containing window anchors onset; a missing interior ayah is explicitly searched between neighbouring evidence before interpolation is allowed.
 8. Refine verified onset, offset, and ayah transitions from the local PCM envelope. Derive one complete-ayah caption display set per ayah, without mutating the canonical recognition result.
 
@@ -20,7 +21,7 @@ The canonical Hafs corpus is the displayed text authority. FastConformer identif
 - Existing ASR-to-ayah interpolation: retained only as a compatibility fallback for persisted `VerseAlignment`; it collapses too much timing detail for caption generation.
 - A second browser-local Arabic CTC/forced-alignment model: rejected for now. No tested, compact Arabic Quran CTC model is available in the current local runtime; adding an unvalidated large model would increase first-run download and memory without demonstrated accuracy improvement.
 
-Whisper Base Timestamped remains lazy loaded, local, and approximately 145 MB q4 on first download. The recovery pass reuses that in-memory model and decoded PCM: it reads up to sixteen 8-second windows with a 2-second overlap, bounded to active speech instead of rerunning the entire recording. This can roughly double difficult fallback runs, by design, with no additional model download or network use.
+Whisper Base Timestamped remains lazy loaded, local, and approximately 145 MB q4 on first download. PCM recovery reuses the already-loaded FastConformer worker/model, but deliberately replaces its input with one FFmpeg-extracted PCM representation before rerunning VAD and identification. It never downloads a second FastConformer model or changes the evidence threshold.
 
 ## Output layers
 

@@ -1,6 +1,17 @@
 # Status
 
-## Current milestone: Audit Quran passage identification
+## Current milestone: Restore native PCM Quran passage recovery
+
+Complete:
+
+- Reproduced the supplied private 22.10-second AAC recording as Surat Al-Muddaththir 74:1–9 without committing the source or derived PCM.
+- Classified the controlled full-speech-window failure as an acceptance failure: native PCM retained the correct opening retrieval/rerank candidate but its coherent path covered only 35.19% of audio. No confidence threshold was lowered; browser VAD remains a required manual retest.
+- Confirmed the pinned local FFmpeg PCM extraction restores the accepted 74:1–9 FastConformer path. Both advanced-editor and Quick Create generation now make one FFmpeg PCM retry only after native FastConformer evidence is rejected; VAD and the existing evidence gate run again unchanged.
+- Added the safe deterministic PCM-recovery fixture, identity-regression coverage, and a reusable private-PCM diagnostic tool. Historical checkpoints `a8825e8`, `1ceea5d`, and `2b743ab` already show the same native failure, so no Git last-good/first-bad commit is claimed.
+
+Verification: retained private PCM representations were rerun against the pinned local assets without writing audio to the repository: native PCM is Surah 74:1–6 with 35.19% coverage and rejects under the unchanged gate; FFmpeg PCM is Surah 74:1–9 with 64.81% coverage and accepts. The original browser-uploadable source is not retained in this workspace, so the browser/VAD end-to-end retest remains manual rather than fabricated. `npm run regression:quran-id`, `npm test` (417 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes its production invariant probes; its optional real timing benchmark fails before timing because `tools/timing-benchmark/real-run.ts` cannot fetch the FastConformer asset (`fetch failed`). No timing code was modified, so this is the known external/model-asset availability limitation rather than a product regression.
+
+## Previous milestone: Audit Quran passage identification
 
 Complete:
 

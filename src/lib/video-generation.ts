@@ -4,6 +4,7 @@ import { recognitionToVerseAlignments, type VerseAlignment } from "./editor/reco
 import { analyzeTranscript, canonicalSpanFromFastConformerIdentification, createPrimaryTranscript, hafsSurahs, hafsVerses } from "./recognition/core.ts";
 import { comparePassageIdentification } from "./recognition/fastconformer-identification.ts";
 import { decideFastConformerPassage } from "./recognition/passage-decision.ts";
+import { shouldRetryFfmpegRecognitionPcm } from "./recognition/pcm-recovery.ts";
 import type { LocalRecognitionWorkerClient } from "./recognition/recognition-worker-client.ts";
 import type { DecodedAudioChannels } from "./recognition/local-audio-decode.ts";
 import type { FastConformerProgress } from "./recognition/contracts.ts";
@@ -20,6 +21,7 @@ export type VideoGenerationInput = {
   file: File;
   sourceUrl: string | null;
   preparedAudio?: DecodedAudioChannels;
+  signal?: AbortSignal;
   worker: LocalRecognitionWorkerClient;
   onProgress: (progress: CaptionGenerationProgress) => void;
   fetcher?: typeof fetch;
@@ -27,6 +29,10 @@ export type VideoGenerationInput = {
 
 function friendlyTimingFailure(reason: string): Error {
   return new Error(`Quran timing could not be completed. ${reason} Please retry.`);
+}
+
+function assertNotAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new DOMException("Caption generation cancelled.", "AbortError");
 }
 
 async function enrichTranslations(segments: CaptionSegment[], fetcher: typeof fetch): Promise<CaptionSegment[]> {
@@ -72,25 +78,28 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
   };
 
   publish(progress.start(input.jobId));
+  assertNotAborted(input.signal);
   let decoded = input.preparedAudio;
+  let usingFfmpegRecognitionPcm = Boolean(input.preparedAudio);
   if (!decoded) {
     const { decodeAudioChannels } = await import("./recognition/local-audio-decode.ts");
     report("preparing-media");
     decoded = await decodeAudioChannels(input.file);
   }
   report("analyzing-speech");
-  const workerPrepared = await input.worker.prepare(input.jobId, decoded.sampleRate, decoded.frameCount, decoded.channelBuffers);
+  let workerPrepared = await input.worker.prepare(input.jobId, decoded.sampleRate, decoded.frameCount, decoded.channelBuffers);
+  assertNotAborted(input.signal);
   if (!workerPrepared.speechRegions.length) throw new Error("No credible human speech was detected in this recording, so Quran captions were not timed from background audio.");
 
-  const run = {
+  const runFor = (value: typeof workerPrepared) => ({
     analysisRunId: crypto.randomUUID(),
     sourceIdentity: `${input.file.name}:${input.file.size}:${input.file.lastModified}`,
     sourceObjectUrl: input.sourceUrl,
-    sourceDurationMs: workerPrepared.durationMs,
+    sourceDurationMs: value.durationMs,
     sampleRate: 16_000,
     pcmIdentity: crypto.randomUUID(),
-  };
-  const prepared = {
+  });
+  const preparedFor = (value: typeof workerPrepared, run: ReturnType<typeof runFor>) => ({
     run,
     chunks: [],
     rawTranscript: "",
@@ -99,15 +108,39 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
     timestampValidation: { asrWordCount: 0, timestampedWordCount: 0, zeroDurationCount: 0, rangeMs: null },
     modelLoadMs: 0,
     transcriptionMs: 0,
-    durationMs: workerPrepared.durationMs,
-    audioAnalysis: workerPrepared.audioAnalysis,
-    speechRegions: workerPrepared.speechRegions,
-  };
+    durationMs: value.durationMs,
+    audioAnalysis: value.audioAnalysis,
+    speechRegions: value.speechRegions,
+  });
+  let run = runFor(workerPrepared);
+  let prepared = preparedFor(workerPrepared, run);
 
   report("identifying-passage");
-  const identification = await input.worker.identify(input.jobId, reportFastConformer);
-  const fastConformerSpan = canonicalSpanFromFastConformerIdentification(identification?.canonicalSpan ?? null);
-  const decision = decideFastConformerPassage(identification, fastConformerSpan);
+  let identification = await input.worker.identify(input.jobId, reportFastConformer);
+  assertNotAborted(input.signal);
+  let fastConformerSpan = canonicalSpanFromFastConformerIdentification(identification?.canonicalSpan ?? null);
+  let decision = decideFastConformerPassage(identification, fastConformerSpan);
+  if (shouldRetryFfmpegRecognitionPcm(decision.accepted, usingFfmpegRecognitionPcm)) {
+    try {
+      const { decodeRecognitionAudioFallback } = await import("./recognition/local-media-compatibility.ts");
+      decoded = await decodeRecognitionAudioFallback(input.file, input.signal);
+      workerPrepared = await input.worker.prepare(input.jobId, decoded.sampleRate, decoded.frameCount, decoded.channelBuffers);
+      assertNotAborted(input.signal);
+      if (workerPrepared.speechRegions.length) {
+        usingFfmpegRecognitionPcm = true;
+        run = runFor(workerPrepared);
+        prepared = preparedFor(workerPrepared, run);
+        report("identifying-passage");
+        identification = await input.worker.identify(input.jobId, reportFastConformer);
+        assertNotAborted(input.signal);
+        fastConformerSpan = canonicalSpanFromFastConformerIdentification(identification?.canonicalSpan ?? null);
+        decision = decideFastConformerPassage(identification, fastConformerSpan);
+      }
+    } catch {
+      assertNotAborted(input.signal);
+      // Retain the native result and existing Whisper fallback behavior.
+    }
+  }
   const runWhisperComparison = process.env.NODE_ENV !== "production";
   const transcriptResult = !decision.accepted || runWhisperComparison
     ? await (async () => {
