@@ -18,6 +18,7 @@ type PreparedEditorMedia = {
 
 export type LocalMediaPreparationEvent = {
   stage: "preparing-converter" | "inspecting-recording" | "converting-recording" | "preparing-audio" | "preparing-editor";
+  inspection?: MediaInspection;
   processedTimeMs?: number;
   sourceDurationMs?: number;
   complete?: boolean;
@@ -332,6 +333,7 @@ function temporaryName(file: File, suffix: string) {
 
 export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPreparation?: (event: LocalMediaPreparationEvent) => void): Promise<PreparedEditorMedia> {
   const inspection = await inspectLocalMedia(file);
+  onPreparation?.({ stage: "inspecting-recording", inspection });
   const route = routeMediaCompatibility(file.size, inspection);
   mediaDebug("route", { selected: route });
   assertNotAborted(signal);

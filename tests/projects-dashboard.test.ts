@@ -2,22 +2,27 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const dashboard = readFileSync(new URL("../src/components/projects-dashboard.tsx", import.meta.url), "utf8");
+const videos = readFileSync(new URL("../src/components/videos-dashboard.tsx", import.meta.url), "utf8");
+const projectsRoute = readFileSync(new URL("../src/app/projects/page.tsx", import.meta.url), "utf8");
 
-test("projects dashboard gates guests, reads private project records, and supports search", () => {
-  assert.match(dashboard, /getAuthSession\(\)/);
-  assert.match(dashboard, /authReturnPath="\/projects"/);
-  assert.match(dashboard, /listCloudProjectRecords\(\)/);
-  assert.match(dashboard, /getPrivateThumbnailUrl/);
-  assert.match(dashboard, /Search projects/);
+test("videos library combines guest-local and authenticated private records with search", () => {
+  assert.match(videos, /createProjectRepository\(\)/);
+  assert.match(videos, /getAuthSession\(\)/);
+  assert.match(videos, /listCloudProjectRecords\(\)/);
+  assert.match(videos, /getPrivateThumbnailUrl/);
+  assert.match(videos, /Search videos/);
 });
 
-test("project cards open editor documents rather than implying cloud export downloads", () => {
-  assert.match(dashboard, /\/editor\?project=/);
-  assert.match(dashboard, /Open project/);
-  assert.doesNotMatch(dashboard, /Download export/);
+test("ready video cards expose composed watch, advanced edit, and on-demand download", () => {
+  assert.match(videos, /<ComposedVideoPreview/);
+  assert.match(videos, /\/editor\?project=/);
+  assert.match(videos, /&export=1/);
+  assert.match(videos, /"Watch"/);
+  assert.match(videos, />Edit<\/Link>/);
+  assert.match(videos, />Download<\/Link>/);
 });
 
-test("undetected projects remain visible with an explicit recovery-safe label", () => {
-  assert.match(dashboard, /Passage not detected yet/);
+test("legacy projects redirect compatibly and undetected items remain recoverable", () => {
+  assert.match(projectsRoute, /redirect\("\/videos"\)/);
+  assert.match(videos, /Needs captions/);
 });

@@ -1,5 +1,40 @@
 # Architecture
 
+## Canonical customer flow and local generation jobs
+
+The primary flow is now `Landing/Dashboard → /create → /videos → Watch, /editor,
+or Download`. `/create` owns media compatibility preparation and a deliberately
+small presentation setup surface. It has no caption timeline because no
+`CaptionSegment[]` exists yet. `/editor` remains the authoritative advanced
+editing surface and existing editor deep links remain valid. `/projects`
+redirects to `/videos` for bookmark compatibility.
+
+`src/lib/video-jobs.ts` is a root-layout-owned browser service. Generate hands
+it the already prepared working `File`, one initial validated `SavedProject`,
+and any prepared recognition PCM. The create route can then unmount while the
+service queues exactly one recognition run through the existing dedicated
+worker and publishes truthful progress to the Videos card. Job tokens reject
+stale progress and completion. Active status metadata is recorded locally;
+after a full refresh an unfinished local job becomes **Interrupted** rather
+than pretending to keep running. Runtime `File`, PCM, object URLs, and poster
+blobs remain memory-only.
+
+Ready means recognition, canonical timing, `CaptionSegment[]`, and initial
+presentation state are complete. It does not mean a second rendered MP4 was
+created. Watch composes the working source with the same saved captions and
+styles used by editor/export. Download enters the existing local export and
+entitlement flow; rendered bytes remain an on-demand browser result.
+
+Guests use IndexedDB metadata plus the in-memory runtime and can create,
+generate, watch, and edit without authentication. For authenticated users, a
+successful local generation is saved through the existing private project
+row, direct private source upload, and lightweight thumbnail paths. No public
+object or service-role browser credential is introduced. Free accounts retain
+the three most recently created completed cloud videos: immediately before a
+new successful save, the oldest completed record is removed through the
+existing Storage-aware `deleteCloudProject()` path. Pro and Premium have no
+invented video quota.
+
 ## Project assets and source selection
 
 Projects persist a metadata-only `ProjectAsset[]` registry for video, audio,
@@ -40,7 +75,7 @@ The project schema is the handoff boundary between recognition, editing, preview
 - `src/lib/quran/content.ts` defines the content abstraction and profiles for Uthmani/QPC Hafs, Madinah/QCF, IndoPak, and KFGQPC style.
 - M3B local recognition uses a browser-only Transformers.js Whisper adapter. It decodes the selected `File` through Web Audio, runs `onnx-community/whisper-base` on WebGPU when available (otherwise local WASM), and returns timestamped transcript chunks to the deterministic matcher. It does not send source audio to an application server or inference API.
 - Local media compatibility is native-first and begins with a lazy Mediabunny container/codec preflight. Native playback has no arbitrary picker byte cap. When only Web Audio decoding fails, a lazily loaded single-thread FFmpeg-WASM runtime mounts the File through `WORKERFS`, probes, then maps only audio to recognition PCM while retaining the original playable video for preview/export. When playback is unavailable, that runtime must pass a short local audio/video probe before it creates a H.264/AAC fast-start MP4 working source. Full normalization alone is preflight-bounded by source bytes, duration, and coded pixels; no media bytes are sent to a compatibility backend. See [MEDIA_COMPATIBILITY.md](./MEDIA_COMPATIBILITY.md).
-- M3C/M4 editor integration converts matcher output into browser-local verse alignments, resolves canonical Arabic locally at once, and derives the active caption directly from video playback time. Optional translation enrichment can fail independently. The `/recognition` route remains a developer diagnostic surface; the main editor is the normal entry point.
+- M3C/M4 editor integration converts matcher output into browser-local verse alignments, resolves canonical Arabic locally at once, and derives the active caption directly from video playback time. Optional translation enrichment can fail independently. The `/recognition` route remains a developer diagnostic surface; `/create` is the normal entry point and `/editor` is the post-generation advanced surface.
 - Automatic Quran timing is selected once inside `analyzeTranscript`: the existing whole-recording Whisper matcher fixes the complete canonical passage, then Tilawa FastConformer performs browser-local global canonical CTC forced alignment on the same decoded 16 kHz PCM. A completed structural result (exact canonical coverage, finite contiguous monotonic ayah intervals, valid outer boundaries, and completed optional-prelude handling) is the sole timing engine. Any structural failure is a recoverable `quran-timing` error and creates no automatic captions. The selector passes one `CaptionSegment[]` boundary array unchanged to preview, timeline, seek behavior, and export.
 - M5A adds an editor-only `CaptionSegment` layer in `src/lib/editor/captions.ts`. Segments contain presentation word slices and preserve their parent `verseKeys`; split boundaries are Quran whitespace boundaries, with derived timing marked explicitly. Automatic chunks are balanced under the readable-word limit to avoid tiny tails. A split segment does not invent or duplicate English sub-sentence text: its parent verse association remains available through `verseKeys`, and the full translation is shown only when the segment carries the complete-ayah association.
 - M5A typography is held in structured editor state using `DEFAULT_TYPOGRAPHY` and validated by `TypographySchema`. Arabic and translation controls are independent, with a neutral default and no mandatory outline; transliteration remains a visibility/control placeholder until a provider is available. `resetTypography()` returns a fresh default object.

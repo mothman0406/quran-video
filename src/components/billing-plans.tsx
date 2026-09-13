@@ -11,7 +11,7 @@ import { billingConfigurationState } from "@/lib/billing/presentation";
 
 type PaidPlan = Exclude<Plan, "free">;
 const benefits: Record<Plan, readonly string[]> = {
-  free: ["720p exports", "Quran AutoCaption watermark", "Up to 3 cloud projects", "Quran caption editing", "No credit card required"],
+  free: ["720p exports", "Quran AutoCaption watermark", "Keep 3 recent saved videos", "Quran caption editing", "No credit card required"],
   pro: ["Up to 1080p exports", "No watermark", "Quran caption editing", "Cloud project access"],
   premium: ["Up to 4K exports", "No watermark", "Quran caption editing", "Cloud project access"],
 };
@@ -84,7 +84,7 @@ export default function BillingPlans({ initialBillingConfigured }: { initialBill
     {session && billingConfiguration === "unconfigured" ? <p className="billing-message" role="status">Stripe billing is not configured for this environment yet.</p> : billingConfiguration === "loading" ? <p className="billing-message" role="status">Loading billing options…</p> : message && <p className="billing-message" role="status">{message}</p>}
     <div className="billing-trust" aria-label="Billing information"><span>Secure checkout with Stripe</span><span>Cancel anytime</span><span>No hidden upgrade fees</span></div>
     <section className="billing-faq" aria-labelledby="billing-faq-title"><div><p>HELPFUL DETAILS</p><h2 id="billing-faq-title">Frequently asked questions</h2></div>{[
-      ["Is there a free plan?", "Yes. You can create and edit Quran caption projects without a subscription. Free exports are available in 720p with a Quran AutoCaption watermark, and Free accounts can save up to 3 cloud projects."],
+      ["Is there a free plan?", "Yes. You can create and edit Quran caption videos without a subscription. Free exports are available in 720p with a Quran AutoCaption watermark, and Free accounts keep their 3 most recent saved videos."],
       ["What does Pro include?", "Pro includes watermark-free exports up to 1080p for $9.99/month or $99/year."],
       ["What does Premium include?", "Premium includes watermark-free exports up to 4K for $19.99/month or $199/year."],
       ["Does Quran AutoCaption upload my recitation?", "Normal editing, Quran recognition, and rendering happen locally in your browser. Media is uploaded privately only when you explicitly save a project to the cloud."],

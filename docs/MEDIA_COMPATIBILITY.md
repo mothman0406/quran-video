@@ -1,5 +1,21 @@
 # Local media compatibility
 
+## Quick Create lifecycle
+
+`/create` starts this existing pipeline immediately after picker or drag/drop
+selection; Generate never invokes it again. Browser-playable originals are
+offered to the preview at once. An unplayable source uses a neutral,
+orientation-aware surface until the one required normalization produces its
+working media. Presentation settings remain independent of conversion state.
+
+For the playable-video audio-fallback route, Quick Create performs the local
+PCM extraction before enabling Generate and hands that prepared PCM to the
+root generation job. For native media, the native working `File` is handed off
+untouched. For full normalization, the normalized H.264/AAC working `File` is
+handed off once. `/videos`, Watch, `/editor`, and export reuse that same job and
+project state; only an explicit Retry may repeat recognition/preparation that
+cannot otherwise be recovered.
+
 Quran AutoCaption accepts media through the standard accessible browser file input and drag/drop. This is the path used by iPhone and iPad Photo Library, macOS Photos/Finder, Android pickers, and desktop file pickers; it does not require the File System Access API.
 
 The picker accepts `video/*`, `audio/*`, and common explicit extensions including MOV, MP4, M4V, M4A, WebM, MKV, AVI, MPEG, transport streams, 3GP, OGV/Ogg, MP3, WAV, FLAC, and AIFF. Actual support is best effort: the selected browser and local decoder capability are authoritative, and protected/DRM media cannot be processed.

@@ -11,7 +11,7 @@ type BillingReturn = "checkout" | "plan-update";
 type PlanComparisonDialogProps = { entitlements: AccountEntitlements; session?: Session | null; onClose: () => void; onEntitlementsRefresh?: () => Promise<void>; billingReturn?: BillingReturn | null };
 
 const PLAN_DETAILS: Record<Plan, { name: string; monthly: number; annual: number; benefits: readonly string[] }> = {
-  free: { name: "Free", monthly: 0, annual: 0, benefits: ["720p exports", "Quran AutoCaption watermark", "Up to 3 cloud projects", "Quran caption editing"] },
+  free: { name: "Free", monthly: 0, annual: 0, benefits: ["720p exports", "Quran AutoCaption watermark", "Keep 3 recent saved videos", "Quran caption editing"] },
   pro: { name: "Pro", monthly: 9.99, annual: 99, benefits: ["Up to 1080p exports", "No watermark", "Quran caption editing", "Cloud project access"] },
   premium: { name: "Premium", monthly: 19.99, annual: 199, benefits: ["Up to 4K exports", "No watermark", "Quran caption editing", "Cloud project access"] },
 };

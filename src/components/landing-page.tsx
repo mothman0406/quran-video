@@ -77,7 +77,7 @@ export default function LandingPage({ demos, showcaseAssets, authenticated }: La
         <p className="landing-eyebrow"><span />Made for Quran recitation</p>
         <h1 id="landing-title">Beautiful Quran captions,<br />automatically synced to your recitation.</h1>
         <p className="landing-lede">Upload your recitation and get canonical Quran text, translation, word-level synchronization, and a video ready to edit and export.</p>
-        <div className="landing-actions"><Link className="landing-primary-cta" href="/editor">Start creating free <span aria-hidden="true">→</span></Link><a className="landing-secondary-cta" href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a></div>
+        <div className="landing-actions"><Link className="landing-primary-cta" href="/create">Start creating free <span aria-hidden="true">→</span></Link><a className="landing-secondary-cta" href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a></div>
         <p className="landing-microcopy">No sign-up required to start.</p>
       </div>
       <div className="landing-hero-editor"><EditorScreenshot priority /></div>
@@ -86,7 +86,7 @@ export default function LandingPage({ demos, showcaseAssets, authenticated }: La
     <section className="landing-proof" aria-label="Product qualities"><p><b>Quran-first</b> captions</p><span /><p><b>Local-first</b> recognition</p><span /><p><b>Up to 4K</b> export</p></section>
 
     <section className="landing-section landing-workflow" id="how-it-works" aria-labelledby="workflow-title">
-      <div className="landing-section-heading"><p className="landing-eyebrow">From source to finished video</p><h2 id="workflow-title">A clear Quran video workflow.</h2><p>Everything starts in the editor—without an account wall in the way.</p></div>
+      <div className="landing-section-heading"><p className="landing-eyebrow">From source to finished video</p><h2 id="workflow-title">A clear Quran video workflow.</h2><p>Start with a focused setup flow—without an account wall in the way.</p></div>
       <ol className="landing-workflow-list">{workflow.map(([number, title, detail]) => <li key={number}><span>{number}</span><div><h3>{title}</h3><p>{detail}</p></div></li>)}</ol>
     </section>
 
@@ -121,7 +121,7 @@ export default function LandingPage({ demos, showcaseAssets, authenticated }: La
       <div className="landing-showcase-grid">{LANDING_SHOWCASE.map((example, index) => <FinishedVideoExample key={example.id} example={example} arabic={[morning, night, unity, eternal][index].arabic} asset={showcaseAssets.find((asset) => asset.id === example.id)} />)}</div>
     </section>
 
-    <section className="landing-final-cta" aria-labelledby="final-title"><p className="landing-eyebrow">Ready when you are</p><h2 id="final-title">Turn your recitation into a finished Quran video.</h2><p>No sign-up required to start.</p><Link className="landing-primary-cta" href="/editor">Start creating free <span aria-hidden="true">→</span></Link></section>
+    <section className="landing-final-cta" aria-labelledby="final-title"><p className="landing-eyebrow">Ready when you are</p><h2 id="final-title">Turn your recitation into a finished Quran video.</h2><p>No sign-up required to start.</p><Link className="landing-primary-cta" href="/create">Start creating free <span aria-hidden="true">→</span></Link></section>
 
     <footer className="landing-footer"><Link className="landing-brand" href="/"><span>۝</span><b>Quran AutoCaption</b></Link><p>© {year} Quran AutoCaption</p><p>Built for Quran recitation.</p></footer>
   </main>;

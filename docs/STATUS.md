@@ -1,5 +1,48 @@
 # Status
 
+## Current milestone: Add quick create and video generation flow
+
+Complete:
+
+- Added `/create` as the guest-first creation route. Selection immediately uses
+  the existing native-first Mediabunny/FFmpeg compatibility pipeline, surfaces
+  its truthful local stages and percentage, previews playable originals, and
+  reuses normalized media or prepared fallback PCM without a second conversion.
+- Added focused pre-generation controls for the three production ratios,
+  keyboard/drag-accessible vertical placement, caption size, translation, and
+  the shared read-so-far highlight presentation. The page contains a labeled
+  canonical sample only and no timeline or advanced timing controls.
+- Added the root-owned local generation job manager and `/videos`. Navigation
+  no longer owns worker lifetime; queued jobs keep running within the open tab,
+  stale tokens cannot update another item, and refreshed active metadata becomes
+  Interrupted with Retry guidance instead of a fake spinner.
+- Added newest-first guest/local and authenticated/private library merging,
+  search and status filters, live cards, composed Watch, advanced Edit,
+  on-demand Download through the existing export gate, Delete/Retry, and static
+  Post to TikTok · Coming soon. No YouTube UI or rendered-video upload was added.
+- Signed-in successful jobs reuse the private cloud-project source/thumbnail
+  save path. Free saves remove the oldest of three completed videos through the
+  existing Storage-aware deletion path after a clear pre-Generate notice; paid
+  plans do not receive a quota. Guests remain fully able to generate/watch/edit.
+- Updated landing/dashboard entry points to `/create`, primary navigation to
+  Videos, Free-plan copy, local editor job restore, and `/projects` compatibility
+  redirect. Existing detected projects appear Ready without regeneration.
+- Added focused Quick Create, job lifecycle, composed Watch, Videos actions,
+  compatibility reuse, local/cloud privacy, stale progress, interrupted state,
+  and Free FIFO coverage. No database migration was required; persistent project
+  readiness remains inferred from the existing validated `CaptionSegment[]`,
+  while active progress stays local and ephemeral.
+
+Verification: `npm run regression:quran` passes both production invariant probes
+and the real 45-ayah quran-align/EveryAyah benchmark (242/242 canonical words;
+start p90 275 ms; transition-derived end p90 461 ms), and refreshed
+`docs/regression/results/20260913.md`. `npm test` (410 passing),
+`npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and
+`git diff --check` pass. The `/create`, `/videos`, and `/editor` production
+server traces remain free of browser-only recognition engines. The build retains
+the existing non-fatal VAD/ONNX Runtime dynamic-import warnings and optional
+TikTok configuration reminder.
+
 ## Current milestone: Show local media conversion progress
 
 Complete:

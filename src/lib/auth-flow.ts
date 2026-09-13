@@ -13,7 +13,7 @@ export function exportAuthIntent(authenticated: boolean): AuthIntent {
     : { kind: "authenticate", continuation: "export" };
 }
 
-const AUTH_RETURN_PATHS = new Set(["/", "/editor", "/projects", "/account", "/billing"]);
+const AUTH_RETURN_PATHS = new Set(["/", "/create", "/editor", "/videos", "/projects", "/account", "/billing"]);
 
 /** OAuth and email links may only return to public, first-party application routes. */
 export function safeAuthReturnPath(value: string | null | undefined): string {

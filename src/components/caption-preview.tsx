@@ -75,6 +75,7 @@ function CaptionPreview({
       setPresentationTimeMs((current) => current === timeMs ? current : timeMs);
     });
   }, [playbackClock]);
+  const effectivePresentationTimeMs = playbackClock ? presentationTimeMs : currentTimeMs;
 
   useLayoutEffect(() => {
     if (!positioning.translationPositionLinked) return;
@@ -102,8 +103,8 @@ function CaptionPreview({
   useEffect(() => {
     const applyVisualState = () => {
       // This exact selector is the shared preview/timeline/test authority.
-      const active = getActiveCaptionSegment(segments, presentationTimeMs);
-      const states = active ? captionVisualStatesAtTime(segments, presentationTimeMs, transitionSettings) : [];
+      const active = getActiveCaptionSegment(segments, effectivePresentationTimeMs);
+      const states = active ? captionVisualStatesAtTime(segments, effectivePresentationTimeMs, transitionSettings) : [];
       const stateById = new Map(states.map((state) => [state.segment.id, state]));
       layerRefs.current.forEach((layer, id) => {
         const state = stateById.get(id);
@@ -118,7 +119,7 @@ function CaptionPreview({
       });
     };
     applyVisualState();
-  }, [presentationTimeMs, segments, transitionSettings]);
+  }, [effectivePresentationTimeMs, segments, transitionSettings]);
 
   useLayoutEffect(() => {
     if (!onCaptionBoundsChange) return;
@@ -185,7 +186,7 @@ function CaptionPreview({
       const translation = translationDisplayText(segment) ?? (item?.status === "ready" ? item.verse.translation : null);
       const hasTranslation = translationStyleState.typography.translationVisible && Boolean(translation);
       const hasTransliteration = segmentTypography.transliterationVisible && Boolean(segment.transliteration);
-      const arabicWords = arabicCaptionPresentationWords(segment, showVerseNumber, presentationTimeMs, segmentTypography.wordHighlightMode);
+      const arabicWords = arabicCaptionPresentationWords(segment, showVerseNumber, effectivePresentationTimeMs, segmentTypography.wordHighlightMode);
       const background = captionBackgroundStyle(segmentBackground);
       const arabicWidth = `${segmentPositioning.maxWidthPercent * 100}%`;
       const translationWidth = `${(translationStyleState.positioning.translationMaxWidthPercent ?? translationStyleState.positioning.maxWidthPercent) * 100}%`;

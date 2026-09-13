@@ -35,7 +35,7 @@ test("the reusable comparison marks the active tier, shows launch pricing, and d
 });
 
 test("account navigation, sign out, Escape, and locked export upgrade use the shared account surfaces", () => {
-  assert.match(account, /href="\/projects"/);
+  assert.match(account, /href="\/videos"/);
   assert.match(account, /Billing &amp; plans/);
   assert.match(account, /signOut\(\)/);
   assert.match(account, /event\.key === "Escape"/);

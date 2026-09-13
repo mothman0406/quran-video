@@ -11,8 +11,8 @@ export default function LandingAuthActions({ authenticated }: LandingAuthActions
   const [authOpen, setAuthOpen] = useState(false);
 
   return <div className="landing-auth-actions">
-    {authenticated ? <Link className="landing-auth-link" href="/projects">Projects</Link> : <button className="landing-auth-link" type="button" onClick={() => setAuthOpen(true)}>Sign in</button>}
-    <Link className="landing-header-cta" href="/editor">Start creating <span aria-hidden="true">↗</span></Link>
-    {authOpen && <AccountPanel session={null} authReturnPath="/projects" onClose={() => setAuthOpen(false)} />}
+    {authenticated ? <Link className="landing-auth-link" href="/videos">Videos</Link> : <button className="landing-auth-link" type="button" onClick={() => setAuthOpen(true)}>Sign in</button>}
+    <Link className="landing-header-cta" href="/create">Start creating <span aria-hidden="true">↗</span></Link>
+    {authOpen && <AccountPanel session={null} authReturnPath="/videos" onClose={() => setAuthOpen(false)} />}
   </div>;
 }

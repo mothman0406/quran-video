@@ -18,7 +18,7 @@ test("public route renders the lightweight landing page and leaves the editor on
   assert.doesNotMatch(landingRoute, /recognition|fastconformer|EditorWorkspace/i);
   assert.match(editorRoute, /EditorClient/);
   assert.match(editorClient, /EditorWorkspace/);
-  assert.match(landingComponent, /href="\/editor"/);
+  assert.match(landingComponent, /href="\/create"/);
   assert.match(landingComponent, /No sign-up required to start\./);
 });
 
@@ -34,10 +34,10 @@ test("landing header is guest-first and supplies its initial Supabase auth state
   assert.match(landingRoute, /supabase\.auth\.getUser\(\)/);
   assert.match(landingRoute, /authenticated=\{authenticated\}/);
   assert.match(landing, /<LandingAuthActions authenticated=\{authenticated\} \/>/);
-  assert.match(authActions, /authenticated \? <Link className="landing-auth-link" href="\/projects">Projects<\/Link> : <button className="landing-auth-link"/);
+  assert.match(authActions, /authenticated \? <Link className="landing-auth-link" href="\/videos">Videos<\/Link> : <button className="landing-auth-link"/);
   assert.match(authActions, />Sign in<\/button>/);
-  assert.match(authActions, /<Link className="landing-header-cta" href="\/editor">Start creating/);
-  assert.match(authActions, /<AccountPanel session=\{null\} authReturnPath="\/projects"/);
+  assert.match(authActions, /<Link className="landing-header-cta" href="\/create">Start creating/);
+  assert.match(authActions, /<AccountPanel session=\{null\} authReturnPath="\/videos"/);
   assert.match(accountPanel, /await signInWithGoogle\(authReturnPath\)/);
   assert.match(accountPanel, /await sendMagicLink\(email\.trim\(\), authReturnPath\)/);
   assert.doesNotMatch(authActions, /getAuthSession|useEffect|localStorage/);

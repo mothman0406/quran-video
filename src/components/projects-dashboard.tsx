@@ -66,7 +66,7 @@ export default function ProjectsDashboard() {
     try { await deleteCloudProject(project.row.id); await refresh(); } catch (caught) { setError(caught instanceof Error ? caught.message : "Could not delete the project."); }
   }
 
-  return <DashboardShell current="projects"><section className="projects-main">
+  return <DashboardShell current="videos"><section className="projects-main">
       <header className="projects-heading"><div><p>PROJECT LIBRARY</p><h1>Your projects</h1><span>{projects.length} saved {projects.length === 1 ? "project" : "projects"}</span></div><Link className="projects-new" href="/editor">New project</Link></header>
       {session && <input className="projects-search" aria-label="Search projects" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search projects…" />}
       {error && <p className="projects-error" role="alert">{error}</p>}
@@ -75,6 +75,6 @@ export default function ProjectsDashboard() {
         return <article className="project-card" key={item.row.id}><Link className="project-card-image" href={`/editor?project=${encodeURIComponent(item.row.id)}`}>{item.thumbnailUrl ? <img src={item.thumbnailUrl} alt="" /> : <span>Quran AutoCaption</span>}</Link><div className="project-card-copy"><h2>{item.project.title}</h2><p>{passage ?? "Passage not detected yet"}</p><div><span>Edited {relativeTime(item.row.updated_at)}</span><span>{duration(item.row.duration_ms)}</span></div><footer><Link href={`/editor?project=${encodeURIComponent(item.row.id)}`}>Open project</Link><button type="button" onClick={() => void rename(item)}>Rename</button><button className="is-danger" type="button" onClick={() => void remove(item)}>Delete</button></footer></div></article>;
       })}</div>}
     </section>
-    {authOpen && <AccountPanel session={null} authReturnPath="/projects" onClose={() => setAuthOpen(false)} />}
+    {authOpen && <AccountPanel session={null} authReturnPath="/videos" onClose={() => setAuthOpen(false)} />}
   </DashboardShell>;
 }

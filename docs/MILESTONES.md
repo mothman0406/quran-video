@@ -14,3 +14,4 @@
 - **M8 — Supabase accounts/saved projects:** add auth and explicit opt-in persistence for lightweight project metadata/settings only; do not add default source-video or rendered-export storage.
 - **M9 — Stripe quotas/subscriptions:** add usage limits and paid plans.
 - **M10 — Future formats/qiraat/media library:** support other formats, future qiraat decisions, and media organization.
+- **M11 — Quick Create and Videos:** make `/create` the focused pre-generation setup route, move local recognition ownership to a root app job service, introduce the guest/cloud `/videos` library and composed Watch experience, retain `/editor` for advanced post-generation editing, redirect `/projects`, and apply Free three-video FIFO through secure media-aware deletion. Final video rendering remains on-demand export.

@@ -7,7 +7,7 @@ import { accountEntitlementsForPlan, type AccountEntitlements } from "@/lib/enti
 import { openCustomerPortal } from "@/lib/billing/client";
 import PlanComparisonDialog from "@/components/plan-comparison-dialog";
 
-type AccountPanelProps = { session: Session | null; entitlements?: AccountEntitlements; onClose: () => void; onBeforeAuthenticate?: () => Promise<void>; authReturnPath?: "/editor" | "/projects"; onOpenPlanComparison?: () => void; onEntitlementsRefresh?: () => Promise<void> };
+type AccountPanelProps = { session: Session | null; entitlements?: AccountEntitlements; onClose: () => void; onBeforeAuthenticate?: () => Promise<void>; authReturnPath?: "/editor" | "/videos"; onOpenPlanComparison?: () => void; onEntitlementsRefresh?: () => Promise<void> };
 
 function displayName(user: User): string {
   const metadata = user.user_metadata;
@@ -104,7 +104,7 @@ export default function AccountPanel({ session, entitlements = accountEntitlemen
     const user = session.user;
     const avatar = avatarUrl(user);
     const planName = entitlements.plan.toUpperCase();
-    const freeUsage = cloudProjectCount === null ? "Loading project usage…" : `${cloudProjectCount} of ${entitlements.cloudProjectLimit} cloud projects`;
+    const freeUsage = cloudProjectCount === null ? "Loading saved videos…" : `${cloudProjectCount} of ${entitlements.cloudProjectLimit} saved videos`;
     const paidBenefits = entitlements.plan === "pro" ? ["Up to 1080p", "No watermark"] : ["Up to 4K", "No watermark"];
     return <div className="editor-account-menu" ref={menuRef} role="menu" aria-label="Account menu" onKeyDown={(event) => { event.stopPropagation(); if (event.key === "Escape") { event.preventDefault(); onClose(); } }}>
       <div className="editor-account-identity">{avatar ? <span aria-label="Account avatar" style={{ backgroundImage: `url(${avatar})` }} /> : <span aria-hidden="true">{displayName(user).slice(0, 1).toUpperCase()}</span>}<div><strong>{displayName(user)}</strong><small>{user.email}</small></div></div>
@@ -113,7 +113,7 @@ export default function AccountPanel({ session, entitlements = accountEntitlemen
         {entitlements.plan === "free" ? <ul><li>720p exports</li><li>Watermark on exports</li><li>{freeUsage}</li></ul> : <ul>{paidBenefits.map((benefit) => <li key={benefit}>{benefit}</li>)}</ul>}
         <button type="button" className="editor-account-plan-action" onClick={entitlements.plan === "free" ? openPlanComparison : () => void managePlan()}>{entitlements.plan === "free" ? "Upgrade plan" : "Manage plan"}</button>
       </section>
-      <div className="editor-account-menu-links"><a role="menuitem" className="editor-account-menu-item" href="/projects" onClick={onClose}>Projects</a><a role="menuitem" className="editor-account-menu-item" href="/account" onClick={onClose}>Account settings</a><button type="button" role="menuitem" className="editor-account-menu-item" onClick={openPlanComparison}>Billing &amp; plans</button></div>
+      <div className="editor-account-menu-links"><a role="menuitem" className="editor-account-menu-item" href="/videos" onClick={onClose}>Videos</a><a role="menuitem" className="editor-account-menu-item" href="/account" onClick={onClose}>Account settings</a><button type="button" role="menuitem" className="editor-account-menu-item" onClick={openPlanComparison}>Billing &amp; plans</button></div>
       <button type="button" role="menuitem" className="editor-account-menu-item editor-account-signout" onClick={() => void signOut().then(onClose).catch((error: unknown) => setMessage(friendlyAuthError(error)))}>Sign out</button>
       {message && <p className="editor-auth-message editor-auth-error" role="alert">{message}</p>}
       {planComparisonOpen && <PlanComparisonDialog entitlements={entitlements} session={session} onEntitlementsRefresh={onEntitlementsRefresh} onClose={() => setPlanComparisonOpen(false)} />}

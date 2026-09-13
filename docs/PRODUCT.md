@@ -1,5 +1,23 @@
 # Product
 
+## Quick Create and Videos
+
+Quran AutoCaption’s default creation path is:
+
+`Quick Create → Generate captions → Videos → optional Watch / Advanced Editor / Download`.
+
+Quick Create starts compatibility preparation as soon as media is selected.
+While local checking, audio preparation, or normalization continues, the user
+can choose 9:16, 1:1, or 16:9, move a clearly labeled sample caption, adjust
+basic size, and choose translation and read-so-far highlighting. It never
+shows fake detected ayat or the advanced timeline.
+
+Generate creates a local app-level job and moves immediately to **Your videos**.
+The card moves through Preparing, Generating captions, Ready, or Generation
+failed/Interrupted using real pipeline state. Ready cards can play a composed
+caption preview, open the full `/editor`, or enter the existing on-demand local
+Download flow. TikTok is shown only as Coming soon and YouTube is absent.
+
 ## Editor assets and timeline interaction
 
 The compact left sidebar exposes local Media import, a collapsed Project Assets bin, and Canvas controls. Project
@@ -16,7 +34,7 @@ Defaults: vertical 9:16, centered Arabic with translation below, ayah-level timi
 
 The V1 model is centralized in `src/lib/entitlements.ts`. Stripe Price IDs are deployment configuration and are mapped only on the server.
 
-- Free ($0): unlimited local recognition, editing, and export count; 720p maximum output with a watermark and up to 3 cloud projects.
+- Free ($0): unlimited local recognition, editing, and export count; 720p maximum output with a watermark and the 3 most recent saved videos retained FIFO.
 - Pro ($9.99/month or $99/year): unwatermarked 720p/1080p output. Paid cloud/storage policy remains TBD.
 - Premium ($19.99/month or $199/year): Pro access plus unwatermarked 4K output. Paid cloud/storage policy remains TBD.
 
@@ -26,10 +44,10 @@ V1 is Hafs only. Recognition, canonical content, rendering, accounts, billing, a
 
 ## Local-first product behavior
 
-- Selecting a browser-playable video or audio file starts a browser-local editing session. Media stays local, and its object URL is released whenever the source changes or the editor unmounts.
+- Selecting a browser-playable video or audio file starts browser-local Quick Create preparation immediately. Compatibility work stays local, and object URLs are released when their owning selection/job is replaced.
 - The product may send a temporary copy for a processing or rendering job when required. That copy is deleted when the job completes, including unsuccessful or expired jobs.
 - Export downloads directly to the user. The service does not keep a rendered export by default.
-- “Save Project” is an explicit opt-in action, separate from editing and exporting. Initially it saves lightweight project metadata and settings only—not source videos or rendered exports.
+- Generate is explicit saved-video intent for signed-in users and may use the existing private source/thumbnail cloud-save path after local generation succeeds. It never uploads a rendered export. Editor Save remains an explicit update action.
 - When a saved project is reopened, the user may need to reselect the original local media. Without it, saved settings and caption work can be viewed or edited, but preview and recognition cannot resume.
 
 ## Current media timeline

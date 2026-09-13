@@ -7,7 +7,7 @@ import { getAuthSession, getSupabaseClient, signOut } from "@/lib/cloud-sync";
 import { accountEntitlementsForPlan, type AccountEntitlements } from "@/lib/entitlements";
 import { getAccountEntitlements } from "@/lib/entitlements/client";
 
-type DashboardSection = "projects" | "billing" | "account";
+type DashboardSection = "create" | "videos" | "billing" | "account";
 type DashboardShellProps = { current: DashboardSection; children: React.ReactNode };
 
 function memberName(session: Session): string {
@@ -38,14 +38,14 @@ export default function DashboardShell({ current, children }: DashboardShellProp
   return <div className="dashboard-shell">
     <aside className="dashboard-sidebar" aria-label="Dashboard navigation">
       <Link className="dashboard-brand" href="/"><span aria-hidden="true">۝</span>Quran AutoCaption</Link>
-      <Link className="dashboard-upload" href="/editor"><span aria-hidden="true">+</span>Upload recitation</Link>
+      <Link className={`dashboard-upload${current === "create" ? " is-active" : ""}`} href="/create"><span aria-hidden="true">+</span>Upload recitation</Link>
       <nav className="dashboard-nav" aria-label="Account sections">
-        <Link className={current === "projects" ? "is-active" : ""} href="/projects">Projects</Link>
+        <Link className={current === "videos" ? "is-active" : ""} href="/videos">Videos</Link>
         <Link className={current === "billing" ? "is-active" : ""} href="/billing">Billing</Link>
         <Link className={current === "account" ? "is-active" : ""} href="/account">Settings</Link>
       </nav>
       <div className="dashboard-member">
-        {session ? <><span className="dashboard-avatar" aria-hidden="true">{(session.user.email ?? "Q").slice(0, 1).toUpperCase()}</span><div><strong>{memberName(session)}</strong><small>{planName} plan</small></div><button type="button" onClick={() => void signOut().then(() => window.location.assign("/"))}>Sign out</button></> : <Link href="/editor">Sign in to save projects</Link>}
+        {session ? <><span className="dashboard-avatar" aria-hidden="true">{(session.user.email ?? "Q").slice(0, 1).toUpperCase()}</span><div><strong>{memberName(session)}</strong><small>{planName} plan</small></div><button type="button" onClick={() => void signOut().then(() => window.location.assign("/"))}>Sign out</button></> : <Link href="/create">Create without signing in</Link>}
       </div>
     </aside>
     <main className="dashboard-main">{children}</main>

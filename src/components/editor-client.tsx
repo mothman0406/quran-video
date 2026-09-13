@@ -154,6 +154,7 @@ import { DEFAULT_SOCIAL_PLATFORM_PREVIEW, moveRectToSafeArea, platformCaptionCol
 import { applyPlaybackRate, DEFAULT_PLAYBACK_RATE, resolvePlaybackRate, type PlaybackRate } from "@/lib/editor/playback-rate";
 import { cloudProjectName, quranProjectMetadata } from "@/lib/cloud-projects";
 import { beginTimelineScrub, endTimelineScrub, isActiveTimelineScrubMove, type TimelineScrubSession } from "@/lib/editor/timeline-scrub";
+import { videoJobManager } from "@/lib/video-jobs";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage =
@@ -347,6 +348,7 @@ export default function Home() {
   const cloudBaselineUpdatedAt = useRef<string | null>(null);
   const cloudMedia = useRef<{ sourcePath: string | null; thumbnailPath: string | null; thumbnailSize: number | null; sourceFingerprint: string | null }>({ sourcePath: null, thumbnailPath: null, thumbnailSize: null, sourceFingerprint: null });
   const cloudProjectLoadStarted = useRef(false);
+  const automaticExportStarted = useRef(false);
   const pendingCloudSourceRestore = useRef<CloudProjectRecord | null>(null);
   const localSafetyProjectId = useRef<string | null>(null);
   const generation = useRef(0);
@@ -614,8 +616,18 @@ export default function Home() {
           .then(async (localProjects) => {
             setProjects(localProjects);
             const resumeProjectId = takeAuthResumeProject();
+            const routeProjectId = new URLSearchParams(window.location.search).get("project");
+            const routeProject = routeProjectId ? localProjects.find((project) => project.id === routeProjectId) : null;
             const resumeProject = resumeProjectId ? localProjects.find((project) => project.id === resumeProjectId) : null;
-            if (resumeProject) await openProject(resumeProject, false);
+            const project = routeProject ?? resumeProject;
+            if (project) {
+              await openProject(project, false);
+              const runtime = videoJobManager.getRuntime(project.id);
+              if (runtime) {
+                cloudProjectLoadStarted.current = true;
+                loadSelectedSource(runtime.file, project.sourceMedia ?? mediaSourceFromFile(runtime.file, mediaKindForFile(runtime.file) ?? "video"), { preserveCaptions: true, restoredCompletedRecognition: project.captionSegments.length > 0 });
+              }
+            }
           })
           .catch((error: unknown) =>
             setErrorMessage(
@@ -1732,6 +1744,11 @@ export default function Home() {
     });
     publishAlignmentDebug(debug);
   }, [alignments, segments]);
+  useEffect(() => {
+    if (automaticExportStarted.current || !videoFile || !segments.length || new URLSearchParams(window.location.search).get("export") !== "1") return;
+    automaticExportStarted.current = true;
+    requestExportSettings();
+  }, [segments.length, videoFile]);
 
   async function copyAlignmentDebug() {
     if (!alignmentDebug.current || typeof navigator === "undefined") return;
@@ -2786,7 +2803,7 @@ export default function Home() {
         onHistoryTransactionCommit={commitProjectHistoryTransaction}
         onSaveToAccount={startCloudSave}
         onOpenProjects={() => setProjectsOpen(true)}
-        onOpenCloudProjects={() => { window.location.assign("/projects"); }}
+        onOpenCloudProjects={() => { window.location.assign("/videos"); }}
         onBeforeAuthenticate={checkpointProjectForAuthentication}
         onDiscard={savedProject ? () => void openProject(savedProject) : newProject}
         onNewProject={newProject}
