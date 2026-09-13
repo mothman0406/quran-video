@@ -15,6 +15,7 @@ import { analyzeTranscript, canonicalSpanFromFastConformerIdentification, create
 import { FASTCONFORMER_MODEL, FASTCONFORMER_MODEL_ARTIFACT, FASTCONFORMER_MODEL_BYTES, FASTCONFORMER_MODEL_LICENSE, FASTCONFORMER_RUNTIME, type FastConformerProgress } from "@/lib/recognition/contracts";
 import { comparePassageIdentification } from "@/lib/recognition/fastconformer-identification";
 import { decideFastConformerPassage } from "@/lib/recognition/passage-decision";
+import { createPassageIdentificationDebugReport } from "@/lib/recognition/passage-identification-debug";
 import {
   CaptionGenerationProgressController,
   CaptionGenerationProgressCoalescer,
@@ -1615,6 +1616,9 @@ export default function Home() {
           whisper: { attempted: result !== prepared, state: whisperAnalysis.passage.state, span: whisperAnalysis.passage.canonicalSpan, confidence: whisperAnalysis.passage.identityConfidence },
           disagreement: passageComparison,
         },
+        PASSAGE_IDENTIFICATION_DEBUG_REPORT: process.env.NODE_ENV !== "production"
+          ? createPassageIdentificationDebugReport(fastConformerIdentification, fastConformerDecision)
+          : undefined,
         PASSAGE_ENGINE_DISAGREEMENT: useFastConformer && whisperAnalysis.passage.state === "confident-unique" && passageComparison?.agreement.exactSpan === false
           ? { fastConformer: fastConformerSpan, whisper: whisperAnalysis.passage.canonicalSpan, overlap: passageComparison.agreement.overlappingAyat, decisionReason: fastConformerDecision.reason }
           : null,

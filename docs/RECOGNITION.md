@@ -35,7 +35,7 @@ Manual timeline edits remain authoritative for presentation and never rewrite ca
 
 ## Debugging
 
-Every recognition run stores a JSON-safe report at `window.__QURAN_ALIGNMENT_DEBUG__` in development. The normal editor exposes **Copy Alignment Debug** after recognition; the development `/recognition` route includes the same data in its debug export. Reports explicitly include the primary raw text/token count/timestamp mode, top five passage candidates, mapping coverage and uniqueness, `passageSource: "primary-transcript"`, the stable pre-f0840e7 shadow comparison, word-timestamp availability, micro-ASR text/windows, direct/recovered coverage by ayah, verse-start evidence, the first-onset trace, canonical word alignments, direct observations, and display sets—never media bytes.
+Every recognition run stores a JSON-safe report at `window.__QURAN_ALIGNMENT_DEBUG__` in development. The normal editor exposes **Copy Alignment Debug** after recognition; the development `/recognition` route includes the same data in its debug export. `PASSAGE_IDENTIFICATION_DEBUG_REPORT` preserves normalized CTC output/token IDs, ten candidates per identification window, retrieval/reranking/coverage scores, repeated-phrase ambiguity, canonical boundary/prelude evidence, global competing hypotheses, cross-surah rejections, and the final acceptance/rejection reason. It never contains PCM, a media URL, filename, media bytes, or customer transcript. See `docs/PASSAGE_IDENTIFICATION_AUDIT.md` for the decision-path audit and real-clip procedure.
 
 ## Current limitations
 

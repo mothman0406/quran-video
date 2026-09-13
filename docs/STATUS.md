@@ -1,5 +1,29 @@
 # Status
 
+## Current milestone: Audit Quran passage identification
+
+Complete:
+
+- Traced the production identity path separately from forced alignment and
+  confirmed that FastConformer Quran-wide CTC is the accepted passage authority;
+  Whisper is a non-vetoing fallback.
+- Audited `a8825e8`, `2b743ab`, timing-only benchmark/end commits, and later
+  media compatibility changes. The cited failing recording is absent, so no
+  regression, candidate rank, or production root cause is claimed.
+- Added a privacy-safe development-only top-10 passage report and a separate
+  `npm run regression:quran-id` gate with fixture categories and identity
+  metrics (including false confident acceptance and abstention).
+- Documented current source findings for QuranCaption, public-only findings for
+  AyahFlow, preprocessing limits, and the exact next reproducibility experiment
+  in `docs/PASSAGE_IDENTIFICATION_AUDIT.md`.
+
+Verification: `npm test` (412 passing), `npx tsc --noEmit`,
+`npm run lint -- --quiet`, `npm run regression:quran-id`, `npm run build`, and
+`git diff --check` pass. `npm run regression:quran` passes invariant probes but
+its optional real timing fixture cannot download a FastConformer asset in this
+workspace (`fetch failed`); this is unrelated to the identity-only audit and
+does not replace the retained 20260913 benchmark record.
+
 ## Current milestone: Add quick create and video generation flow
 
 Complete:
