@@ -14,7 +14,8 @@ const editor = readFileSync(new URL("../src/components/editor-client.tsx", impor
 test("quick create begins the existing preparation pipeline on selection and never exposes a timeline", () => {
   assert.match(quickCreate, /void prepare\(event\.currentTarget\.files\?\.\[0\]\)/);
   assert.match(quickCreate, /await prepareLocalMedia\(next, abort\.signal/);
-  assert.match(quickCreate, /decodeRecognitionAudioFallback\(result\.file/);
+  assert.match(quickCreate, /extractRecognitionPcm\(next, abort\.signal/);
+  assert.doesNotMatch(quickCreate, /extractRecognitionPcm\(result\.file/);
   assert.match(quickCreate, /onDrop=\{drop\}/);
   assert.doesNotMatch(quickCreate, /CaptionTimeline|timelineRef|splitCaption|mergeCaption|word timing/i);
 });

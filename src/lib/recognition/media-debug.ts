@@ -1,8 +1,19 @@
 /** Production-safe local media compatibility trace, enabled only by ?debugMedia=1. */
 export type MediaDebugFacts = Record<string, boolean | number | string | null | undefined>;
 
-export function mediaDebugEnabled(search = typeof window === "undefined" ? "" : window.location.search): boolean {
-  return new URLSearchParams(search).get("debugMedia") === "1";
+const MEDIA_DEBUG_SESSION_KEY = "quran-autocaption-debug-media";
+
+export function mediaDebugEnabled(search?: string): boolean {
+  const explicitSearch = search !== undefined;
+  const candidate = search ?? (typeof window === "undefined" ? "" : window.location.search);
+  const enabled = new URLSearchParams(candidate).get("debugMedia") === "1";
+  if (explicitSearch || typeof window === "undefined") return enabled;
+  try {
+    if (enabled) sessionStorage.setItem(MEDIA_DEBUG_SESSION_KEY, "1");
+    return enabled || sessionStorage.getItem(MEDIA_DEBUG_SESSION_KEY) === "1";
+  } catch {
+    return enabled;
+  }
 }
 
 /** Do not add names, URLs, samples, identities, tokens, or raw FFmpeg messages here. */

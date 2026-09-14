@@ -122,8 +122,8 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
   let decision = decideFastConformerPassage(identification, fastConformerSpan);
   if (shouldRetryFfmpegRecognitionPcm(decision.accepted, usingFfmpegRecognitionPcm)) {
     try {
-      const { decodeRecognitionAudioFallback } = await import("./recognition/local-media-compatibility.ts");
-      decoded = await decodeRecognitionAudioFallback(input.file, input.signal);
+      const { extractRecognitionPcm } = await import("./recognition/local-media-compatibility.ts");
+      decoded = await extractRecognitionPcm(input.file, input.signal);
       workerPrepared = await input.worker.prepare(input.jobId, decoded.sampleRate, decoded.frameCount, decoded.channelBuffers);
       assertNotAborted(input.signal);
       if (workerPrepared.speechRegions.length) {

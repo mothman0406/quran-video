@@ -1424,13 +1424,13 @@ export default function Home() {
       try {
         decoded = await decodeAudioChannels(sourceFile);
       } catch {
-        const { decodeRecognitionAudioFallback } = await import("@/lib/recognition/local-media-compatibility");
+        const { extractRecognitionPcm } = await import("@/lib/recognition/local-media-compatibility");
         const abort = new AbortController();
         mediaPreparationAbort.current?.abort();
         mediaPreparationAbort.current = abort;
         const mediaJob = beginMediaPreparation("preparing-converter");
         try {
-          decoded = await decodeRecognitionAudioFallback(sourceFile, abort.signal, (event) => publishMediaPreparation(mediaJob, event));
+          decoded = await extractRecognitionPcm(sourceFile, abort.signal, (event) => publishMediaPreparation(mediaJob, event));
         } finally {
           if (mediaPreparationAbort.current === abort) {
             mediaPreparationAbort.current = null;
@@ -1472,7 +1472,7 @@ export default function Home() {
         // characteristics. Keep the same evidence gate, but retry once with
         // FFmpeg's independent local decoder before falling back to Whisper.
         try {
-          const { decodeRecognitionAudioFallback } = await import("@/lib/recognition/local-media-compatibility");
+          const { extractRecognitionPcm } = await import("@/lib/recognition/local-media-compatibility");
           const abort = new AbortController();
           mediaPreparationAbort.current?.abort();
           mediaPreparationAbort.current = abort;
@@ -1480,7 +1480,7 @@ export default function Home() {
           pcmRecoveryDiagnostics.recovery = { state: "recovery-started", voicedCoverage: null, durationMs: null, speechRegionCount: null };
           let recovered;
           try {
-            recovered = await decodeRecognitionAudioFallback(sourceFile, abort.signal, (event) => publishMediaPreparation(mediaJob, event));
+            recovered = await extractRecognitionPcm(sourceFile, abort.signal, (event) => publishMediaPreparation(mediaJob, event));
           } finally {
             if (mediaPreparationAbort.current === abort) {
               mediaPreparationAbort.current = null;

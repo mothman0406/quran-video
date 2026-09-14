@@ -214,8 +214,8 @@ class VideoJobManager {
       let preparedAudio = runtime.preparedAudio;
       runtime.preparedAudio = undefined;
       if (!preparedAudio && job.project.sourceMedia?.compatibility === "audio-fallback") {
-        const { decodeRecognitionAudioFallback } = await import("./recognition/local-media-compatibility.ts");
-        preparedAudio = await decodeRecognitionAudioFallback(runtime.file, runtime.abort.signal);
+        const { extractRecognitionPcm } = await import("./recognition/local-media-compatibility.ts");
+        preparedAudio = await extractRecognitionPcm(runtime.file, runtime.abort.signal);
       }
       const { generateVideoCaptions } = await import("./video-generation.ts");
       const result = await generateVideoCaptions({

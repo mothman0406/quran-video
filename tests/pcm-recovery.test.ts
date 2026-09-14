@@ -40,20 +40,34 @@ test("developer recovery facts retain native rejection and recovered coverage wi
   assert.equal(JSON.stringify(diagnostics).includes("audio"), false);
 });
 
-test("both caption-generation flows perform the recovery before Whisper fallback", () => {
+test("both caption-generation flows use the sole shared PCM extractor before Whisper fallback", () => {
   for (const path of ["src/components/editor-client.tsx", "src/lib/video-generation.ts"]) {
     const source = readFileSync(path, "utf8");
     assert.match(source, /shouldRetryFfmpegRecognitionPcm\(/);
-    assert.match(source, /decodeRecognitionAudioFallback/);
+    assert.match(source, /extractRecognitionPcm/);
   }
 });
 
-test("recovery is abortable and does not reset customer-facing caption progress", () => {
+test("recovery is abortable, serialized with media jobs, and does not reset customer-facing caption progress", () => {
   const editor = readFileSync("src/components/editor-client.tsx", "utf8");
   const generation = readFileSync("src/lib/video-generation.ts", "utf8");
   const jobs = readFileSync("src/lib/video-jobs.ts", "utf8");
-  assert.match(editor, /decodeRecognitionAudioFallback\(sourceFile, abort\.signal/);
+  const compatibility = readFileSync("src/lib/recognition/local-media-compatibility.ts", "utf8");
+  assert.match(editor, /extractRecognitionPcm\(sourceFile, abort\.signal/);
   assert.match(editor, /cancelMediaPreparation\(\);/);
-  assert.match(generation, /decodeRecognitionAudioFallback\(input\.file, input\.signal\)/);
+  assert.match(generation, /extractRecognitionPcm\(input\.file, input\.signal\)/);
   assert.match(jobs, /signal: runtime\.abort\.signal/);
+  assert.match(compatibility, /let ffmpegJobQueue: Promise<void> = Promise\.resolve\(\)/);
+  assert.match(compatibility, /ffmpegJobQueue = scheduled\.then\(\(\) => undefined, \(\) => undefined\)/);
+  assert.match(compatibility, /return runFfmpegJob\(signal, async \(runtime\)/);
+});
+
+test("recovery has no bespoke FFmpeg loader and preserves the diagnostic tail facts", () => {
+  const compatibility = readFileSync("src/lib/recognition/local-media-compatibility.ts", "utf8");
+  assert.equal((compatibility.match(/await import\("@ffmpeg\/ffmpeg"\)/g) ?? []).length, 1);
+  assert.equal((compatibility.match(/new FFmpeg\(\)/g) ?? []).length, 1);
+  assert.match(compatibility, /export async function extractRecognitionPcm/);
+  for (const field of ["sampleCount", "sha256", "rms", "peak", "finalNonNegligibleSample", "finalWindowSha256"]) {
+    assert.match(compatibility, new RegExp(field));
+  }
 });

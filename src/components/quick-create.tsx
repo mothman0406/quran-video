@@ -126,12 +126,14 @@ export default function QuickCreate() {
     const originalUrl = URL.createObjectURL(next);
     replacePreviewUrl(originalUrl);
     try {
-      const { prepareLocalMedia, decodeRecognitionAudioFallback } = await import("@/lib/recognition/local-media-compatibility");
+      const { extractRecognitionPcm, prepareLocalMedia } = await import("@/lib/recognition/local-media-compatibility");
       const result = await prepareLocalMedia(next, abort.signal, (event) => publishPreparation(job, event));
       if (abort.signal.aborted || job !== preparationId.current) return;
       let preparedAudio: DecodedAudioChannels | undefined;
       if (result.route === "audio-fallback") {
-        preparedAudio = await decodeRecognitionAudioFallback(result.file, abort.signal, (event) => publishPreparation(job, event));
+        // Keep recovery tied to the user's original File, never a preview or
+        // compatibility representation.
+        preparedAudio = await extractRecognitionPcm(next, abort.signal, (event) => publishPreparation(job, event));
       }
       if (abort.signal.aborted || job !== preparationId.current) return;
       const assetId = crypto.randomUUID();
