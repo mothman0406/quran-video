@@ -1,5 +1,16 @@
 # Status
 
+## Current milestone: Preserve PCM ownership across recognition worker transfers
+
+Complete:
+
+- Traced both transferable PCM boundaries. The recognition client previously transferred caller-owned `channelBuffers` into its retained worker; the worker-to-main `copy-pcm` response already transfers a `slice()` clone. VAD runs inside that retained recognition worker, and video generation, recovery, and route persistence create no additional transferable media buffers.
+- Made `LocalRecognitionWorkerClient.prepare()` clone PCM at its narrow transfer boundary. Callers now retain their canonical decoded or FFmpeg-recovered PCM for native-to-recovery restoration, same-tab `/create` → `/videos` jobs, and retries, while each worker request transfers only a disposable per-channel copy.
+- Documented the ownership contract on both the recognition client and decoded-audio type. No recognition policy, recovery arbitration, VAD, FastConformer, FFmpeg asset/runtime architecture, or source-media copying changed.
+- Added regression coverage that performs real structured-clone transfers: it proves the disposable request buffer detaches while authoritative PCM stays readable, a subsequent recovery and retry can create fresh requests, and the accepted-native path issues just one preparation pass while retaining the worker.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`, `npm test` (430 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` production invariant probes pass; its optional real quran-align/EveryAyah benchmark cannot fetch its artifact in this workspace (`fetch failed`), so it exits non-zero after updating only its generated timestamp, which was restored.
+
 ## Current milestone: Harden Quran passage recovery selection
 
 Complete:

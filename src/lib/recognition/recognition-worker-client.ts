@@ -15,6 +15,16 @@ type WorkerLike = {
 type WorkerFactory = () => WorkerLike;
 type Pending = { resolve: (value: unknown) => void; reject: (reason: Error) => void; expected: RecognitionWorkerResponse["type"]; onProgress?: (progress: FastConformerProgress) => void };
 
+/**
+ * `prepare` accepts caller-owned, reusable PCM. A worker transfer detaches its
+ * backing ArrayBuffer, so every request gets its own short-lived copy. Keep
+ * this ownership boundary here: callers may retain PCM for recovery, retries,
+ * or route-persistent jobs without knowing this client uses transferables.
+ */
+function disposableWorkerBuffers(channelBuffers: readonly ArrayBuffer[]): ArrayBuffer[] {
+  return channelBuffers.map((buffer) => buffer.slice(0));
+}
+
 export class RecognitionJobCancelledError extends Error {
   constructor() { super("Recognition job was cancelled."); }
 }
@@ -31,8 +41,9 @@ export class LocalRecognitionWorkerClient {
   }
 
   prepare(jobId: number, sourceSampleRate: number, frameCount: number, channelBuffers: ArrayBuffer[]) {
+    const workerBuffers = disposableWorkerBuffers(channelBuffers);
     return this.request<{ audioAnalysis: AudioAnalysis; speechRegions: VadSpeechRegion[]; durationMs: number }>(
-      { type: "prepare", jobId, sourceSampleRate, frameCount, channelBuffers }, "prepared", channelBuffers,
+      { type: "prepare", jobId, sourceSampleRate, frameCount, channelBuffers: workerBuffers }, "prepared", workerBuffers,
     );
   }
 

@@ -1,7 +1,7 @@
 export type DecodedAudioChannels = {
   sampleRate: number;
   frameCount: number;
-  /** Independent buffers are safe to transfer to the recognition worker. */
+  /** Caller-owned PCM. The recognition client creates a disposable transfer copy. */
   channelBuffers: ArrayBuffer[];
 };
 
