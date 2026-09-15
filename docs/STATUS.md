@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Harden Quran passage recovery selection
+
+Complete:
+
+- Kept native and FFmpeg-recovered FastConformer attempts independent through the authoritative evidence gate. Recovery no longer overwrites a rejected native result merely by producing an accepted candidate.
+- Added conservative recovery arbitration: accepted recovery must explain at least 60% of VAD-qualified audio and materially improve coverage or coherent-window support; a disagreeing recovered surah needs a decisive coverage improvement. Otherwise the FastConformer result abstains and the original PCM is restored for Whisper fallback.
+- Strengthened global long-recording coherence with whole-path CTC fit, coherent-window support, unsupported-window-run, and repeated-phrase checks. This rejects isolated/mixed local matches rather than constructing a passage from them.
+- Added developer-only `?debugMedia=1` recognition events for primary, recovery, and final selection, including span, coverage, continuity, window counts, and selection/rejection reason. Alignment debug now preserves recovery arbitration.
+- Added synthetic safety coverage for native authority, strong recovery promotion, weak/incoherent recovery abstention, disagreement abstention, and mixed long-window abstention. The retained Al-Muddaththir 74:1–9 evidence fixture remains green (native 35.19% rejected; recovered 64.81% accepted and selected).
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`, `npm test` (428 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes production invariant probes; its optional real timing benchmark cannot fetch the FastConformer artifact in this workspace (`fetch failed`), so the generated 20260915 timing record is retained as a benchmark limitation rather than a recognition code failure.
+
 ## Current milestone: Restore native PCM Quran passage recovery
 
 Findings and retained work:

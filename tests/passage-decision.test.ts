@@ -64,6 +64,28 @@ test("one noisy window is tolerated, while contradictory surahs and invalid stru
   assert.equal(decision(identification({ normalizedCtcScore: Number.NaN })).state, "failed");
 });
 
+test("long recordings with isolated or mixed local candidates abstain instead of assembling a weak global span", () => {
+  const mixed = identification({
+    windowResults: [window(0), window(1), window(2), window(3), window(4), window(5)],
+    surahConsensus: { selectedSurah: 74, strongWindowCount: 3, agreeingStrongWindows: 3 },
+    globalHypotheses: [{
+      surah: 74,
+      span: identification().canonicalSpan,
+      path: [{ windowIndex: 0, candidate: candidate() }, { windowIndex: 1, candidate: null }, { windowIndex: 2, candidate: null }, { windowIndex: 3, candidate: null }, { windowIndex: 4, candidate: candidate() }, { windowIndex: 5, candidate: candidate() }],
+      acousticScore: -0.2,
+      lexicalUniqueness: 0.5,
+      localSharedPhraseScore: 0.5,
+      continuityScore: 1,
+      voicedCoverage: 0.5,
+      finalScore: 1,
+      agreeingWindows: 3,
+    }],
+    confidence: { composite: 0.8, normalizedBestCtcScore: -0.2, bestVsSecondMargin: 0.2, agreeingWindows: 3, voicedAudioExplained: 0.5 },
+  });
+  const result = decision(mixed);
+  assert.deepEqual({ accepted: result.accepted, state: result.state, gap: result.evidence.longestUnexplainedWindowRun }, { accepted: false, state: "insufficient-evidence", gap: 3 });
+});
+
 test("accepted FastConformer and rejected FastConformer/Whisper fallback retain typed passage sources", () => {
   const span = canonicalSpanFromFastConformerIdentification(identification().canonicalSpan)!;
   const emptyWhisper = createPrimaryTranscript([], "chunk-fallback");

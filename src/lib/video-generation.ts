@@ -4,7 +4,7 @@ import { recognitionToVerseAlignments, type VerseAlignment } from "./editor/reco
 import { analyzeTranscript, canonicalSpanFromFastConformerIdentification, createPrimaryTranscript, hafsSurahs, hafsVerses } from "./recognition/core.ts";
 import { comparePassageIdentification } from "./recognition/fastconformer-identification.ts";
 import { decideFastConformerPassage } from "./recognition/passage-decision.ts";
-import { shouldRetryFfmpegRecognitionPcm } from "./recognition/pcm-recovery.ts";
+import { recognitionDecisionDebug, selectRecoveryPassage, shouldRetryFfmpegRecognitionPcm } from "./recognition/pcm-recovery.ts";
 import type { LocalRecognitionWorkerClient } from "./recognition/recognition-worker-client.ts";
 import type { DecodedAudioChannels } from "./recognition/local-audio-decode.ts";
 import type { FastConformerProgress } from "./recognition/contracts.ts";
@@ -90,6 +90,7 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
   let workerPrepared = await input.worker.prepare(input.jobId, decoded.sampleRate, decoded.frameCount, decoded.channelBuffers);
   assertNotAborted(input.signal);
   if (!workerPrepared.speechRegions.length) throw new Error("No credible human speech was detected in this recording, so Quran captions were not timed from background audio.");
+  const nativeDecoded = decoded;
 
   const runFor = (value: typeof workerPrepared) => ({
     analysisRunId: crypto.randomUUID(),
@@ -116,11 +117,16 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
   let prepared = preparedFor(workerPrepared, run);
 
   report("identifying-passage");
-  let identification = await input.worker.identify(input.jobId, reportFastConformer);
+  const nativeIdentification = await input.worker.identify(input.jobId, reportFastConformer);
   assertNotAborted(input.signal);
-  let fastConformerSpan = canonicalSpanFromFastConformerIdentification(identification?.canonicalSpan ?? null);
-  let decision = decideFastConformerPassage(identification, fastConformerSpan);
-  if (shouldRetryFfmpegRecognitionPcm(decision.accepted, usingFfmpegRecognitionPcm)) {
+  const nativeFastConformerSpan = canonicalSpanFromFastConformerIdentification(nativeIdentification?.canonicalSpan ?? null);
+  const nativeDecision = decideFastConformerPassage(nativeIdentification, nativeFastConformerSpan);
+  recognitionDecisionDebug("recognition-primary-result", { source: "native", decision: nativeDecision, identification: nativeIdentification });
+  let recoveryIdentification: typeof nativeIdentification | null = null;
+  let recoveryFastConformerSpan: ReturnType<typeof canonicalSpanFromFastConformerIdentification> = null;
+  let recoveryDecision: ReturnType<typeof decideFastConformerPassage> | null = null;
+  let recoveryPrepared: typeof prepared | null = null;
+  if (shouldRetryFfmpegRecognitionPcm(nativeDecision.accepted, usingFfmpegRecognitionPcm)) {
     try {
       const { extractRecognitionPcm } = await import("./recognition/local-media-compatibility.ts");
       decoded = await extractRecognitionPcm(input.file, input.signal);
@@ -129,17 +135,39 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
       if (workerPrepared.speechRegions.length) {
         usingFfmpegRecognitionPcm = true;
         run = runFor(workerPrepared);
-        prepared = preparedFor(workerPrepared, run);
+        recoveryPrepared = preparedFor(workerPrepared, run);
         report("identifying-passage");
-        identification = await input.worker.identify(input.jobId, reportFastConformer);
+        recoveryIdentification = await input.worker.identify(input.jobId, reportFastConformer);
         assertNotAborted(input.signal);
-        fastConformerSpan = canonicalSpanFromFastConformerIdentification(identification?.canonicalSpan ?? null);
-        decision = decideFastConformerPassage(identification, fastConformerSpan);
+        recoveryFastConformerSpan = canonicalSpanFromFastConformerIdentification(recoveryIdentification?.canonicalSpan ?? null);
+        recoveryDecision = decideFastConformerPassage(recoveryIdentification, recoveryFastConformerSpan);
+        recognitionDecisionDebug("recognition-recovery-result", { source: "recovery", decision: recoveryDecision, identification: recoveryIdentification });
       }
     } catch {
       assertNotAborted(input.signal);
       // Retain the native result and existing Whisper fallback behavior.
     }
+  }
+  const recoverySelection = selectRecoveryPassage(nativeDecision, recoveryDecision);
+  recognitionDecisionDebug("recognition-final-selection", {
+    source: recoverySelection.selectedSource === "recovery" ? "recovery" : "native",
+    decision: recoverySelection.selectedDecision ?? recoveryDecision ?? nativeDecision,
+    identification: recoverySelection.selectedSource === "recovery" ? recoveryIdentification : nativeIdentification,
+    selection: recoverySelection,
+  });
+  let identification = nativeIdentification;
+  let fastConformerSpan = nativeFastConformerSpan;
+  let decision = nativeDecision;
+  if (recoverySelection.selectedSource === "recovery" && recoveryIdentification && recoveryFastConformerSpan && recoveryDecision && recoveryPrepared) {
+    identification = recoveryIdentification;
+    fastConformerSpan = recoveryFastConformerSpan;
+    decision = recoveryDecision;
+    prepared = recoveryPrepared;
+  } else if (recoveryPrepared) {
+    workerPrepared = await input.worker.prepare(input.jobId, nativeDecoded.sampleRate, nativeDecoded.frameCount, nativeDecoded.channelBuffers);
+    assertNotAborted(input.signal);
+    run = runFor(workerPrepared);
+    prepared = preparedFor(workerPrepared, run);
   }
   const runWhisperComparison = process.env.NODE_ENV !== "production";
   const transcriptResult = !decision.accepted || runWhisperComparison

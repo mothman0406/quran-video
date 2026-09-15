@@ -27,7 +27,13 @@ export type FastConformerPassageEvidence = {
   strongWindowCount: number;
   agreeingStrongWindows: number;
   contradictoryStrongWindows: number;
+  totalWindowCount: number;
+  usableWindowCount: number;
+  coherentWindowCount: number;
+  coherentWindowRatio: number;
+  longestUnexplainedWindowRun: number;
   normalizedBestCtcScore: number | null;
+  normalizedCoherentCtcScore: number | null;
   bestVsSecondMargin: number | null;
   voicedAudioExplained: number;
   continuityScore: number;
@@ -43,6 +49,16 @@ export type FastConformerPassageDecision = {
   reason: string;
   evidence: FastConformerPassageEvidence;
 };
+
+function longestUnexplainedRun(path: readonly { candidate: unknown | null }[]) {
+  let longest = 0;
+  let current = 0;
+  for (const entry of path) {
+    current = entry.candidate ? 0 : current + 1;
+    longest = Math.max(longest, current);
+  }
+  return longest;
+}
 
 function finiteOrNull(value: number | null) {
   return value === null || Number.isFinite(value);
@@ -62,6 +78,11 @@ export function decideFastConformerPassage(
     ? coherentCandidates
     : identification?.windowResults.filter((window) => window.state === "strong-candidate" && window.selectedCandidate).map((window) => window.selectedCandidate!) ?? [];
   const selectedSurah = identification?.selectedSurah ?? null;
+  const totalWindowCount = identification?.windowResults.length ?? 0;
+  const usableWindowCount = identification?.windowResults.filter((window) => window.state !== "no-usable-evidence").length ?? 0;
+  const coherentWindowCount = coherentCandidates.length || (!winningHypothesis ? strong.length : 0);
+  const coherentWindowRatio = coherentWindowCount / Math.max(1, usableWindowCount);
+  const longestUnsupportedRun = winningHypothesis ? longestUnexplainedRun(winningHypothesis.path) : 0;
   const contradictoryStrongWindows = strong.filter((candidate) => candidate.start.surah !== selectedSurah || candidate.end.surah !== selectedSurah).length;
   const structuralReasons: string[] = [];
   const span = identification?.canonicalSpan;
@@ -77,7 +98,13 @@ export function decideFastConformerPassage(
     strongWindowCount: strong.length,
     agreeingStrongWindows: identification?.surahConsensus.agreeingStrongWindows ?? 0,
     contradictoryStrongWindows,
+    totalWindowCount,
+    usableWindowCount,
+    coherentWindowCount,
+    coherentWindowRatio: Number(coherentWindowRatio.toFixed(4)),
+    longestUnexplainedWindowRun: longestUnsupportedRun,
     normalizedBestCtcScore: identification?.normalizedCtcScore ?? null,
+    normalizedCoherentCtcScore: winningHypothesis?.acousticScore ?? identification?.normalizedCtcScore ?? null,
     bestVsSecondMargin: identification?.margin ?? null,
     voicedAudioExplained: identification?.confidence.voicedAudioExplained ?? 0,
     continuityScore: identification?.continuityScore ?? 0,
@@ -93,10 +120,20 @@ export function decideFastConformerPassage(
   const ctcMinimum = singleWindow ? FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.singleWindowMinimumNormalizedCtcScore : FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumNormalizedCtcScore;
   const marginMinimum = singleWindow ? FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.singleWindowMinimumMargin : FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumMargin;
   const voicedMinimum = singleWindow ? FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.singleWindowMinimumVoicedExplained : FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumVoicedExplained;
-  if ((identification!.normalizedCtcScore ?? Number.NEGATIVE_INFINITY) < ctcMinimum) return { accepted: false, state: "insufficient-evidence", reason: "FastConformer CTC fit is below the documented production threshold.", evidence };
+  // The whole path, rather than a single locally excellent window, must meet
+  // the published fit threshold. This prevents a long recording from being
+  // promoted by an isolated phrase while its remaining selected windows are
+  // acoustically poor.
+  if ((evidence.normalizedCoherentCtcScore ?? Number.NEGATIVE_INFINITY) < ctcMinimum) return { accepted: false, state: "insufficient-evidence", reason: "The coherent FastConformer path CTC fit is below the documented production threshold.", evidence };
   if ((identification!.margin ?? Number.NEGATIVE_INFINITY) < marginMinimum) return { accepted: false, state: "ambiguous", reason: "FastConformer best-path margin is too small.", evidence };
   if (identification!.confidence.voicedAudioExplained < voicedMinimum) return { accepted: false, state: "insufficient-evidence", reason: "Too little VAD-qualified audio is explained by the FastConformer path.", evidence };
   if (!singleWindow && identification!.surahConsensus.agreeingStrongWindows < 2) return { accepted: false, state: "ambiguous", reason: "Multiple useful windows did not form a coherent Quran path.", evidence };
+  // Identification windows have already been VAD-qualified. For a long
+  // recording, repeatedly skipping those voiced windows is not a coherent
+  // passage explanation; it is exactly the shape in which repeated phrases
+  // can otherwise assemble a plausible-looking but wrong global span.
+  if (!singleWindow && totalWindowCount >= 5 && (coherentWindowRatio < 0.6 || longestUnsupportedRun >= 3)) return { accepted: false, state: "insufficient-evidence", reason: "The selected Quran path does not support enough of the long recording's voiced timeline.", evidence };
+  if (!singleWindow && totalWindowCount >= 5 && winningHypothesis && winningHypothesis.lexicalUniqueness < 0.08) return { accepted: false, state: "ambiguous", reason: "The long recording relies too heavily on repeated Quran language without distinctive passage context.", evidence };
   if (singleWindow && winningHypothesis && winningHypothesis.lexicalUniqueness < 0.08) return { accepted: false, state: "ambiguous", reason: "A short clip contains only common Quran language without disambiguating context.", evidence };
   return { accepted: true, state: "accepted", reason: singleWindow ? "Strong short-clip FastConformer evidence passed." : "Coherent multi-window FastConformer evidence passed.", evidence };
 }
