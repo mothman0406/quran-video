@@ -42,7 +42,7 @@ test("worker preparation transfers a disposable PCM copy while retaining caller-
   assert.equal(created, 1, "the worker is retained after preparation");
 });
 
-test("recovery and retry can dispatch new transferred copies after a prior worker request", async () => {
+test("a second preparation and retry can dispatch new transferred copies after a prior worker request", async () => {
   const worker = new FakeWorker();
   const client = new LocalRecognitionWorkerClient(() => worker);
   const authoritativePcm = new Float32Array([3, 4]);
@@ -52,18 +52,18 @@ test("recovery and retry can dispatch new transferred copies after a prior worke
   worker.respond(prepared(7));
   await primary;
 
-  const recovery = client.prepare(7, 48_000, 2, [authoritativePcm.buffer]);
-  const recoveryRequest = worker.calls[1]?.message as Extract<RecognitionWorkerRequest, { type: "prepare" }>;
-  assert.notStrictEqual(recoveryRequest.channelBuffers[0], authoritativePcm.buffer);
+  const secondPreparation = client.prepare(7, 48_000, 2, [authoritativePcm.buffer]);
+  const secondRequest = worker.calls[1]?.message as Extract<RecognitionWorkerRequest, { type: "prepare" }>;
+  assert.notStrictEqual(secondRequest.channelBuffers[0], authoritativePcm.buffer);
   worker.detachTransferredBuffers(1);
-  assert.ok(authoritativePcm.buffer.byteLength > 0, "a failed native request cannot poison route-persistent PCM");
+  assert.ok(authoritativePcm.buffer.byteLength > 0, "an earlier request cannot poison route-persistent PCM");
   assert.deepEqual(Array.from(authoritativePcm), [3, 4]);
   worker.respond(prepared(7));
-  await recovery;
+  await secondPreparation;
 
   const retry = client.prepare(8, 48_000, 2, [authoritativePcm.buffer]);
   worker.detachTransferredBuffers(2);
-  assert.ok(authoritativePcm.buffer.byteLength > 0, "a completed recovery cannot poison retry PCM");
+  assert.ok(authoritativePcm.buffer.byteLength > 0, "a completed request cannot poison retry PCM");
   worker.respond(prepared(8));
   await retry;
   assert.equal(worker.calls.length, 3);

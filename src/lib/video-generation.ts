@@ -4,7 +4,7 @@ import { recognitionToVerseAlignments, type VerseAlignment } from "./editor/reco
 import { analyzeTranscript, canonicalSpanFromFastConformerIdentification, createPrimaryTranscript, hafsSurahs, hafsVerses } from "./recognition/core.ts";
 import { comparePassageIdentification } from "./recognition/fastconformer-identification.ts";
 import { decideFastConformerPassage } from "./recognition/passage-decision.ts";
-import { recognitionDecisionDebug, selectRecoveryPassage, shouldRetryFfmpegRecognitionPcm } from "./recognition/pcm-recovery.ts";
+import { quranRecognitionDebug } from "./recognition/passage-identification-debug.ts";
 import type { LocalRecognitionWorkerClient } from "./recognition/recognition-worker-client.ts";
 import type { DecodedAudioChannels } from "./recognition/local-audio-decode.ts";
 import type { FastConformerProgress } from "./recognition/contracts.ts";
@@ -20,7 +20,8 @@ export type VideoGenerationInput = {
   jobId: number;
   file: File;
   sourceUrl: string | null;
-  preparedAudio?: DecodedAudioChannels;
+  /** Media preparation owns decoder choice and supplies one canonical PCM. */
+  authoritativePcm: DecodedAudioChannels;
   signal?: AbortSignal;
   worker: LocalRecognitionWorkerClient;
   onProgress: (progress: CaptionGenerationProgress) => void;
@@ -56,8 +57,8 @@ async function enrichTranslations(segments: CaptionSegment[], fetcher: typeof fe
 
 /**
  * Runs the same local Quran identification and authoritative FastConformer
- * alignment used by the advanced editor. Compatibility normalization happens
- * before this boundary and is never repeated here.
+ * alignment used by the advanced editor. It receives one media-prepared PCM;
+ * decoder alternatives never participate in passage selection here.
  */
 export async function generateVideoCaptions(input: VideoGenerationInput): Promise<VideoGenerationResult> {
   const progress = new CaptionGenerationProgressController();
@@ -79,18 +80,10 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
 
   publish(progress.start(input.jobId));
   assertNotAborted(input.signal);
-  let decoded = input.preparedAudio;
-  let usingFfmpegRecognitionPcm = Boolean(input.preparedAudio);
-  if (!decoded) {
-    const { decodeAudioChannels } = await import("./recognition/local-audio-decode.ts");
-    report("preparing-media");
-    decoded = await decodeAudioChannels(input.file);
-  }
   report("analyzing-speech");
-  let workerPrepared = await input.worker.prepare(input.jobId, decoded.sampleRate, decoded.frameCount, decoded.channelBuffers);
+  const workerPrepared = await input.worker.prepare(input.jobId, input.authoritativePcm.sampleRate, input.authoritativePcm.frameCount, input.authoritativePcm.channelBuffers);
   assertNotAborted(input.signal);
   if (!workerPrepared.speechRegions.length) throw new Error("No credible human speech was detected in this recording, so Quran captions were not timed from background audio.");
-  const nativeDecoded = decoded;
 
   const runFor = (value: typeof workerPrepared) => ({
     analysisRunId: crypto.randomUUID(),
@@ -113,62 +106,15 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
     audioAnalysis: value.audioAnalysis,
     speechRegions: value.speechRegions,
   });
-  let run = runFor(workerPrepared);
-  let prepared = preparedFor(workerPrepared, run);
+  const run = runFor(workerPrepared);
+  const prepared = preparedFor(workerPrepared, run);
 
   report("identifying-passage");
-  const nativeIdentification = await input.worker.identify(input.jobId, reportFastConformer);
+  const identification = await input.worker.identify(input.jobId, reportFastConformer);
   assertNotAborted(input.signal);
-  const nativeFastConformerSpan = canonicalSpanFromFastConformerIdentification(nativeIdentification?.canonicalSpan ?? null);
-  const nativeDecision = decideFastConformerPassage(nativeIdentification, nativeFastConformerSpan);
-  recognitionDecisionDebug("recognition-primary-result", { source: "native", decision: nativeDecision, identification: nativeIdentification });
-  let recoveryIdentification: typeof nativeIdentification | null = null;
-  let recoveryFastConformerSpan: ReturnType<typeof canonicalSpanFromFastConformerIdentification> = null;
-  let recoveryDecision: ReturnType<typeof decideFastConformerPassage> | null = null;
-  let recoveryPrepared: typeof prepared | null = null;
-  if (shouldRetryFfmpegRecognitionPcm(nativeDecision.accepted, usingFfmpegRecognitionPcm)) {
-    try {
-      const { extractRecognitionPcm } = await import("./recognition/local-media-compatibility.ts");
-      decoded = await extractRecognitionPcm(input.file, input.signal);
-      workerPrepared = await input.worker.prepare(input.jobId, decoded.sampleRate, decoded.frameCount, decoded.channelBuffers);
-      assertNotAborted(input.signal);
-      if (workerPrepared.speechRegions.length) {
-        usingFfmpegRecognitionPcm = true;
-        run = runFor(workerPrepared);
-        recoveryPrepared = preparedFor(workerPrepared, run);
-        report("identifying-passage");
-        recoveryIdentification = await input.worker.identify(input.jobId, reportFastConformer);
-        assertNotAborted(input.signal);
-        recoveryFastConformerSpan = canonicalSpanFromFastConformerIdentification(recoveryIdentification?.canonicalSpan ?? null);
-        recoveryDecision = decideFastConformerPassage(recoveryIdentification, recoveryFastConformerSpan);
-        recognitionDecisionDebug("recognition-recovery-result", { source: "recovery", decision: recoveryDecision, identification: recoveryIdentification });
-      }
-    } catch {
-      assertNotAborted(input.signal);
-      // Retain the native result and existing Whisper fallback behavior.
-    }
-  }
-  const recoverySelection = selectRecoveryPassage(nativeDecision, recoveryDecision);
-  recognitionDecisionDebug("recognition-final-selection", {
-    source: recoverySelection.selectedSource === "recovery" ? "recovery" : "native",
-    decision: recoverySelection.selectedDecision ?? recoveryDecision ?? nativeDecision,
-    identification: recoverySelection.selectedSource === "recovery" ? recoveryIdentification : nativeIdentification,
-    selection: recoverySelection,
-  });
-  let identification = nativeIdentification;
-  let fastConformerSpan = nativeFastConformerSpan;
-  let decision = nativeDecision;
-  if (recoverySelection.selectedSource === "recovery" && recoveryIdentification && recoveryFastConformerSpan && recoveryDecision && recoveryPrepared) {
-    identification = recoveryIdentification;
-    fastConformerSpan = recoveryFastConformerSpan;
-    decision = recoveryDecision;
-    prepared = recoveryPrepared;
-  } else if (recoveryPrepared) {
-    workerPrepared = await input.worker.prepare(input.jobId, nativeDecoded.sampleRate, nativeDecoded.frameCount, nativeDecoded.channelBuffers);
-    assertNotAborted(input.signal);
-    run = runFor(workerPrepared);
-    prepared = preparedFor(workerPrepared, run);
-  }
+  const fastConformerSpan = canonicalSpanFromFastConformerIdentification(identification?.canonicalSpan ?? null);
+  const decision = decideFastConformerPassage(identification, fastConformerSpan);
+  quranRecognitionDebug(identification, decision);
   const runWhisperComparison = process.env.NODE_ENV !== "production";
   const transcriptResult = !decision.accepted || runWhisperComparison
     ? await (async () => {

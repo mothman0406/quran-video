@@ -5,6 +5,29 @@ export type DecodedAudioChannels = {
   channelBuffers: ArrayBuffer[];
 };
 
+export const RECOGNITION_SAMPLE_RATE = 16_000;
+
+/**
+ * Completes native media preparation outside the Quran worker. The output is
+ * always one 16 kHz mono caller-owned channel, matching FFmpeg's f32le
+ * extraction contract.
+ */
+export function canonicalizeNativeRecognitionPcm(decoded: DecodedAudioChannels): DecodedAudioChannels {
+  const channels = decoded.channelBuffers.map((buffer) => new Float32Array(buffer));
+  const frameCount = Math.ceil(decoded.frameCount * RECOGNITION_SAMPLE_RATE / decoded.sampleRate);
+  const mono = new Float32Array(frameCount);
+  for (let frame = 0; frame < mono.length; frame += 1) {
+    const position = frame * decoded.sampleRate / RECOGNITION_SAMPLE_RATE;
+    const before = Math.floor(position);
+    const after = Math.min(before + 1, decoded.frameCount - 1);
+    const blend = position - before;
+    let sample = 0;
+    for (const channel of channels) sample += (channel[before] ?? 0) * (1 - blend) + (channel[after] ?? 0) * blend;
+    mono[frame] = sample / Math.max(1, channels.length);
+  }
+  return { sampleRate: RECOGNITION_SAMPLE_RATE, frameCount: mono.length, channelBuffers: [mono.buffer] };
+}
+
 /**
  * Media decoding must use the window's AudioContext. Everything after this
  * boundary, including resampling, runs in the dedicated recognition worker.

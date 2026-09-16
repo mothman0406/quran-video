@@ -24,11 +24,12 @@ passing production evidence gate. Native and FFmpeg PCM have matching duration
 (22,104 ms) and 0.999988 sample correlation, but differ enough in downmix and
 resampling to change the noisy final-window CTC evidence.
 
-Production now makes exactly one local FFmpeg PCM retry only after a native
-FastConformer decision fails. It reruns VAD and the unchanged Quran-wide
-identification/evidence gate on that independent decode. An accepted native
-result, already-FFmpeg PCM, and failed recovery retain their existing paths;
-Whisper remains the later fallback.
+The correction moves this finding to media preparation: 44.1 kHz requires a
+fractional native-worker resample, so compatibility selects the existing
+FFmpeg mono/16 kHz extraction before VAD and FastConformer begin. Recognition
+then makes one Quran-wide identification pass on that authoritative PCM.
+Decoder choice never uses Quran evidence, and the unchanged evidence gate
+continues to abstain on weak or incoherent recordings.
 
 The current code is already a two-stage local design: recall-first Quran-wide
 retrieval followed by candidate-specific CTC verification and whole-recording
@@ -43,8 +44,8 @@ uniqueness, or invalid coordinates.
 
 | Stage | Implementation | Input → output / guard |
 | --- | --- | --- |
-| Decode | `local-audio-decode.ts`, `local-media-compatibility.ts` | Native `AudioContext` PCM or FFmpeg `f32le`, mono, 16 kHz fallback → transferable channel buffers. |
-| Prepare/VAD | `recognition-worker.ts`, `vad.ts`, `speech-regions.ts` | Native channel-average/linear 16 kHz PCM, with one FFmpeg PCM recovery only after a rejected native FastConformer decision → RMS analysis, speech regions. VAD qualifies identification windows; it is not identity authority. |
+| Decode | `local-audio-decode.ts`, `local-media-compatibility.ts` | Media preflight chooses native PCM or FFmpeg `f32le` as one authoritative input before Quran inference. |
+| Prepare/VAD | `recognition-worker.ts`, `vad.ts`, `speech-regions.ts` | The authoritative PCM is mixed/resampled only as needed, then produces RMS analysis and speech regions. VAD qualifies identification windows; it is not identity authority. |
 | CTC | `local-fastconformer.ts#createFastConformerIdentificationRunner` | 12 s windows / 6 s hop with >=1.2 s voiced audio → FastConformer logits. |
 | Retrieve | `fastconformer-identification.ts#greedyDecodeCtc`, `retrieveQuranCandidates` | Normalized greedy CTC lexical tokens; initial basmalah excluded from location lookup → up to 48 same-surah contiguous ranges, using 1–3 gram anchors and length/drift expansions. |
 | Verify/rerank | `rerankQuranCandidates` | Exact forward CTC likelihood for canonical target and optional prelude; per-frame normalized score. First 24 retrieval candidates only. |
@@ -116,11 +117,12 @@ repeated/similar language, noise, short clips, and multi-ayah clips. The metric
 utility measures exact surah/start/end, top-3/top-5 recall, false confident
 acceptance, and abstention once a retained licensed fixture supplies results.
 
-Current result: 8 logical fixture specifications plus the deterministic safe
-`muddaththir-74-1-9-native-pcm-recovery` fixture. It records no private media,
-PCM, logits, transcript, filename, or path; it asserts that a native abstention
-gets one local recovery attempt and that the recovered evidence is 74:1–9 and
-accepted. Runtime accuracy metrics still require a retained licensed fixture.
+Current result: 8 logical fixture specifications plus a deterministic media
+preparation invariant for the private Muddaththir evidence. It records no
+private media, PCM, logits, transcript, filename, or path; it asserts that the
+44.1 kHz compatibility route selects canonical FFmpeg PCM before one Quran
+identification pass. Runtime accuracy metrics still require a retained licensed
+fixture.
 
 The local-only diagnostic is `tools/regression/diagnose-real-quran-id.ts`; it
 accepts derived 16 kHz float PCM and pinned public Tilawa assets, emitting only

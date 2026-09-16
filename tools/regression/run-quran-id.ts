@@ -9,7 +9,7 @@ const categories = ["starts mid-ayah", "ends mid-ayah", "basmalah present", "no 
 async function main() {
   const covered = categories.filter((category) => QURAN_ID_FIXTURES.some((fixture) => fixture.category.includes(category)));
   if (covered.length !== categories.length) throw new Error(`Quran ID fixture manifest is missing: ${categories.filter((category) => !covered.includes(category)).join(", ")}`);
-  await execFileAsync(process.execPath, ["--experimental-strip-types", "--test", "tests/fastconformer-identification.test.ts", "tests/passage-decision.test.ts", "tests/passage-identification-debug.test.ts", "tests/passage-id-metrics.test.ts", "tests/pcm-recovery.test.ts"], { cwd: process.cwd() });
+  await execFileAsync(process.execPath, ["--experimental-strip-types", "--test", "tests/fastconformer-identification.test.ts", "tests/passage-decision.test.ts", "tests/passage-identification-debug.test.ts", "tests/passage-id-metrics.test.ts", "tests/recognition-audio-preparation.test.ts"], { cwd: process.cwd() });
   console.log(`PASS  Quran ID regression fixture schema (${QURAN_ID_FIXTURES.length} logical fixtures; retained audio required for runtime metrics).`);
 }
 

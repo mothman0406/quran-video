@@ -99,3 +99,24 @@ export function createPassageIdentificationDebugReport(
     })),
   };
 }
+
+/** Compact ?debugMedia=1 recognition outcome, separate from media preparation. */
+export function quranRecognitionDebug(
+  identification: FastConformerIdentificationResult | null,
+  decision: FastConformerPassageDecision,
+): void {
+  if (typeof window === "undefined" || new URLSearchParams(window.location.search).get("debugMedia") !== "1") return;
+  const span = identification?.canonicalSpan ?? null;
+  console.info("[Quran AutoCaption recognition]", {
+    event: "final-passage-decision",
+    proposedSurah: identification?.selectedSurah ?? null,
+    startAyah: span?.start.ayah ?? null,
+    endAyah: span?.end.ayah ?? null,
+    accepted: decision.accepted,
+    reason: decision.reason,
+    voicedCoverage: decision.evidence.voicedAudioExplained,
+    continuity: decision.evidence.continuityScore,
+    usableWindows: decision.evidence.usableWindowCount,
+    totalWindows: decision.evidence.totalWindowCount,
+  });
+}

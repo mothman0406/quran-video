@@ -16,6 +16,8 @@ function post(message: RecognitionWorkerResponse) {
 }
 
 function resampleAndMix(channelBuffers: readonly ArrayBuffer[], sourceSampleRate: number, frameCount: number) {
+  // Compatibility preparation normally supplies canonical 16 kHz mono PCM.
+  // Keep this defensive conversion for callers from older in-memory jobs.
   const channels = channelBuffers.map((buffer) => new Float32Array(buffer));
   if (!channels.length || !frameCount) return new Float32Array();
   const output = new Float32Array(Math.ceil(frameCount * TARGET_SAMPLE_RATE / sourceSampleRate));

@@ -211,18 +211,18 @@ class VideoJobManager {
     await this.repository?.put(job.project);
     void this.preparePoster(id, token);
     try {
-      let preparedAudio = runtime.preparedAudio;
+      let authoritativePcm = runtime.preparedAudio;
       runtime.preparedAudio = undefined;
-      if (!preparedAudio && job.project.sourceMedia?.compatibility === "audio-fallback") {
-        const { extractRecognitionPcm } = await import("./recognition/local-media-compatibility.ts");
-        preparedAudio = await extractRecognitionPcm(runtime.file, runtime.abort.signal);
+      if (!authoritativePcm) {
+        const { prepareRecognitionAudio } = await import("./recognition/local-media-compatibility.ts");
+        authoritativePcm = (await prepareRecognitionAudio(runtime.file, runtime.abort.signal)).pcm;
       }
       const { generateVideoCaptions } = await import("./video-generation.ts");
       const result = await generateVideoCaptions({
         jobId: workerJobId,
         file: runtime.file,
         sourceUrl: runtime.sourceUrl,
-        preparedAudio,
+        authoritativePcm,
         signal: runtime.abort.signal,
         worker: this.worker ??= new LocalRecognitionWorkerClient(),
         onProgress: (progress) => {

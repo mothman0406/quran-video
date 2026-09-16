@@ -1,5 +1,41 @@
 # Status
 
+## Current milestone: Restore canonical media preparation before Quran recognition
+
+Complete:
+
+- Restored the pre-recovery Quran-recognition design: one canonical media PCM
+  enters VAD, one FastConformer Quran-wide identification pass, the unchanged
+  evidence gate, Whisper fallback when needed, and canonical forced alignment.
+  Native-vs-FFmpeg Quran hypotheses, recovery-only thresholds, and arbitration
+  were removed rather than loosened.
+- Added `prepareRecognitionAudio()` as the media/recognition boundary. It
+  returns caller-owned 16 kHz mono PCM selected from native Web Audio or the
+  existing FFmpeg audio-only path using only inspected media facts and native
+  decoder availability. 44.1 kHz inputs use FFmpeg before recognition because
+  the prior native-worker fractional resample was the measured Muddaththir
+  divergence; integral native rates retain the efficient native path.
+- Preserved Mediabunny inspection, browser-playable source preservation,
+  audio-only extraction, full normalization, WorkerFS, self-hosted FFmpeg,
+  progress, cleanup, route-persistent `/create` → `/videos` jobs, and the
+  transferable-ownership fix. Worker requests still receive disposable clones
+  and never detach application-owned canonical PCM.
+- The ignored Muddaththir MP4 remains untracked (SHA-256
+  `042579aa04ded0237aac43c0fa430094d1784d5c6d0062f15b506940c63cd55a`).
+  Its previously captured media/PCM evidence is 22,104 ms, 44.1 kHz stereo
+  H.264/AAC; the selected canonical FFmpeg PCM produced accepted 74:1–9.
+  Node cannot run browser Mediabunny/FFmpeg-WASM decoding directly, so this
+  workspace validates the production boundary and retained evidence without
+  inventing a browser execution result.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`,
+`npm test` (425 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`,
+`npm run build`, and `git diff --check` pass. `npm run regression:quran`
+passes production invariant probes, then exits non-zero only because its
+optional external quran-align/EveryAyah artifact is unavailable; its generated
+report was not retained. The build retains the pre-existing VAD/ONNX dynamic
+dependency warnings and optional TikTok configuration reminder.
+
 ## Current milestone: Preserve PCM ownership across recognition worker transfers
 
 Complete:

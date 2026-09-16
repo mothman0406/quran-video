@@ -18,8 +18,8 @@ type Pending = { resolve: (value: unknown) => void; reject: (reason: Error) => v
 /**
  * `prepare` accepts caller-owned, reusable PCM. A worker transfer detaches its
  * backing ArrayBuffer, so every request gets its own short-lived copy. Keep
- * this ownership boundary here: callers may retain PCM for recovery, retries,
- * or route-persistent jobs without knowing this client uses transferables.
+ * this ownership boundary here: callers may retain PCM for retries or
+ * route-persistent jobs without knowing this client uses transferables.
  */
 function disposableWorkerBuffers(channelBuffers: readonly ArrayBuffer[]): ArrayBuffer[] {
   return channelBuffers.map((buffer) => buffer.slice(0));

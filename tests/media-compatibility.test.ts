@@ -28,8 +28,7 @@ test("iPhone-style MOV selection is accepted without File System Access", () => 
 
 test("playable MOV with AAC audio routes to audio-only fallback without requiring a video decoder", () => {
   assert.equal(routeMediaCompatibility(250 * 1024 * 1024, inspection({ nativeRecognitionAudio: false, durationMs: 30_000, videoCodec: "hevc", audioCodec: "aac" })), "audio-fallback");
-  assert.match(editor, /decodeAudioChannels\(sourceFile\)/);
-  assert.match(editor, /extractRecognitionPcm\(sourceFile, abort\.signal/);
+  assert.match(editor, /prepareRecognitionAudio\(sourceFile, abort\.signal/);
   assert.match(editor, /compatibility: "audio-fallback"/);
   assert.match(fallback, /"-map", "0:a:0"/);
   assert.match(fallback, /"-vn"/);
@@ -202,7 +201,7 @@ test("conversion diagnostics distinguish command completion from output and clea
   ]) assert.match(fallback, new RegExp(`mediaDebug\\("${event}"`));
 });
 
-test("an explicitly requested recovery PCM extraction stays in the audio-only safety envelope", () => {
+test("FFmpeg canonical PCM extraction stays in the audio-only safety envelope", () => {
   assert.match(fallback, /const route = "audio-fallback" as const/);
   assert.match(fallback, /recognitionPcmBytes\(inspection\.durationMs\) > MAX_RECOGNITION_PCM_BYTES/);
   assert.doesNotMatch(fallback, /extractRecognitionPcm[\s\S]*?routeMediaCompatibility\(file\.size/);

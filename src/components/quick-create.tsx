@@ -126,15 +126,12 @@ export default function QuickCreate() {
     const originalUrl = URL.createObjectURL(next);
     replacePreviewUrl(originalUrl);
     try {
-      const { extractRecognitionPcm, prepareLocalMedia } = await import("@/lib/recognition/local-media-compatibility");
+      const { prepareLocalMedia, prepareRecognitionAudio } = await import("@/lib/recognition/local-media-compatibility");
       const result = await prepareLocalMedia(next, abort.signal, (event) => publishPreparation(job, event));
       if (abort.signal.aborted || job !== preparationId.current) return;
-      let preparedAudio: DecodedAudioChannels | undefined;
-      if (result.route === "audio-fallback") {
-        // Keep recovery tied to the user's original File, never a preview or
-        // compatibility representation.
-        preparedAudio = await extractRecognitionPcm(next, abort.signal, (event) => publishPreparation(job, event));
-      }
+      // Decoder choice completes before this job leaves /create. The generated
+      // PCM is the sole recognition input across /create → /videos.
+      const preparedAudio = (await prepareRecognitionAudio(result.file, abort.signal, (event) => publishPreparation(job, event))).pcm;
       if (abort.signal.aborted || job !== preparationId.current) return;
       const assetId = crypto.randomUUID();
       const source = mediaSourceFromFile(result.file, result.kind, {

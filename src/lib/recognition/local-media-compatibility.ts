@@ -16,6 +16,14 @@ type PreparedEditorMedia = {
   original: Pick<File, "name" | "type" | "size">;
 };
 
+/** The only PCM representation passed into Quran identification and timing. */
+export type PreparedRecognitionAudio = {
+  pcm: DecodedAudioChannels;
+  decodePath: "native" | "ffmpeg";
+  reason: "native-safe" | "non-integral-resample" | "native-decode-unavailable" | "media-audio-fallback";
+  inspection: MediaInspection;
+};
+
 export type LocalMediaPreparationEvent = {
   stage: "preparing-converter" | "inspecting-recording" | "converting-recording" | "preparing-audio" | "preparing-editor";
   inspection?: MediaInspection;
@@ -126,6 +134,23 @@ export async function inspectLocalMedia(file: File): Promise<MediaInspection> {
     audioSampleRate: inspection.audioSampleRate ?? null, audioChannels: inspection.audioChannels ?? null,
   });
   return inspection;
+}
+
+/**
+ * The recognition worker's native preparation uses linear resampling.  44.1
+ * kHz sources therefore need a fractional 16 kHz conversion, unlike the
+ * common 32/48 kHz paths.  For this known media boundary, FFmpeg owns the
+ * canonical downmix/resample before Quran inference begins.  This is a media
+ * decision, never a result of Quran evidence.
+ */
+export function requiresFfmpegCanonicalPcm(inspection: MediaInspection): boolean {
+  const sampleRate = inspection.audioSampleRate;
+  return Boolean(sampleRate && Number.isFinite(sampleRate) && sampleRate % 16_000 !== 0);
+}
+
+function recognitionPreparationReason(inspection: MediaInspection): PreparedRecognitionAudio["reason"] {
+  if (!inspection.nativeRecognitionAudio) return "media-audio-fallback";
+  return requiresFfmpegCanonicalPcm(inspection) ? "non-integral-resample" : "native-safe";
 }
 
 function runtimeFailure(code: "ffmpeg-wrapper-import-failed" | "ffmpeg-worker-create-failed" | "ffmpeg-core-load-failed" | "ffmpeg-wasm-load-failed" | "ffmpeg-initialize-failed") {
@@ -519,6 +544,60 @@ export async function extractRecognitionPcm(file: File, signal?: AbortSignal, on
       }
     }
   });
+}
+
+/**
+ * Select and create one canonical PCM representation before Quran recognition.
+ * Decoder choice is based solely on inspected media and native decoder
+ * availability; no Quran candidate, confidence, or passage decision reaches
+ * this boundary.
+ */
+export async function prepareRecognitionAudio(
+  file: File,
+  signal?: AbortSignal,
+  onPreparation?: (event: LocalMediaPreparationEvent) => void,
+): Promise<PreparedRecognitionAudio> {
+  const inspection = await inspectLocalMedia(file);
+  assertNotAborted(signal);
+  const initialReason = recognitionPreparationReason(inspection);
+  const useFfmpeg = initialReason !== "native-safe";
+  mediaDebug("recognition-preparation", {
+    selectedDecodePath: useFfmpeg ? "ffmpeg" : "native",
+    reason: initialReason,
+    extension: visibleFileExtension(file.name),
+    audioCodec: inspection.audioCodec ?? null,
+    audioSampleRate: inspection.audioSampleRate ?? null,
+    audioChannels: inspection.audioChannels ?? null,
+    sourceDurationMs: inspection.durationMs ?? null,
+  });
+  if (useFfmpeg) {
+    const pcm = await extractRecognitionPcm(file, signal, onPreparation);
+    return { pcm, decodePath: "ffmpeg", reason: initialReason, inspection };
+  }
+  try {
+    const { canonicalizeNativeRecognitionPcm, decodeAudioChannels } = await import("./local-audio-decode.ts");
+    const pcm = canonicalizeNativeRecognitionPcm(await decodeAudioChannels(file));
+    mediaDebug("recognition-pcm", {
+      decodePath: "native",
+      sampleCount: pcm.frameCount,
+      durationMs: Math.round(pcm.frameCount * 1_000 / pcm.sampleRate),
+      canonicalSampleRate: pcm.sampleRate,
+      channelCount: pcm.channelBuffers.length,
+    });
+    return { pcm, decodePath: "native", reason: "native-safe", inspection };
+  } catch {
+    assertNotAborted(signal);
+    mediaDebug("recognition-preparation", {
+      selectedDecodePath: "ffmpeg",
+      reason: "native-decode-unavailable",
+      audioCodec: inspection.audioCodec ?? null,
+      audioSampleRate: inspection.audioSampleRate ?? null,
+      audioChannels: inspection.audioChannels ?? null,
+      sourceDurationMs: inspection.durationMs ?? null,
+    });
+    const pcm = await extractRecognitionPcm(file, signal, onPreparation);
+    return { pcm, decodePath: "ffmpeg", reason: "native-decode-unavailable", inspection };
+  }
 }
 
 export function releaseLocalMediaRuntime() {
