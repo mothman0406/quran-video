@@ -29,7 +29,7 @@ test("audio-only fallback has its own measurable preparation stage", () => {
   progress.start(1, "preparing-converter");
   assert.deepEqual(progress.reportProcessedTime(1, "preparing-audio", 3_700, 10_000), { stage: "preparing-audio", percentage: 37 });
   assert.match(workspace, /Preparing audio for detection/);
-  assert.doesNotMatch(compatibility, /decodeRecognitionAudioFallback[\s\S]*?"-c:v", "libx264"/);
+  assert.doesNotMatch(compatibility, /extractRecognitionPcm[\s\S]*?"-c:v", "libx264"/);
 });
 
 test("media progress is clamped and remains indeterminate without an authoritative duration", () => {
@@ -61,6 +61,11 @@ test("completion reaches 100 before the next truthful stage, and visual updates 
   assert.equal(coalescer.shouldPublish({ stage: "converting-recording", percentage: 30 }, 0), true);
   assert.equal(coalescer.shouldPublish({ stage: "converting-recording", percentage: 31 }, 50), false);
   assert.equal(coalescer.shouldPublish({ stage: "converting-recording", percentage: 31 }, 150), true);
+});
+
+test("a final progress timestamp never marks conversion complete before FFmpeg.exec resolves", () => {
+  assert.match(compatibility, /await runFfmpeg\(runtime, command, "pcmExtractionFailed", signal,[\s\S]*?\);\s*onPreparation\?\.\(\{ stage: progressStage, sourceDurationMs: inspection\.durationMs, complete: true \}\)/);
+  assert.match(compatibility, /mediaDebug\("ffmpeg-exec-resolved"[\s\S]*?mediaDebug\("conversion-complete"/);
 });
 
 test("FFmpeg progress listeners are scoped to an active command and removed afterward", () => {

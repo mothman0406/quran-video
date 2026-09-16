@@ -14,7 +14,7 @@ const editor = readFileSync(new URL("../src/components/editor-client.tsx", impor
 test("quick create begins the existing preparation pipeline on selection and never exposes a timeline", () => {
   assert.match(quickCreate, /void prepare\(event\.currentTarget\.files\?\.\[0\]\)/);
   assert.match(quickCreate, /await prepareLocalMedia\(next, abort\.signal/);
-  assert.match(quickCreate, /decodeRecognitionAudioFallback\(result\.file/);
+  assert.match(quickCreate, /prepareRecognitionAudio\(result\.file, abort\.signal/);
   assert.match(quickCreate, /onDrop=\{drop\}/);
   assert.doesNotMatch(quickCreate, /CaptionTimeline|timelineRef|splitCaption|mergeCaption|word timing/i);
 });
@@ -43,7 +43,7 @@ test("Generate creates one app-level job from prepared media and navigates immed
   assert.match(quickCreate, /videoJobManager\.start\(\{ project, file: prepared\.file, preparedAudio: prepared\.preparedAudio/);
   assert.match(quickCreate, /router\.push\("\/videos"\)/);
   assert.equal((quickCreate.match(/videoJobManager\.start\(/g) ?? []).length, 1);
-  assert.doesNotMatch(generation, /prepareLocalMedia|full-normalization|normalize/i);
+  assert.doesNotMatch(generation, /prepareLocalMedia|extractRecognitionPcm|full-normalization|normalize/i);
 });
 
 test("root-owned job provider keeps local recognition alive across create-to-videos navigation", () => {
@@ -66,6 +66,15 @@ test("generation retains the authoritative Quran recognition and timing path", (
   assert.match(generation, /createCaptionSegmentsFromVerseBoundaries/);
   assert.match(generation, /analysis\.authoritativeTimingEngine\.wordTimings/);
   assert.match(generation, /No credible human speech was detected/);
+});
+
+test("quick create and editor emit the same shared recognition diagnostic schema", () => {
+  for (const source of [generation, editor]) {
+    assert.match(source, /quranRecognitionDebug\(/);
+    assert.match(source, /quranFallbackDebug\(/);
+    assert.match(source, /quranFinalIdentityDebug\(/);
+    assert.match(source, /quranForcedAlignmentDebug\(/);
+  }
 });
 
 test("advanced editor restores the generated local project/runtime and preserves export auth gating", () => {

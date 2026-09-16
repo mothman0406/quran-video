@@ -3,10 +3,10 @@ import {
   BlobSource,
   Input,
 } from "mediabunny";
-import { compatibilityErrorFromUnknown, MediaCompatibilityError, routeMediaCompatibility, type MediaCompatibilityRoute, type MediaInspection } from "../media-compatibility.ts";
+import { compatibilityErrorFromUnknown, MAX_RECOGNITION_PCM_BYTES, MediaCompatibilityError, recognitionPcmBytes, routeMediaCompatibility, type MediaCompatibilityRoute, type MediaInspection } from "../media-compatibility.ts";
 import type { MediaKind } from "../editor/media.ts";
 import type { DecodedAudioChannels } from "./local-audio-decode.ts";
-import { mediaDebug, visibleFileExtension } from "./media-debug.ts";
+import { mediaDebug, mediaDebugEnabled, visibleFileExtension } from "./media-debug.ts";
 
 type PreparedEditorMedia = {
   file: File;
@@ -14,6 +14,14 @@ type PreparedEditorMedia = {
   route: MediaCompatibilityRoute;
   inspection: MediaInspection;
   original: Pick<File, "name" | "type" | "size">;
+};
+
+/** The only PCM representation passed into Quran identification and timing. */
+export type PreparedRecognitionAudio = {
+  pcm: DecodedAudioChannels;
+  decodePath: "native" | "ffmpeg";
+  reason: "native-safe" | "non-integral-resample" | "native-decode-unavailable" | "media-audio-fallback";
+  inspection: MediaInspection;
 };
 
 export type LocalMediaPreparationEvent = {
@@ -41,6 +49,12 @@ type FfmpegRuntime = {
 };
 
 let runtimePromise: Promise<FfmpegRuntime> | null = null;
+/**
+ * FFmpeg has one virtual filesystem and one pair of event listener sets. Keep
+ * a complete mount/probe/command/read/cleanup operation exclusive so media
+ * normalization and recognition extraction cannot interleave their state.
+ */
+let ffmpegJobQueue: Promise<void> = Promise.resolve();
 
 /** Pinned, same-origin single-thread core files copied from @ffmpeg/core/dist/umd. */
 export const FFMPEG_RUNTIME_ASSETS = {
@@ -113,13 +127,31 @@ async function inspectTracks(file: File): Promise<MediaInspection> {
 /** Fast, lazy local preflight. It reads container metadata before FFmpeg work. */
 export async function inspectLocalMedia(file: File): Promise<MediaInspection> {
   const inspection = await inspectTracks(file);
-  mediaDebug("inspection", {
-    extension: visibleFileExtension(file.name), fileSize: file.size,
+  mediaDebug("source-inspection", {
+    container: visibleFileExtension(file.name), fileSize: file.size,
     browserPlayback: inspection.browserPlayback, nativeRecognitionAudio: inspection.nativeRecognitionAudio,
     audioStreams: inspection.audioStreamCount ?? 0, audioCodec: inspection.audioCodec ?? null,
-    audioSampleRate: inspection.audioSampleRate ?? null, audioChannels: inspection.audioChannels ?? null,
+    sourceSampleRate: inspection.audioSampleRate ?? null, channels: inspection.audioChannels ?? null,
+    durationMs: inspection.durationMs ?? null,
   });
   return inspection;
+}
+
+/**
+ * The recognition worker's native preparation uses linear resampling.  44.1
+ * kHz sources therefore need a fractional 16 kHz conversion, unlike the
+ * common 32/48 kHz paths.  For this known media boundary, FFmpeg owns the
+ * canonical downmix/resample before Quran inference begins.  This is a media
+ * decision, never a result of Quran evidence.
+ */
+export function requiresFfmpegCanonicalPcm(inspection: MediaInspection): boolean {
+  const sampleRate = inspection.audioSampleRate;
+  return Boolean(sampleRate && Number.isFinite(sampleRate) && sampleRate % 16_000 !== 0);
+}
+
+function recognitionPreparationReason(inspection: MediaInspection): PreparedRecognitionAudio["reason"] {
+  if (!inspection.nativeRecognitionAudio) return "media-audio-fallback";
+  return requiresFfmpegCanonicalPcm(inspection) ? "non-integral-resample" : "native-safe";
 }
 
 function runtimeFailure(code: "ffmpeg-wrapper-import-failed" | "ffmpeg-worker-create-failed" | "ffmpeg-core-load-failed" | "ffmpeg-wasm-load-failed" | "ffmpeg-initialize-failed") {
@@ -255,6 +287,20 @@ async function loadFfmpeg(signal?: AbortSignal): Promise<FfmpegRuntime> {
   }
 }
 
+async function runFfmpegJob<T>(signal: AbortSignal | undefined, work: (runtime: FfmpegRuntime) => Promise<T>): Promise<T> {
+  const execute = async () => {
+    assertNotAborted(signal);
+    const runtime = await loadFfmpeg(signal);
+    assertNotAborted(signal);
+    return work(runtime);
+  };
+  const scheduled = ffmpegJobQueue.then(execute, execute);
+  // A failed or cancelled operation must release the next operation without
+  // exposing the previous job's rejection or listeners to it.
+  ffmpegJobQueue = scheduled.then(() => undefined, () => undefined);
+  return scheduled;
+}
+
 /**
  * WORKERFS gives FFmpeg a File-backed input. Unlike MEMFS writeFile(), it does
  * not first materialize the whole source as an ArrayBuffer or a second source
@@ -309,7 +355,10 @@ async function runFfmpeg(
   runtime.on("log", onLog);
   if (onProgress) runtime.on("progress", onFfmpegProgress);
   try {
-    if (await runtime.exec(args, undefined, { signal }) !== 0) throw mediaFailureFromFfmpegLog(lines, fallback);
+    mediaDebug("ffmpeg-exec-start", {});
+    const exitCode = await runtime.exec(args, undefined, { signal });
+    mediaDebug("ffmpeg-exec-resolved", { exitCode });
+    if (exitCode !== 0) throw mediaFailureFromFfmpegLog(lines, fallback);
   } catch (error) {
     if (error instanceof MediaCompatibilityError || isAbort(error)) throw error;
     throw mediaFailureFromFfmpegLog(lines, fallback);
@@ -342,104 +391,214 @@ export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPrep
   }
 
   onPreparation?.({ stage: "preparing-converter" });
-  const runtime = await loadFfmpeg(signal);
-  let mountPoint: string | null = null;
   const audioOnly = inspection.kind === "audio";
   const outputName = temporaryName(file, audioOnly ? ".m4a" : ".mp4");
-  try {
-    const mounted = await mountSource(runtime, file, signal);
-    mountPoint = mounted.mountPoint;
-    const { inputName } = mounted;
-    onPreparation?.({ stage: "inspecting-recording" });
-    await probeFfmpeg(runtime, inputName, audioOnly ? "audio" : "media", signal);
-    assertNotAborted(signal);
-    const command = audioOnly
-      ? ["-i", inputName, "-map", "0:a:0", "-c:a", "aac", "-movflags", "+faststart", outputName]
-      : ["-i", inputName, "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", outputName];
-    const progressStage = "converting-recording" as const;
-    let lastDebugPercentage = -1;
-    mediaDebug("conversion-start", { route, sourceDurationMs: inspection.durationMs ?? null });
-    onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs });
-    await runFfmpeg(runtime, command, "pcmExtractionFailed", signal, (processedTimeMs) => {
-      onPreparation?.({ stage: progressStage, processedTimeMs, sourceDurationMs: inspection.durationMs });
-      const percentage = inspection.durationMs && inspection.durationMs > 0 ? Math.min(100, Math.max(0, Math.round((processedTimeMs / inspection.durationMs) * 100))) : null;
-      if (percentage !== null && percentage >= lastDebugPercentage + 10) {
-        lastDebugPercentage = percentage;
-        mediaDebug("conversion-progress", { route, percentage });
+  return runFfmpegJob(signal, async (runtime) => {
+    let mountPoint: string | null = null;
+    try {
+      const mounted = await mountSource(runtime, file, signal);
+      mountPoint = mounted.mountPoint;
+      const { inputName } = mounted;
+      onPreparation?.({ stage: "inspecting-recording" });
+      await probeFfmpeg(runtime, inputName, audioOnly ? "audio" : "media", signal);
+      assertNotAborted(signal);
+      const command = audioOnly
+        ? ["-i", inputName, "-map", "0:a:0", "-c:a", "aac", "-movflags", "+faststart", outputName]
+        : ["-i", inputName, "-map", "0:v:0", "-map", "0:a?", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", outputName];
+      const progressStage = "converting-recording" as const;
+      let lastDebugPercentage = -1;
+      mediaDebug("conversion-start", { route, sourceDurationMs: inspection.durationMs ?? null });
+      onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs });
+      await runFfmpeg(runtime, command, "pcmExtractionFailed", signal, (processedTimeMs) => {
+        onPreparation?.({ stage: progressStage, processedTimeMs, sourceDurationMs: inspection.durationMs });
+        const percentage = inspection.durationMs && inspection.durationMs > 0 ? Math.min(100, Math.max(0, Math.round((processedTimeMs / inspection.durationMs) * 100))) : null;
+        if (percentage !== null && percentage >= lastDebugPercentage + 10) {
+          lastDebugPercentage = percentage;
+          mediaDebug("conversion-progress", { route, percentage });
+        }
+      });
+      onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs, complete: true });
+      onPreparation?.({ stage: "preparing-editor" });
+      mediaDebug("output-read-start", {});
+      const data = await runtime.readFile(outputName, undefined, { signal }) as Uint8Array;
+      mediaDebug("output-read-complete", { byteLength: data.byteLength });
+      const normalizedBytes = new Uint8Array(data.byteLength);
+      normalizedBytes.set(data);
+      mediaDebug("working-media-create-start", {});
+      const normalized = new File([normalizedBytes.buffer], `${file.name.replace(/\.[^.]+$/u, "") || "recitation"}.${audioOnly ? "m4a" : "mp4"}`, { type: audioOnly ? "audio/mp4" : "video/mp4", lastModified: file.lastModified });
+      mediaDebug("working-media-create-complete", { byteLength: normalized.size });
+      mediaDebug("conversion-complete", { route });
+      return { file: normalized, kind: audioOnly ? "audio" : "video", route, inspection, original: file };
+    } catch (error) {
+      if (error instanceof MediaCompatibilityError || isAbort(error)) throw error;
+      throw compatibilityErrorFromUnknown(error, "pcmExtractionFailed");
+    } finally {
+      await Promise.allSettled([runtime.deleteFile(outputName, { signal })]);
+      if (mountPoint) {
+        mediaDebug("workerfs-unmount-start", {});
+        await Promise.allSettled([runtime.unmount(mountPoint)]);
+        mediaDebug("workerfs-unmount-complete", {});
+        await Promise.allSettled([runtime.deleteDir(mountPoint)]);
       }
-    });
-    onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs, complete: true });
-    mediaDebug("conversion-complete", { route });
-    onPreparation?.({ stage: "preparing-editor" });
-    const data = await runtime.readFile(outputName, undefined, { signal }) as Uint8Array;
-    const normalizedBytes = new Uint8Array(data.byteLength);
-    normalizedBytes.set(data);
-    const normalized = new File([normalizedBytes.buffer], `${file.name.replace(/\.[^.]+$/u, "") || "recitation"}.${audioOnly ? "m4a" : "mp4"}`, { type: audioOnly ? "audio/mp4" : "video/mp4", lastModified: file.lastModified });
-    return { file: normalized, kind: audioOnly ? "audio" : "video", route, inspection, original: file };
-  } catch (error) {
-    if (error instanceof MediaCompatibilityError || isAbort(error)) throw error;
-    throw compatibilityErrorFromUnknown(error, "pcmExtractionFailed");
-  } finally {
-    await Promise.allSettled([runtime.deleteFile(outputName, { signal })]);
-    if (mountPoint) {
-      await Promise.allSettled([runtime.unmount(mountPoint)]);
-      await Promise.allSettled([runtime.deleteDir(mountPoint)]);
     }
-  }
+  });
 }
 
-/** Called only after Web Audio fails; the original playable video remains the editor source. */
-export async function decodeRecognitionAudioFallback(file: File, signal?: AbortSignal, onPreparation?: (event: LocalMediaPreparationEvent) => void): Promise<DecodedAudioChannels> {
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  // Copying this derived output is intentional: Web Crypto's strict browser
+  // type accepts ArrayBuffer, while FFmpeg's view may be backed differently.
+  const digest = await crypto.subtle.digest("SHA-256", new Uint8Array(bytes).buffer);
+  return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function recognitionPcmDiagnostics(pcm: DecodedAudioChannels) {
+  const buffer = pcm.channelBuffers[0] ?? new ArrayBuffer(0);
+  const bytes = new Uint8Array(buffer);
+  const samples = new Float32Array(buffer, 0, pcm.frameCount);
+  let squaredTotal = 0;
+  for (let index = 0; index < samples.length; index += 1) {
+    squaredTotal += samples[index]! ** 2;
+  }
+  return {
+    canonicalSampleRate: pcm.sampleRate,
+    sampleCount: pcm.frameCount,
+    pcmDurationMs: Math.round(pcm.frameCount * 1_000 / pcm.sampleRate),
+    rms: Math.sqrt(squaredTotal / Math.max(1, samples.length)),
+    pcmSha256: await sha256Hex(bytes),
+  };
+}
+
+async function reportRecognitionPreparation(
+  file: File,
+  inspection: MediaInspection,
+  path: PreparedRecognitionAudio["decodePath"],
+  reason: PreparedRecognitionAudio["reason"],
+  pcm: DecodedAudioChannels,
+) {
+  if (!mediaDebugEnabled()) return;
+  let diagnostics: Awaited<ReturnType<typeof recognitionPcmDiagnostics>> | null = null;
+  try {
+    diagnostics = await recognitionPcmDiagnostics(pcm);
+  } catch {
+    // Diagnostics must never affect decoder selection or recognition input.
+  }
+  mediaDebug("recognition-preparation", {
+    path,
+    reason,
+    container: visibleFileExtension(file.name),
+    audioCodec: inspection.audioCodec ?? null,
+    sourceSampleRate: inspection.audioSampleRate ?? null,
+    channels: inspection.audioChannels ?? null,
+    sourceDurationMs: inspection.durationMs ?? null,
+    canonicalSampleRate: diagnostics?.canonicalSampleRate ?? pcm.sampleRate,
+    sampleCount: diagnostics?.sampleCount ?? pcm.frameCount,
+    pcmDurationMs: diagnostics?.pcmDurationMs ?? Math.round(pcm.frameCount * 1_000 / pcm.sampleRate),
+    rms: diagnostics?.rms ?? null,
+    pcmSha256: diagnostics?.pcmSha256 ?? null,
+  });
+}
+
+/**
+ * Extracts one independent recognition representation from the exact File the
+ * user selected. Media compatibility and native-PCM recovery share this sole
+ * FFmpeg path and its UMD runtime lifecycle.
+ */
+export async function extractRecognitionPcm(file: File, signal?: AbortSignal, onPreparation?: (event: LocalMediaPreparationEvent) => void): Promise<DecodedAudioChannels> {
   const inspection = await inspectLocalMedia(file);
-  const route = routeMediaCompatibility(file.size, { ...inspection, nativeRecognitionAudio: false, browserPlayback: true });
+  // This is an explicitly requested alternate representation, not a second
+  // compatibility-routing decision. Its safety envelope is the audio fallback
+  // envelope, regardless of whether the native decoder also says it can play.
+  if (!inspection.readable) throw new MediaCompatibilityError("unreadable");
+  if (!inspection.hasAudio) throw new MediaCompatibilityError("noAudio");
+  if (recognitionPcmBytes(inspection.durationMs) > MAX_RECOGNITION_PCM_BYTES) throw new MediaCompatibilityError("recognitionAudioTooLarge");
+  const route = "audio-fallback" as const;
   mediaDebug("route", { selected: route });
   if (route !== "audio-fallback") throw new MediaCompatibilityError("audioDecodeFailed");
   onPreparation?.({ stage: "preparing-converter" });
-  const runtime = await loadFfmpeg(signal);
-  let mountPoint: string | null = null;
   const outputName = temporaryName(file, ".f32");
-  try {
-    const mounted = await mountSource(runtime, file, signal);
-    mountPoint = mounted.mountPoint;
-    const { inputName } = mounted;
-    onPreparation?.({ stage: "inspecting-recording" });
-    await probeFfmpeg(runtime, inputName, "audio", signal);
-    const progressStage = "preparing-audio" as const;
-    let lastDebugPercentage = -1;
-    mediaDebug("conversion-start", { route, sourceDurationMs: inspection.durationMs ?? null });
-    onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs });
-    await runFfmpeg(runtime, [
-      "-i", inputName, "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-acodec", "pcm_f32le", outputName,
-    ], "pcmExtractionFailed", signal, (processedTimeMs) => {
-      onPreparation?.({ stage: progressStage, processedTimeMs, sourceDurationMs: inspection.durationMs });
-      const percentage = inspection.durationMs && inspection.durationMs > 0 ? Math.min(100, Math.max(0, Math.round((processedTimeMs / inspection.durationMs) * 100))) : null;
-      if (percentage !== null && percentage >= lastDebugPercentage + 10) {
-        lastDebugPercentage = percentage;
-        mediaDebug("conversion-progress", { route, percentage });
+  return runFfmpegJob(signal, async (runtime) => {
+    let mountPoint: string | null = null;
+    try {
+      const mounted = await mountSource(runtime, file, signal);
+      mountPoint = mounted.mountPoint;
+      const { inputName } = mounted;
+      onPreparation?.({ stage: "inspecting-recording" });
+      await probeFfmpeg(runtime, inputName, "audio", signal);
+      const progressStage = "preparing-audio" as const;
+      let lastDebugPercentage = -1;
+      mediaDebug("conversion-start", { route, sourceDurationMs: inspection.durationMs ?? null });
+      onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs });
+      await runFfmpeg(runtime, [
+        "-i", inputName, "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-acodec", "pcm_f32le", outputName,
+      ], "pcmExtractionFailed", signal, (processedTimeMs) => {
+        onPreparation?.({ stage: progressStage, processedTimeMs, sourceDurationMs: inspection.durationMs });
+        const percentage = inspection.durationMs && inspection.durationMs > 0 ? Math.min(100, Math.max(0, Math.round((processedTimeMs / inspection.durationMs) * 100))) : null;
+        if (percentage !== null && percentage >= lastDebugPercentage + 10) {
+          lastDebugPercentage = percentage;
+          mediaDebug("conversion-progress", { route, percentage });
+        }
+      });
+      onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs, complete: true });
+      mediaDebug("output-read-start", {});
+      const bytes = await runtime.readFile(outputName, undefined, { signal }) as Uint8Array;
+      mediaDebug("output-read-complete", { byteLength: bytes.byteLength });
+      if (bytes.byteLength % Float32Array.BYTES_PER_ELEMENT !== 0) throw new MediaCompatibilityError("pcmExtractionFailed");
+      const copy = new Uint8Array(bytes.byteLength);
+      copy.set(bytes);
+      const frameCount = copy.byteLength / Float32Array.BYTES_PER_ELEMENT;
+      mediaDebug("pcm", { audioDecode: true, pcmDurationMs: Math.round(frameCount / 16), errorCode: null });
+      mediaDebug("conversion-complete", { route });
+      return { sampleRate: 16_000, frameCount, channelBuffers: [copy.buffer] };
+    } catch (error) {
+      if (error instanceof MediaCompatibilityError || isAbort(error)) {
+        if (error instanceof MediaCompatibilityError) mediaDebug("failure", { audioDecode: false, errorCode: error.code });
+        throw error;
       }
-    });
-    onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs, complete: true });
-    mediaDebug("conversion-complete", { route });
-    const bytes = await runtime.readFile(outputName, undefined, { signal }) as Uint8Array;
-    const copy = new Uint8Array(bytes.byteLength);
-    copy.set(bytes);
-    const frameCount = bytes.byteLength / Float32Array.BYTES_PER_ELEMENT;
-    mediaDebug("pcm", { audioDecode: true, pcmDurationMs: Math.round(frameCount / 16), errorCode: null });
-    return { sampleRate: 16_000, frameCount, channelBuffers: [copy.buffer] };
-  } catch (error) {
-    if (error instanceof MediaCompatibilityError || isAbort(error)) {
-      if (error instanceof MediaCompatibilityError) mediaDebug("failure", { audioDecode: false, errorCode: error.code });
-      throw error;
+      const compatible = compatibilityErrorFromUnknown(error, "pcmExtractionFailed");
+      mediaDebug("failure", { audioDecode: false, errorCode: compatible.code });
+      throw compatible;
+    } finally {
+      await Promise.allSettled([runtime.deleteFile(outputName, { signal })]);
+      if (mountPoint) {
+        mediaDebug("workerfs-unmount-start", {});
+        await Promise.allSettled([runtime.unmount(mountPoint)]);
+        mediaDebug("workerfs-unmount-complete", {});
+        await Promise.allSettled([runtime.deleteDir(mountPoint)]);
+      }
     }
-    const compatible = compatibilityErrorFromUnknown(error, "pcmExtractionFailed");
-    mediaDebug("failure", { audioDecode: false, errorCode: compatible.code });
-    throw compatible;
-  } finally {
-    await Promise.allSettled([runtime.deleteFile(outputName, { signal })]);
-    if (mountPoint) {
-      await Promise.allSettled([runtime.unmount(mountPoint)]);
-      await Promise.allSettled([runtime.deleteDir(mountPoint)]);
-    }
+  });
+}
+
+/**
+ * Select and create one canonical PCM representation before Quran recognition.
+ * Decoder choice is based solely on inspected media and native decoder
+ * availability; no Quran candidate, confidence, or passage decision reaches
+ * this boundary.
+ */
+export async function prepareRecognitionAudio(
+  file: File,
+  signal?: AbortSignal,
+  onPreparation?: (event: LocalMediaPreparationEvent) => void,
+): Promise<PreparedRecognitionAudio> {
+  const inspection = await inspectLocalMedia(file);
+  assertNotAborted(signal);
+  const initialReason = recognitionPreparationReason(inspection);
+  const useFfmpeg = initialReason !== "native-safe";
+  if (useFfmpeg) {
+    const pcm = await extractRecognitionPcm(file, signal, onPreparation);
+    await reportRecognitionPreparation(file, inspection, "ffmpeg", initialReason, pcm);
+    return { pcm, decodePath: "ffmpeg", reason: initialReason, inspection };
+  }
+  try {
+    const { canonicalizeNativeRecognitionPcm, decodeAudioChannels } = await import("./local-audio-decode.ts");
+    const pcm = canonicalizeNativeRecognitionPcm(await decodeAudioChannels(file));
+    await reportRecognitionPreparation(file, inspection, "native", "native-safe", pcm);
+    return { pcm, decodePath: "native", reason: "native-safe", inspection };
+  } catch {
+    assertNotAborted(signal);
+    const pcm = await extractRecognitionPcm(file, signal, onPreparation);
+    await reportRecognitionPreparation(file, inspection, "ffmpeg", "native-decode-unavailable", pcm);
+    return { pcm, decodePath: "ffmpeg", reason: "native-decode-unavailable", inspection };
   }
 }
 

@@ -11,11 +11,13 @@ import type { VadSpeechRegion } from "./speech-regions.ts";
 import { normalizeTilawaArabic } from "./tilawa-lexical.ts";
 import {
   FASTCONFORMER_IDENTIFICATION_DEFAULTS,
+  advanceQuranContinuationState,
   buildQuranWideLexicalIndex,
   identifyQuranWindow,
   summarizeFastConformerIdentification,
   type FastConformerIdentificationResult,
   type QuranWideLexicalIndex,
+  type QuranContinuationState,
 } from "./fastconformer-identification.ts";
 import {
   FASTCONFORMER_BASE_URL,
@@ -876,6 +878,7 @@ export function createFastConformerIdentificationRunner(audio: Float32Array, spe
       if (!loaded.session.inputNames.includes("audio_signal") || !loaded.session.inputNames.includes("length")) throw new Error(`FastConformer has an unsupported input contract: ${loaded.session.inputNames.join(", ")}.`);
       let inferenceMs = 0;
       const windows = [];
+      let continuation: QuranContinuationState | null = null;
       for (const [windowIndex, window] of audioWindows.entries()) {
         const inferenceStartedAt = performance.now();
         const samples = audio.slice(window.startSample, window.endSample);
@@ -887,7 +890,7 @@ export function createFastConformerIdentificationRunner(audio: Float32Array, spe
         const [, frames, vocabularySize] = output?.dims ?? [];
         if (!output || !(output.data instanceof Float32Array) || !frames || !vocabularySize || vocabularySize <= BLANK_TOKEN_ID) throw new Error("FastConformer returned an unsupported CTC log-probability shape.");
         inferenceMs += Math.round(performance.now() - inferenceStartedAt);
-        windows.push(identifyQuranWindow(index, {
+        const identified = identifyQuranWindow(index, {
           index: windowIndex,
           startMs: window.startMs,
           endMs: window.endMs,
@@ -895,7 +898,9 @@ export function createFastConformerIdentificationRunner(audio: Float32Array, spe
           logits: { values: output.data, frames, vocabularySize },
           vocabulary: loaded.assets.vocabulary,
           blankTokenId: BLANK_TOKEN_ID,
-        }));
+        }, continuation);
+        continuation = advanceQuranContinuationState(continuation, identified);
+        windows.push(identified);
         onProgress?.({ phase: "identifying-passage", completed: windowIndex + 1, total: audioWindows.length });
       }
       const summary = summarizeFastConformerIdentification(windows, inferenceMs);

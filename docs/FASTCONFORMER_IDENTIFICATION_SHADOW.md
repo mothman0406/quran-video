@@ -51,8 +51,25 @@ is greedily CTC-decoded by argmax, repeated-token collapse, and blank removal.
 The decoded lexical words feed a deterministic inverted 1–3-gram index. Rare
 and longer anchors carry more weight. Anchors generate nearby contiguous
 word-level ranges at several plausible lengths, so a candidate can start/end
-mid-ayah and cross ayah boundaries. Retrieval is recall-first: up to 48 coarse
-candidates, then 24 acoustic reranks.
+mid-ayah and cross ayah boundaries.
+
+Quran-wide retrieval always remains active. A bounded same-surah continuation
+lane is added only after an independently strong global candidate has all of:
+the existing `strong-candidate` window classification, the unchanged -0.60
+multi-window acoustic floor, non-zero lexical coverage, the unchanged 0.08
+uniqueness floor, valid same-surah coordinates, and at least 0.42 target
+coverage. The last plausible anchored interval and the audio-window overlap
+project expected start/end word positions. Local recall varies the projected
+start, the prior end, the immediately following word, and bounded forward-end
+positions. This includes clipped next-ayah evidence without forcing a longest
+range.
+
+Global retrieval still produces up to 48 coarse candidates. With an active
+anchor, eight of the existing 24 CTC slots are reserved for bounded local
+continuations and sixteen for the leading global candidates; deduplication can
+refill unused capacity from global retrieval. Thus the CTC budget remains 24
+and no model inference is repeated. Local and global candidates use the exact
+same forward-CTC implementation.
 
 ## Acoustic score, continuity, and confidence
 
@@ -64,10 +81,26 @@ basmalah sequence exists, canonical-only and optional-prelude-plus-canonical
 targets are both scored and the better acoustic explanation is retained.
 
 A deterministic Viterbi solver combines each window's CTC score with Quran
-order continuity. It rewards same/adjacent ayah progression and plausible
-forward movement, penalizes backward and unrelated-surah jumps, and retains
-the previous hypothesis across a null/uncertain window. A null state means one
-noisy window cannot veto a coherent passage.
+order continuity. For same-surah candidates it projects expected start and end
+from elapsed audio and the previous canonical word rate. Its bonus is
+`0.90 * (0.15*overlapFit + 0.15*startFit + 0.10*endFit + 0.20*forwardExtension + 0.40*nextAyahEntry)`,
+bounded to 0.90, then subtracts
+`min(8, 0.055*abs(start-expectedStart) + 0.025*abs(end-expectedEnd))`.
+Quran overlap is compared
+with audio-window overlap, so `74:1-6 -> 74:3-8` is corroborating evidence even
+though the current start is not the previous end. `nextAyahEntry` is flat after
+the boundary is crossed: it can recover a partial following ayah, but does not
+reward successively longer targets. The bonus is withheld unless CTC is finite,
+the existing candidate confidence floor passes, and target coverage is at
+least 0.42. Backward and cross-surah movement remain penalized.
+
+The explicit null state remains available for silence, noise, or materially bad
+local CTC. One local miss retains the last position across a noisy overlap; two
+consecutive misses release local recall. Global candidates are never removed.
+Two consecutive independently strong global windows from another surah must
+also beat the local acoustic score by the unchanged 0.05 multi-window margin
+before the online position re-anchors. Final whole-recording hypotheses remain
+single-surah, so discontinuous passages are not joined into one caption range.
 
 When at least two strong windows agree on a surah, the solver keeps only that
 surah's candidate states (plus its explicit null state). Final span

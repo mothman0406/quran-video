@@ -8,13 +8,23 @@ offered to the preview at once. An unplayable source uses a neutral,
 orientation-aware surface until the one required normalization produces its
 working media. Presentation settings remain independent of conversion state.
 
-For the playable-video audio-fallback route, Quick Create performs the local
-PCM extraction before enabling Generate and hands that prepared PCM to the
-root generation job. For native media, the native working `File` is handed off
-untouched. For full normalization, the normalized H.264/AAC working `File` is
-handed off once. `/videos`, Watch, `/editor`, and export reuse that same job and
-project state; only an explicit Retry may repeat recognition/preparation that
-cannot otherwise be recovered.
+Quick Create prepares one authoritative 16 kHz mono PCM before enabling
+Generate and hands it to the root generation job. The native working `File`, or
+the normalized H.264/AAC working `File`, remains the preview/export source.
+`/videos`, Watch, `/editor`, and export reuse that same job and project state;
+only an explicit Retry may repeat preparation.
+
+## Canonical recognition audio
+
+Media compatibility owns decoder selection. Quran identification and timing
+receive one authoritative PCM and never compare decoder-derived Quran
+passages. Ordinary native-safe sources retain the efficient Web Audio path. A
+source that needs audio fallback, whose native decoder fails, or whose source
+rate requires fractional 16 kHz conversion (including 44.1 kHz) uses the
+existing FFmpeg audio-only extraction before recognition begins. This is based
+on media facts, never Quran confidence or a proposed surah. Wrong Quran text
+remains worse than abstention, so the Quran-wide FastConformer evidence gate is
+unchanged.
 
 Quran AutoCaption accepts media through the standard accessible browser file input and drag/drop. This is the path used by iPhone and iPad Photo Library, macOS Photos/Finder, Android pickers, and desktop file pickers; it does not require the File System Access API.
 
@@ -22,7 +32,7 @@ The picker accepts `video/*`, `audio/*`, and common explicit extensions includin
 
 ## Native first
 
-On selection, the app reads local container metadata with Mediabunny before changing the current editor source. It checks that media is readable, whether an audio track is present, the basic codecs and duration when available, browser playback viability, and recognition-audio decoder support. A native H.264/AAC MP4 continues directly into the existing local recognition path without conversion.
+On selection, the app reads local container metadata with Mediabunny before changing the current editor source. It checks that media is readable, whether an audio track is present, the basic codecs and duration when available, browser playback viability, and recognition-audio decoder support. Native-safe H.264/AAC media continues efficiently through Web Audio; the canonical-PCM rule above determines any recognition-only extraction.
 
 If the original video can play but Web Audio cannot decode its recognition track, Quran AutoCaption keeps that original video as the preview and export source. It lazily loads a single-thread FFmpeg-WASM runtime, first opens and decodes a one-second **audio-only** probe, then maps only the first audio stream (`-map 0:a:0 -vn`) to mono 16 kHz float PCM for the local recognition worker. `-vn` makes the no-video-decode requirement explicit: a browser-playable HEVC/H.264 video stream cannot block AAC audio extraction. The PCM has the source media timeline; it is not percentage-rebased or used to alter caption timing.
 

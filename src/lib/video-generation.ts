@@ -4,6 +4,7 @@ import { recognitionToVerseAlignments, type VerseAlignment } from "./editor/reco
 import { analyzeTranscript, canonicalSpanFromFastConformerIdentification, createPrimaryTranscript, hafsSurahs, hafsVerses } from "./recognition/core.ts";
 import { comparePassageIdentification } from "./recognition/fastconformer-identification.ts";
 import { decideFastConformerPassage } from "./recognition/passage-decision.ts";
+import { quranFallbackDebug, quranFinalIdentityDebug, quranForcedAlignmentDebug, quranRecognitionDebug } from "./recognition/passage-identification-debug.ts";
 import type { LocalRecognitionWorkerClient } from "./recognition/recognition-worker-client.ts";
 import type { DecodedAudioChannels } from "./recognition/local-audio-decode.ts";
 import type { FastConformerProgress } from "./recognition/contracts.ts";
@@ -19,7 +20,9 @@ export type VideoGenerationInput = {
   jobId: number;
   file: File;
   sourceUrl: string | null;
-  preparedAudio?: DecodedAudioChannels;
+  /** Media preparation owns decoder choice and supplies one canonical PCM. */
+  authoritativePcm: DecodedAudioChannels;
+  signal?: AbortSignal;
   worker: LocalRecognitionWorkerClient;
   onProgress: (progress: CaptionGenerationProgress) => void;
   fetcher?: typeof fetch;
@@ -27,6 +30,10 @@ export type VideoGenerationInput = {
 
 function friendlyTimingFailure(reason: string): Error {
   return new Error(`Quran timing could not be completed. ${reason} Please retry.`);
+}
+
+function assertNotAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new DOMException("Caption generation cancelled.", "AbortError");
 }
 
 async function enrichTranslations(segments: CaptionSegment[], fetcher: typeof fetch): Promise<CaptionSegment[]> {
@@ -50,8 +57,8 @@ async function enrichTranslations(segments: CaptionSegment[], fetcher: typeof fe
 
 /**
  * Runs the same local Quran identification and authoritative FastConformer
- * alignment used by the advanced editor. Compatibility normalization happens
- * before this boundary and is never repeated here.
+ * alignment used by the advanced editor. It receives one media-prepared PCM;
+ * decoder alternatives never participate in passage selection here.
  */
 export async function generateVideoCaptions(input: VideoGenerationInput): Promise<VideoGenerationResult> {
   const progress = new CaptionGenerationProgressController();
@@ -72,25 +79,21 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
   };
 
   publish(progress.start(input.jobId));
-  let decoded = input.preparedAudio;
-  if (!decoded) {
-    const { decodeAudioChannels } = await import("./recognition/local-audio-decode.ts");
-    report("preparing-media");
-    decoded = await decodeAudioChannels(input.file);
-  }
+  assertNotAborted(input.signal);
   report("analyzing-speech");
-  const workerPrepared = await input.worker.prepare(input.jobId, decoded.sampleRate, decoded.frameCount, decoded.channelBuffers);
+  const workerPrepared = await input.worker.prepare(input.jobId, input.authoritativePcm.sampleRate, input.authoritativePcm.frameCount, input.authoritativePcm.channelBuffers);
+  assertNotAborted(input.signal);
   if (!workerPrepared.speechRegions.length) throw new Error("No credible human speech was detected in this recording, so Quran captions were not timed from background audio.");
 
-  const run = {
+  const runFor = (value: typeof workerPrepared) => ({
     analysisRunId: crypto.randomUUID(),
     sourceIdentity: `${input.file.name}:${input.file.size}:${input.file.lastModified}`,
     sourceObjectUrl: input.sourceUrl,
-    sourceDurationMs: workerPrepared.durationMs,
+    sourceDurationMs: value.durationMs,
     sampleRate: 16_000,
     pcmIdentity: crypto.randomUUID(),
-  };
-  const prepared = {
+  });
+  const preparedFor = (value: typeof workerPrepared, run: ReturnType<typeof runFor>) => ({
     run,
     chunks: [],
     rawTranscript: "",
@@ -99,17 +102,23 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
     timestampValidation: { asrWordCount: 0, timestampedWordCount: 0, zeroDurationCount: 0, rangeMs: null },
     modelLoadMs: 0,
     transcriptionMs: 0,
-    durationMs: workerPrepared.durationMs,
-    audioAnalysis: workerPrepared.audioAnalysis,
-    speechRegions: workerPrepared.speechRegions,
-  };
+    durationMs: value.durationMs,
+    audioAnalysis: value.audioAnalysis,
+    speechRegions: value.speechRegions,
+  });
+  const run = runFor(workerPrepared);
+  const prepared = preparedFor(workerPrepared, run);
 
   report("identifying-passage");
   const identification = await input.worker.identify(input.jobId, reportFastConformer);
+  assertNotAborted(input.signal);
   const fastConformerSpan = canonicalSpanFromFastConformerIdentification(identification?.canonicalSpan ?? null);
   const decision = decideFastConformerPassage(identification, fastConformerSpan);
+  quranRecognitionDebug(identification, decision, { speechRegions: prepared.speechRegions, durationMs: prepared.durationMs });
   const runWhisperComparison = process.env.NODE_ENV !== "production";
-  const transcriptResult = !decision.accepted || runWhisperComparison
+  const shouldExecuteWhisper = !decision.accepted || runWhisperComparison;
+  quranFallbackDebug(decision, shouldExecuteWhisper);
+  const transcriptResult = shouldExecuteWhisper
     ? await (async () => {
         const { transcribePreparedPcm } = await import("./recognition/local-whisper.ts");
         const audio = await input.worker.copyPcm(input.jobId);
@@ -123,6 +132,18 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
   });
   const useFastConformer = decision.accepted && fastConformerSpan !== null;
   const selectedSpan = useFastConformer ? fastConformerSpan : whisperAnalysis.passage.canonicalSpan;
+  const identityAccepted = Boolean(selectedSpan && (useFastConformer || whisperAnalysis.passage.state === "confident-unique"));
+  quranFinalIdentityDebug({
+    decision: identityAccepted ? "accepted" : "abstained",
+    accepted: identityAccepted,
+    authority: useFastConformer ? "fastconformer-primary" : "whisper-fallback",
+    proposedSurah: selectedSpan ? Number(selectedSpan.firstVerseKey.split(":")[0]) : null,
+    startAyah: selectedSpan ? Number(selectedSpan.firstVerseKey.split(":")[1]) : null,
+    endAyah: selectedSpan ? Number(selectedSpan.lastVerseKey.split(":")[1]) : null,
+    reasons: [useFastConformer
+      ? decision.reason
+      : identityAccepted ? "Whisper fallback produced a confident unique Quran passage." : `Whisper fallback state was ${whisperAnalysis.passage.state}.`],
+  });
   if (selectedSpan) {
     const surah = hafsSurahs.find((item) => item.number === Number(selectedSpan.firstVerseKey.split(":")[0]));
     publish(progress.confirmIdentity(input.jobId, `Detected Surah ${surah?.name ?? selectedSpan.firstVerseKey.split(":")[0]}`));
@@ -153,13 +174,32 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
   const speechEndMs = transcriptResult.speechRegions.at(-1)?.endMs ?? transcriptResult.audioAnalysis.durationMs;
   const matches = selectedSpan.coveredVerseKeys.map((verseKey) => ({ verseKey, startMs: speechStartMs, endMs: speechEndMs }));
   report("aligning-words");
-  const aligned = await input.worker.align(
-    input.jobId,
-    hafsVerses.filter((verse) => selectedSpan.coveredVerseKeys.includes(verse.verseKey)),
-    matches,
-    run.analysisRunId,
-    reportFastConformer,
-  );
+  quranForcedAlignmentDebug("started", {
+    identityAuthority: useFastConformer ? "fastconformer-primary" : "whisper-fallback",
+    startAyah: Number(selectedSpan.firstVerseKey.split(":")[1]),
+    endAyah: Number(selectedSpan.lastVerseKey.split(":")[1]),
+  });
+  let aligned: Awaited<ReturnType<LocalRecognitionWorkerClient["align"]>>;
+  try {
+    aligned = await input.worker.align(
+      input.jobId,
+      hafsVerses.filter((verse) => selectedSpan.coveredVerseKeys.includes(verse.verseKey)),
+      matches,
+      run.analysisRunId,
+      reportFastConformer,
+    );
+  } catch (error) {
+    quranForcedAlignmentDebug("failed", { reason: error instanceof Error ? error.name : "UnknownError", resultingStartAyah: null, resultingEndAyah: null });
+    throw error;
+  }
+  const firstAlignedKey = aligned.ayahTimings[0]?.verseKey ?? null;
+  const lastAlignedKey = aligned.ayahTimings.at(-1)?.verseKey ?? null;
+  quranForcedAlignmentDebug(aligned.status === "complete" && aligned.alignmentComplete ? "succeeded" : "failed", {
+    status: aligned.status,
+    reason: aligned.reason ?? null,
+    resultingStartAyah: firstAlignedKey ? Number(firstAlignedKey.split(":")[1]) : null,
+    resultingEndAyah: lastAlignedKey ? Number(lastAlignedKey.split(":")[1]) : null,
+  });
   const analysis = analyzeTranscript(primaryTranscript, {
     audioAnalysis: transcriptResult.audioAnalysis,
     speechRegions: transcriptResult.speechRegions,

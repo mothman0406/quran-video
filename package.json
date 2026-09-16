@@ -15,6 +15,7 @@
     "timing:benchmark:real": "node --expose-gc --experimental-strip-types tools/timing-benchmark/real-run.ts",
     "timing:benchmark:merge": "node --experimental-strip-types tools/timing-benchmark/merge-real-runs.ts",
     "regression:quran": "node --experimental-strip-types tools/regression/run-quran.ts",
+    "regression:quran-id": "node --experimental-strip-types tools/regression/run-quran-id.ts",
     "analyze:netlify-server": "node scripts/analyze-netlify-server.mjs",
     "check:translation:live": "LIVE_TRANSLATION_CHECK=1 node --experimental-strip-types scripts/check-translation.ts",
     "start": "next start",

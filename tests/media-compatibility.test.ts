@@ -4,7 +4,7 @@ import test from "node:test";
 import { MAX_FULL_NORMALIZATION_BYTES, MAX_RECOGNITION_PCM_BYTES, MEDIA_COMPATIBILITY_ERRORS, MediaCompatibilityError, mediaCompatibilityErrorMessage, recognitionPcmBytes, routeMediaCompatibility, type MediaInspection } from "../src/lib/media-compatibility.ts";
 import { MEDIA_FILE_ACCEPT, mediaFileError, mediaKindForFile } from "../src/lib/editor/media.ts";
 import { FFMPEG_RUNTIME_ASSETS, ffmpegInitializationDebugFacts, mediaFailureFromFfmpegLog, resolveFfmpegRuntimeAssetUrl } from "../src/lib/recognition/local-media-compatibility.ts";
-import { mediaDebugEnabled, visibleFileExtension } from "../src/lib/recognition/media-debug.ts";
+import { mediaDebug, mediaDebugEnabled, serializeMediaDebugLine, visibleFileExtension } from "../src/lib/recognition/media-debug.ts";
 
 const editor = readFileSync("src/components/editor-client.tsx", "utf8");
 const workspace = readFileSync("src/components/editor-workspace.tsx", "utf8");
@@ -28,13 +28,12 @@ test("iPhone-style MOV selection is accepted without File System Access", () => 
 
 test("playable MOV with AAC audio routes to audio-only fallback without requiring a video decoder", () => {
   assert.equal(routeMediaCompatibility(250 * 1024 * 1024, inspection({ nativeRecognitionAudio: false, durationMs: 30_000, videoCodec: "hevc", audioCodec: "aac" })), "audio-fallback");
-  assert.match(editor, /decodeAudioChannels\(sourceFile\)/);
-  assert.match(editor, /decodeRecognitionAudioFallback\(sourceFile, abort\.signal/);
+  assert.match(editor, /prepareRecognitionAudio\(sourceFile, abort\.signal/);
   assert.match(editor, /compatibility: "audio-fallback"/);
   assert.match(fallback, /"-map", "0:a:0"/);
   assert.match(fallback, /"-vn"/);
-  assert.doesNotMatch(fallback, /decodeRecognitionAudioFallback[\s\S]*?"-c:v", "libx264"/);
-  assert.doesNotMatch(fallback, /decodeRecognitionAudioFallback[\s\S]*?"-map", "0:v:0"/);
+  assert.doesNotMatch(fallback, /extractRecognitionPcm[\s\S]*?"-c:v", "libx264"/);
+  assert.doesNotMatch(fallback, /extractRecognitionPcm[\s\S]*?"-map", "0:v:0"/);
   assert.match(fallback, /mount\("WORKERFS", \{ files: \[file\] \}/);
   assert.doesNotMatch(fallback, /file\.arrayBuffer\(\)/);
   assert.match(workspace, /Preparing audio for detection/);
@@ -58,11 +57,12 @@ test("FFmpeg runtime assets are pinned same-origin paths from every editor route
   assert.equal(resolveFfmpegRuntimeAssetUrl("core", "https://qurancaptions.com/editor"), "https://qurancaptions.com/ffmpeg/ffmpeg-core.js");
   assert.equal(resolveFfmpegRuntimeAssetUrl("wasm", "https://qurancaptions.com/editor"), "https://qurancaptions.com/ffmpeg/ffmpeg-core.wasm");
   assert.doesNotMatch(fallback, /quran-autocaption\.netlify\.app|cdn\.jsdelivr\.net|unpkg\.com|toBlobURL/);
-  assert.match(fallback, /coreURL: FFMPEG_RUNTIME_ASSETS\.core/);
-  assert.match(fallback, /wasmURL: FFMPEG_RUNTIME_ASSETS\.wasm/);
+  assert.match(fallback, /await runtime\.load\(\{ coreURL: FFMPEG_RUNTIME_ASSETS\.core, wasmURL: FFMPEG_RUNTIME_ASSETS\.wasm \}/);
   assert.doesNotMatch(fallback, /classWorkerURL:|workerURL:/);
   assert.match(fallback, /wrapperWorker: "next-webpack-bundled-classic"/);
   assert.match(fallback, /core: "self-hosted-umd"/);
+  assert.match(fallback, /await import\("@ffmpeg\/ffmpeg"\)/);
+  assert.match(fallback, /\(\{ FFmpeg \} = await import\("@ffmpeg\/ffmpeg"\)/);
 });
 
 test("FFmpeg runtime setup reports its exact safe initialization failure", () => {
@@ -147,14 +147,59 @@ test("safe media debugging is opt-in and excludes the filename", () => {
   assert.equal(mediaDebugEnabled("?debugMedia=0"), false);
   assert.equal(visibleFileExtension("Screen Recording 2026-09-11 at 10.32.15.mov"), "mov");
   assert.equal(visibleFileExtension("recitation"), null);
-  assert.match(fallback, /mediaDebug\("inspection"/);
+  assert.match(fallback, /mediaDebug\("source-inspection"/);
   assert.match(fallback, /audioStreams/);
   assert.match(fallback, /pcmDurationMs/);
   assert.doesNotMatch(fallback, /mediaDebug\([^\n]*file\.name/);
 });
 
+test("critical debug events serialize as stable copyable text without binary payloads", () => {
+  const line = serializeMediaDebugLine("recognition-preparation", {
+    path: "ffmpeg",
+    reason: "non-integral-resample",
+    nested: { z: 2, a: 1 },
+    pcm: new Float32Array(50_000).fill(0.123456789),
+  });
+  assert.match(line, /^\[Quran AutoCaption debug\] recognition-preparation \{/);
+  assert.match(line, /"nested":\{"a":1,"z":2\}/);
+  assert.match(line, /"pcm":"\[omitted typed array: 200000 bytes\]"/);
+  assert.doesNotMatch(line, /0\.123456789/);
+});
+
+test("normal non-debug execution emits no diagnostics", () => {
+  const original = console.info;
+  const lines: unknown[][] = [];
+  console.info = (...args: unknown[]) => { lines.push(args); };
+  try {
+    mediaDebug("should-not-print", { enabled: false });
+  } finally {
+    console.info = original;
+  }
+  assert.deepEqual(lines, []);
+});
+
+test("recognition preparation diagnostics contain the complete canonical PCM fingerprint", () => {
+  for (const field of ["path", "reason", "container", "audioCodec", "sourceSampleRate", "channels", "sourceDurationMs", "canonicalSampleRate", "sampleCount", "pcmDurationMs", "rms", "pcmSha256"]) {
+    assert.match(fallback, new RegExp(`${field}:`));
+  }
+  assert.doesNotMatch(fallback, /mediaDebug\([^\n]*channelBuffers/);
+});
+
+test("the explicit media debug flag remains available through a same-tab generation route", () => {
+  const debug = readFileSync("src/lib/recognition/media-debug.ts", "utf8");
+  const nextConfig = readFileSync("next.config.ts", "utf8");
+  assert.match(debug, /quran-autocaption-debug-media/);
+  assert.match(debug, /sessionStorage\.setItem\(MEDIA_DEBUG_SESSION_KEY, "1"\)/);
+  assert.match(debug, /sessionStorage\.getItem\(MEDIA_DEBUG_SESSION_KEY\) === "1"/);
+  assert.match(debug, /mediaDebugLine\("build-marker"|serializeMediaDebugLine\("build-marker"/);
+  assert.match(nextConfig, /process\.env\.COMMIT_REF/);
+  assert.match(nextConfig, /NEXT_PUBLIC_QURAN_BUILD_COMMIT/);
+});
+
 test("fallback work is local, cancellable, cleaned up, and cannot introduce a backend conversion service", () => {
   assert.match(fallback, /@ffmpeg\/ffmpeg/);
+  const nextConfig = readFileSync("next.config.ts", "utf8");
+  assert.doesNotMatch(nextConfig, /@ffmpeg\/ffmpeg|webpack\(/);
   assert.match(fallback, /AbortSignal/);
   assert.match(fallback, /unmount\(mountPoint\)/);
   assert.match(fallback, /deleteDir\(mountPoint\)/);
@@ -169,6 +214,33 @@ test("native media remains FFmpeg-free while a successful fallback initializes b
   assert.match(fallback, /if \(route !== "full-normalization"\) \{\s*return \{ file, kind: inspection\.kind, route, inspection, original: file \};\s*\}/);
   assert.match(fallback, /const runtime = await loadFfmpeg\(signal\);[\s\S]*?await probeFfmpeg\(runtime, inputName/);
   assert.equal(routeMediaCompatibility(2 * 1024 * 1024 * 1024, inspection()), "native");
+});
+
+test("all FFmpeg commands share one runtime job queue and scoped cleanup", () => {
+  assert.match(fallback, /let ffmpegJobQueue: Promise<void> = Promise\.resolve\(\)/);
+  assert.match(fallback, /async function runFfmpegJob<T>/);
+  assert.match(fallback, /ffmpegJobQueue = scheduled\.then\(\(\) => undefined, \(\) => undefined\)/);
+  assert.equal((fallback.match(/return runFfmpegJob\(signal, async \(runtime\)/g) ?? []).length, 2);
+});
+
+test("conversion diagnostics distinguish command completion from output and cleanup finalization", () => {
+  for (const event of [
+    "ffmpeg-exec-start",
+    "ffmpeg-exec-resolved",
+    "output-read-start",
+    "output-read-complete",
+    "workerfs-unmount-start",
+    "workerfs-unmount-complete",
+    "working-media-create-start",
+    "working-media-create-complete",
+    "conversion-complete",
+  ]) assert.match(fallback, new RegExp(`mediaDebug\\("${event}"`));
+});
+
+test("FFmpeg canonical PCM extraction stays in the audio-only safety envelope", () => {
+  assert.match(fallback, /const route = "audio-fallback" as const/);
+  assert.match(fallback, /recognitionPcmBytes\(inspection\.durationMs\) > MAX_RECOGNITION_PCM_BYTES/);
+  assert.doesNotMatch(fallback, /extractRecognitionPcm[\s\S]*?routeMediaCompatibility\(file\.size/);
 });
 
 test("ordinary extension-only picker files have no blanket native size limit", () => {

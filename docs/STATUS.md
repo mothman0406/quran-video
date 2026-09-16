@@ -1,5 +1,240 @@
 # Status
 
+## Current milestone: Add Quran continuity-seeded recognition
+
+Complete:
+
+- Kept the Quran-wide global lane and added a bounded same-surah continuation
+  lane after an independently strong anchor. Activation reuses the existing
+  strong-window classification, `-0.60` multi-window CTC floor, `0.08`
+  uniqueness floor, non-zero lexical coverage, valid coordinates, and the
+  existing `0.42` short-target coverage floor. Weak/ambiguous guesses cannot
+  seed local recall.
+- Projected expected Quran start/end positions from the previous canonical
+  word interval and the overlapping audio geometry. The local lane explores
+  bounded start uncertainty plus the prior end, its next word, and modest
+  forward-end variations. Eight of the unchanged 24 forward-CTC slots are
+  reserved for local candidates and sixteen for global candidates; both lanes
+  reuse the same logits and exact scorer.
+- Replaced ayah-end-only continuity with bounded interval geometry covering
+  audio/Quran overlap fit, expected start/end fit, forward extension, and a
+  flat partial-next-ayah term. Null remains available. One local miss retains
+  an anchor; two release it. Two consecutive independently strong global
+  contradictions, each materially better by the unchanged `0.05` margin,
+  re-anchor. Final hypotheses remain single-surah.
+- Extended privacy-safe diagnostics with anchor state/span, local/global
+  counts, selected candidate origin, and re-anchor/release reasons. No media,
+  VAD, model, decoder, window, CTC implementation, Whisper authority, passage
+  threshold, or caption-timing contract changed.
+- The ignored Muddaththir MP4 still has SHA-256
+  `042579aa04ded0237aac43c0fa430094d1784d5c6d0062f15b506940c63cd55a`.
+  Pinned FFmpeg-WASM in local headless Chrome produced 353,663 float samples /
+  22,104 ms with the required browser PCM SHA-256
+  `9c7b3eb1fb3929165bf9a597a0f3a3b87c8075199f95fe34d0a03409af9990b3`.
+  One top-level identification call used three existing window inference runs.
+  Its coherent path was `74:1w1-6w2` (`-0.364213`),
+  `74:4w1-8w3` (`-2.886115`), and `74:6w3-9w1` (`-1.495717`). The final
+  window's acoustic-only local winner remained the shorter `74:6w3-8w4`
+  (`-1.042350`), but bounded forward temporal coverage correctly selected the
+  partial ayah 9 boundary. The wrong global `23:100w14-101w4` candidate
+  (`-1.802227`) remained available as the escape lane.
+- The unchanged passage gate accepted 74:1-9 with best-window CTC `-0.364213`,
+  coherent mean `-1.582015`, margin `4.8539`, coverage `1.0`, three agreeing
+  windows, coherent ratio `1.0`, longest unsupported run `0`, and lexical
+  uniqueness `0.465882`. The separate canonical FastConformer alignment
+  completed all nine ayat with mean score `0.4547`, no optional basmalah, and
+  contiguous timing from ayah 1 onset at 1,117 ms through ayah 9 end at
+  22,104 ms.
+- Added deterministic coverage for reserved local capacity, reported browser
+  evidence, overlap and boundary geometry, weak-anchor refusal, noisy-window
+  retention/release, materially poor local CTC choosing null, repeated/global
+  ambiguity safety, two-window re-anchor, and discontinuous-passages remaining
+  separate.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`,
+`npm test` (442 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`,
+`npm run build`, and `git diff --check` pass. `npm run regression:quran`
+passes its production invariant probes, then exits non-zero only at the known
+optional external quran-align/EveryAyah benchmark; its failure-only generated
+report was not retained. The build retains the pre-existing VAD/ONNX dynamic
+dependency warnings and optional TikTok configuration reminder.
+
+## Current milestone: Expose browser recognition diagnostics
+
+Complete:
+
+- Replaced expandable-object `?debugMedia=1` console output with stable,
+  copyable one-line JSON under `[Quran AutoCaption debug]`. The serializer
+  sorts object keys, bounds nested data, and replaces typed arrays and array
+  buffers with byte-count markers instead of emitting PCM or model payloads.
+- Added a once-per-page `build-marker`. Netlify's non-secret build-time
+  `COMMIT_REF` is inlined as `NEXT_PUBLIC_QURAN_BUILD_COMMIT`; non-Netlify
+  builds explicitly report `local-development`.
+- The shared Quick Create and editor diagnostics now cover source inspection,
+  the selected canonical decoder and PCM fingerprint, raw VAD/window summary,
+  every FastConformer window winner, final passage evidence and all failed
+  rules, the short-vs-long CTC gate mode, FastConformer authority, explicit
+  Whisper fallback entry/authority, final identity, and forced-alignment
+  start/success/failure. Recognition, media, fallback, and timing decisions are
+  unchanged.
+- The private Muddaththir fixture retained SHA-256
+  `042579aa04ded0237aac43c0fa430094d1784d5c6d0062f15b506940c63cd55a`.
+  The existing real production-path replay again selected FFmpeg PCM, invoked
+  Quran identification once, accepted 74:1–9, and completed alignment. Evidence
+  remained best CTC `-0.349854`, coherent mean `-1.012985`, coverage `0.6296`,
+  margin `3.6864`, two agreeing windows out of three, coherent ratio `0.6667`,
+  longest unsupported run `1`, and lexical uniqueness `0.460593`. The local
+  equivalent serialized `recognition-preparation` with `path:"ffmpeg"`,
+  `reason:"non-integral-resample"`, 16 kHz / 353,663 samples / 22,104 ms,
+  RMS `0.057825835859801486`, and PCM SHA-256
+  `b1aecc84711a4ee79778f206acd8e9cb2c488e9f330f83ba4ba099c4b8d89751`;
+  `final-passage-decision` reported
+  `gateMode:"short-recording-best-window-ctc"` and no failed rules.
+- Local Git and the tracked origin branch both contained `756b052` before this
+  milestone. This checkout has no linked Netlify site metadata, so no Deploy
+  Preview commit SHA was inferred or claimed.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`,
+`npm test` (436 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, and
+`npm run build` pass. `npm run regression:quran` passes its production
+invariant probes and exits non-zero only at the known optional external
+quran-align/EveryAyah timing benchmark. The generated failure-only report was
+not retained. The build retains the pre-existing VAD/ONNX dynamic-dependency
+warnings and optional TikTok configuration reminder.
+
+## Current milestone: Scope the Quran whole-path CTC gate
+
+Complete:
+
+- Restored the stable best-window CTC requirement for every recording without
+  changing the `-0.60`/`-0.35` thresholds or any margin, coverage, agreement,
+  VAD, media-preparation, FastConformer, or timing behavior.
+- Reused the existing long-timeline definition of five or more generated
+  identification windows. Those recordings additionally retain the coherent-
+  path mean CTC gate; their multi-window paths retain the usable/coherent-
+  window ratio, unsupported-run, and repeated-language uniqueness protections.
+  Shorter recordings still require
+  valid finite evidence, same-surah structure, best-window CTC, margin,
+  VAD-qualified coverage, and multi-window agreement.
+- Added deterministic coverage for the real three-window decision shape and
+  for weak short acoustics, weak long whole-path acoustics, three-window gaps,
+  long repeated language, low coverage, small margin, insufficient agreement,
+  surah inconsistency, and non-finite evidence.
+- The ignored Muddaththir fixture still matches SHA-256
+  `042579aa04ded0237aac43c0fa430094d1784d5c6d0062f15b506940c63cd55a`.
+  A private local real-audio replay used the production FFmpeg extraction
+  command, configured Silero VAD, current FastConformer identification and
+  passage decision, and current forced alignment. Its sole top-level Quran
+  identification call accepted 74:1–9 with best-window CTC `-0.349854`,
+  coherent-path mean `-1.012985`, coverage `0.6296`, margin `3.6864`, two
+  agreeing windows, coherent ratio `0.6667`, longest unsupported run `1`, and
+  lexical uniqueness `0.460593`; forced alignment completed.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`,
+`npm test` (430 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`,
+`npm run build`, and `git diff --check` pass. `npm run regression:quran` passes
+its production invariant probes, then exits non-zero only because the optional
+quran-align/EveryAyah FastConformer artifact fetch fails; its generated report
+was not retained. The build retains the pre-existing VAD/ONNX dynamic
+dependency warnings and optional TikTok configuration reminder.
+
+## Current milestone: Restore canonical media preparation before Quran recognition
+
+Complete:
+
+- Restored the pre-recovery Quran-recognition design: one canonical media PCM
+  enters VAD, one FastConformer Quran-wide identification pass, the unchanged
+  evidence gate, Whisper fallback when needed, and canonical forced alignment.
+  Native-vs-FFmpeg Quran hypotheses, recovery-only thresholds, and arbitration
+  were removed rather than loosened.
+- Added `prepareRecognitionAudio()` as the media/recognition boundary. It
+  returns caller-owned 16 kHz mono PCM selected from native Web Audio or the
+  existing FFmpeg audio-only path using only inspected media facts and native
+  decoder availability. 44.1 kHz inputs use FFmpeg before recognition because
+  the prior native-worker fractional resample was the measured Muddaththir
+  divergence; integral native rates retain the efficient native path.
+- Preserved Mediabunny inspection, browser-playable source preservation,
+  audio-only extraction, full normalization, WorkerFS, self-hosted FFmpeg,
+  progress, cleanup, route-persistent `/create` → `/videos` jobs, and the
+  transferable-ownership fix. Worker requests still receive disposable clones
+  and never detach application-owned canonical PCM.
+- The ignored Muddaththir MP4 remains untracked (SHA-256
+  `042579aa04ded0237aac43c0fa430094d1784d5c6d0062f15b506940c63cd55a`).
+  Its previously captured media/PCM evidence is 22,104 ms, 44.1 kHz stereo
+  H.264/AAC; the selected canonical FFmpeg PCM produced accepted 74:1–9.
+  Node cannot run browser Mediabunny/FFmpeg-WASM decoding directly, so this
+  workspace validates the production boundary and retained evidence without
+  inventing a browser execution result.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`,
+`npm test` (425 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`,
+`npm run build`, and `git diff --check` pass. `npm run regression:quran`
+passes production invariant probes, then exits non-zero only because its
+optional external quran-align/EveryAyah artifact is unavailable; its generated
+report was not retained. The build retains the pre-existing VAD/ONNX dynamic
+dependency warnings and optional TikTok configuration reminder.
+
+## Current milestone: Preserve PCM ownership across recognition worker transfers
+
+Complete:
+
+- Traced both transferable PCM boundaries. The recognition client previously transferred caller-owned `channelBuffers` into its retained worker; the worker-to-main `copy-pcm` response already transfers a `slice()` clone. VAD runs inside that retained recognition worker, and video generation, recovery, and route persistence create no additional transferable media buffers.
+- Made `LocalRecognitionWorkerClient.prepare()` clone PCM at its narrow transfer boundary. Callers now retain their canonical decoded or FFmpeg-recovered PCM for native-to-recovery restoration, same-tab `/create` → `/videos` jobs, and retries, while each worker request transfers only a disposable per-channel copy.
+- Documented the ownership contract on both the recognition client and decoded-audio type. No recognition policy, recovery arbitration, VAD, FastConformer, FFmpeg asset/runtime architecture, or source-media copying changed.
+- Added regression coverage that performs real structured-clone transfers: it proves the disposable request buffer detaches while authoritative PCM stays readable, a subsequent recovery and retry can create fresh requests, and the accepted-native path issues just one preparation pass while retaining the worker.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`, `npm test` (430 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` production invariant probes pass; its optional real quran-align/EveryAyah benchmark cannot fetch its artifact in this workspace (`fetch failed`), so it exits non-zero after updating only its generated timestamp, which was restored.
+
+## Current milestone: Harden Quran passage recovery selection
+
+Complete:
+
+- Kept native and FFmpeg-recovered FastConformer attempts independent through the authoritative evidence gate. Recovery no longer overwrites a rejected native result merely by producing an accepted candidate.
+- Added conservative recovery arbitration: accepted recovery must explain at least 60% of VAD-qualified audio and materially improve coverage or coherent-window support; a disagreeing recovered surah needs a decisive coverage improvement. Otherwise the FastConformer result abstains and the original PCM is restored for Whisper fallback.
+- Strengthened global long-recording coherence with whole-path CTC fit, coherent-window support, unsupported-window-run, and repeated-phrase checks. This rejects isolated/mixed local matches rather than constructing a passage from them.
+- Added developer-only `?debugMedia=1` recognition events for primary, recovery, and final selection, including span, coverage, continuity, window counts, and selection/rejection reason. Alignment debug now preserves recovery arbitration.
+- Added synthetic safety coverage for native authority, strong recovery promotion, weak/incoherent recovery abstention, disagreement abstention, and mixed long-window abstention. The retained Al-Muddaththir 74:1–9 evidence fixture remains green (native 35.19% rejected; recovered 64.81% accepted and selected).
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`, `npm test` (428 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passes production invariant probes; its optional real timing benchmark cannot fetch the FastConformer artifact in this workspace (`fetch failed`), so the generated 20260915 timing record is retained as a benchmark limitation rather than a recognition code failure.
+
+## Current milestone: Restore native PCM Quran passage recovery
+
+Findings and retained work:
+
+- Reproduced the supplied private 22.10-second AAC recording as Surat Al-Muddaththir 74:1–9 without committing the source or derived PCM.
+- Classified the controlled full-speech-window failure as an acceptance failure: native PCM retained the correct opening retrieval/rerank candidate but its coherent path covered only 35.19% of audio. No confidence threshold was lowered; browser VAD remains a required manual retest.
+- Confirmed the pinned local FFmpeg PCM extraction restores the accepted 74:1–9 FastConformer path. Both advanced-editor and Quick Create generation now make one FFmpeg PCM retry only after native FastConformer evidence is rejected; VAD and the existing evidence gate run again unchanged.
+- Added the safe deterministic PCM-recovery fixture, identity-regression coverage, and a reusable private-PCM diagnostic tool. Historical checkpoints `a8825e8`, `1ceea5d`, and `2b743ab` already show the same native failure, so no Git last-good/first-bad commit is claimed.
+- Re-aligned the shared loader exactly to deployed commit `02b1d08`: package-root dynamic `@ffmpeg/ffmpeg` import, named `FFmpeg` constructor, Next/Webpack-bundled classic wrapper worker, self-hosted UMD single-thread core/WASM pair, and `FFmpeg.load({ coreURL: "/ffmpeg/ffmpeg-core.js", wasmURL: "/ffmpeg/ffmpeg-core.wasm" })` with neither worker override. `@ffmpeg/ffmpeg@0.12.15`, `@ffmpeg/core@0.12.10`, lockfile, and both public assets match that commit; the JS and WASM SHA-256 values are respectively `b266ab5b952555881dd6310663986994a182acb2b7ff25cf10a25f7a37ac2b21` and `9f57947a5bd530d8f00c5b3f2cb2a3492faa7e5d823315342d6a8656d0a6b7b7`.
+- The existing incompatible probe was headless system Google Chrome at `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, `Google Chrome 152.0.7977.85`; there is no bundled Chromium or Playwright/Puppeteer runner. It is a distinct headless mode from the user’s normal installed Google Chrome, which successfully initialized and executed the deployed `02b1d08` runtime. Its `invalid value type 0x1f` result is non-authoritative for this runtime and does not justify a version or architecture change. A separate headed session of that same system Chrome against the local production build reached the exact bootstrap configuration but failed at core import with a wrapper `Cannot find module` message for the relative path, before WorkerFS or PCM extraction. That local-host/emitted-wrapper discrepancy also cannot override the deployed normal-Chrome trace, so no loader/version/asset/worker change was made to satisfy it.
+- The deployed full-normalization trace reached progress 100 without `conversion-complete`. In that exact deployed source, `conversion-complete` is emitted immediately after `await runtime.exec()` and before output read, File construction, or WORKERFS cleanup; therefore the observed stall is specifically an unresolved full-normalization `FFmpeg.exec()`, not a Blob/read/cleanup/state-transition hang. It may share the command lifecycle with PCM recovery but has not been shown to occur for the distinct audio-only PCM command. Developer-only traces now distinguish exec, output read, working-media creation, and unmount stages without exposing technical details to customers.
+
+Verification: the private source at `tmp/regression-inputs/muddaththir-74-1-9.mp4` matches the supplied SHA-256 and remains untracked. Retained PCM evidence remains native 74:1–6/35.19% rejected and FFmpeg PCM 74:1–9/64.81% accepted, with thresholds and VAD unchanged. The direct browser PCM extraction and `/create`/`/editor` retest are not claimed complete: local headed Chrome fails at bootstrap as documented above, while the authoritative deployed normal-Chrome test reaches FFmpeg execution but its full-normalization command remains pending after 100%. `npm run check:ffmpeg-assets`, `npm run regression:quran-id`, `npm test` (423 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check` pass. `npm run regression:quran` passed its invariant probes but its optional real quran-align/EveryAyah timing benchmark is unavailable; the safe result record is `docs/regression/results/20260914.md`.
+
+## Previous milestone: Audit Quran passage identification
+
+Complete:
+
+- Traced the production identity path separately from forced alignment and
+  confirmed that FastConformer Quran-wide CTC is the accepted passage authority;
+  Whisper is a non-vetoing fallback.
+- Audited `a8825e8`, `2b743ab`, timing-only benchmark/end commits, and later
+  media compatibility changes. The cited failing recording is absent, so no
+  regression, candidate rank, or production root cause is claimed.
+- Added a privacy-safe development-only top-10 passage report and a separate
+  `npm run regression:quran-id` gate with fixture categories and identity
+  metrics (including false confident acceptance and abstention).
+- Documented current source findings for QuranCaption, public-only findings for
+  AyahFlow, preprocessing limits, and the exact next reproducibility experiment
+  in `docs/PASSAGE_IDENTIFICATION_AUDIT.md`.
+
+Verification: `npm test` (412 passing), `npx tsc --noEmit`,
+`npm run lint -- --quiet`, `npm run regression:quran-id`, `npm run build`, and
+`git diff --check` pass. `npm run regression:quran` passes invariant probes but
+its optional real timing fixture cannot download a FastConformer asset in this
+workspace (`fetch failed`); this is unrelated to the identity-only audit and
+does not replace the retained 20260913 benchmark record.
+
 ## Current milestone: Add quick create and video generation flow
 
 Complete:

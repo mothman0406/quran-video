@@ -1,4 +1,5 @@
 import type { CtcFrameLogits } from "./ctc-forced-alignment.ts";
+import { FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS } from "./passage-decision.ts";
 import { normalizeTilawaArabic } from "./tilawa-lexical.ts";
 
 export const FASTCONFORMER_IDENTIFICATION_DEFAULTS = {
@@ -7,8 +8,24 @@ export const FASTCONFORMER_IDENTIFICATION_DEFAULTS = {
   minimumVoicedMs: 1_200,
   coarseCandidateLimit: 48,
   rerankCandidateLimit: 24,
+  globalRerankCandidateLimitWithAnchor: 16,
+  localContinuationCandidateLimit: 24,
+  localRerankReservation: 8,
   minimumCandidateWords: 2,
 } as const;
+
+/** Existing production evidence concepts reused to decide whether Quran
+ * coordinates are trustworthy enough to seed (but never force) local recall. */
+export const FASTCONFORMER_CONTINUATION_ANCHOR_DEFAULTS = {
+  minimumNormalizedCtcScore: FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumNormalizedCtcScore,
+  minimumLexicalUniqueness: FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.minimumLexicalUniqueness,
+  minimumTargetCoverage: 0.42,
+  minimumCandidateConfidence: 0.25,
+  materiallyStrongerGlobalMargin: FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumMargin,
+  contradictoryWindowsToReanchor: 2,
+} as const;
+
+export type QuranCandidateOrigin = "global" | "local";
 
 export type QuranIdentificationWord = {
   surah: number;
@@ -63,6 +80,8 @@ export type QuranPassageCandidate = {
   confidence: number;
   marginFromSecond: number | null;
   ctcTokenCount: number;
+  /** Recall lane(s) which supplied this exact canonical interval. */
+  origins?: readonly QuranCandidateOrigin[];
   optionalPrelude: {
     available: boolean;
     selected: "present" | "absent";
@@ -96,6 +115,25 @@ export type IdentificationWindowResult = {
   performance: { retrievalMs: number; rerankingMs: number; candidatesReranked: number };
   /** Candidate expansions rejected because they would join two surahs. */
   crossSurahCandidatesRejected: number;
+  continuation: {
+    anchorActive: boolean;
+    anchorSpan: { start: QuranPassageCandidate["start"]; end: QuranPassageCandidate["end"] } | null;
+    globalCandidateCount: number;
+    localCandidateCount: number;
+    selectedOrigin: QuranCandidateOrigin | "global+local" | null;
+    event: "none" | "anchor-activated" | "anchor-advanced" | "local-miss" | "re-anchored" | "anchor-released";
+    reason: string | null;
+  };
+};
+
+export type QuranContinuationState = {
+  /** Original independently strong evidence which authorized the lane. */
+  strongAnchor: QuranPassageCandidate;
+  /** Most recent plausible same-surah position used for temporal projection. */
+  position: QuranPassageCandidate;
+  positionWindow: Pick<IdentificationWindowResult, "index" | "startMs" | "endMs" | "voicedMs">;
+  contradictoryGlobalWindows: number;
+  localFailureWindows: number;
 };
 
 export type QuranContinuitySolution = {
@@ -344,6 +382,7 @@ function retrieveQuranCandidatesWithDiagnostics(index: QuranWideLexicalIndex, de
         const end = Math.max(start, Math.min(bounds.end, requestedEnd));
         const candidate = candidateFromPositions(index, start, end, score / Math.max(1, locationEvidence.length));
         if (!candidate) continue;
+        candidate.origins = ["global"];
         const lexicalEvidence = lexicalEvidenceForCandidate(index, candidate, locationEvidence);
         candidate.retrievalScore = lexicalEvidence.score;
         candidate.lexicalUniqueness = lexicalEvidence.uniqueness;
@@ -365,6 +404,91 @@ function retrieveQuranCandidatesWithDiagnostics(index: QuranWideLexicalIndex, de
  * cross-ayah and mid-ayah ranges, then leaves acoustic discrimination to CTC. */
 export function retrieveQuranCandidates(index: QuranWideLexicalIndex, decodedTokens: readonly string[], limit = FASTCONFORMER_IDENTIFICATION_DEFAULTS.coarseCandidateLimit): QuranPassageCandidate[] {
   return retrieveQuranCandidatesWithDiagnostics(index, decodedTokens, limit).candidates;
+}
+
+function candidateKey(candidate: Pick<QuranPassageCandidate, "startPosition" | "endPosition">) {
+  return `${candidate.startPosition}:${candidate.endPosition}`;
+}
+
+function boundedPosition(value: number, bounds: { start: number; end: number }) {
+  return Math.max(bounds.start, Math.min(bounds.end, Math.round(value)));
+}
+
+/** Projects the last plausible same-surah interval through overlapping audio.
+ * Boundary-first variants deliberately include the previous end and its next
+ * word, because a clipped final window may contain only a partial new ayah. */
+export function generateLocalContinuationCandidates(
+  index: QuranWideLexicalIndex,
+  decodedTokens: readonly string[],
+  anchor: QuranContinuationState,
+  currentWindow: Pick<IdentificationWindowInput, "startMs" | "endMs">,
+  limit = FASTCONFORMER_IDENTIFICATION_DEFAULTS.localContinuationCandidateLimit,
+): QuranPassageCandidate[] {
+  const previous = anchor.position;
+  const bounds = surahBounds(index, previous.startPosition);
+  if (!bounds || previous.start.surah !== previous.end.surah) return [];
+  const previousDuration = Math.max(1, anchor.positionWindow.endMs - anchor.positionWindow.startMs);
+  const previousLength = previous.endPosition - previous.startPosition + 1;
+  const wordsPerMs = previousLength / previousDuration;
+  const startAdvance = Math.max(0, currentWindow.startMs - anchor.positionWindow.startMs) * wordsPerMs;
+  const newTailMs = Math.max(0, currentWindow.endMs - anchor.positionWindow.endMs);
+  const expectedStart = previous.startPosition + startAdvance;
+  const expectedEnd = previous.endPosition + newTailMs * wordsPerMs;
+  const startUncertainty = Math.max(1, Math.round(previousLength * 0.18));
+  const tailAdvance = Math.max(1, Math.round(newTailMs * wordsPerMs));
+  const startOffsets = [0, -1, 1, -startUncertainty, startUncertainty];
+  const endAdvances = [0, 1, Math.round(tailAdvance / 2), tailAdvance, Math.max(0, tailAdvance - startUncertainty), tailAdvance + startUncertainty];
+  const candidates = new Map<string, QuranPassageCandidate>();
+  for (const startOffset of startOffsets) {
+    const start = boundedPosition(expectedStart + startOffset, bounds);
+    for (const endAdvance of endAdvances) {
+      const end = boundedPosition(previous.endPosition + endAdvance, bounds);
+      if (end < start || end - start + 1 < FASTCONFORMER_IDENTIFICATION_DEFAULTS.minimumCandidateWords) continue;
+      const candidate = candidateFromPositions(index, start, end, 0);
+      if (!candidate) continue;
+      const lexicalEvidence = lexicalEvidenceForCandidate(index, candidate, decodedTokens);
+      candidate.retrievalScore = lexicalEvidence.score;
+      candidate.lexicalUniqueness = lexicalEvidence.uniqueness;
+      candidate.lexicalCoverage = lexicalEvidence.coverage;
+      candidate.origins = ["local"];
+      const temporalDistance = Math.abs(start - expectedStart) + Math.abs(end - expectedEnd) * 0.35;
+      // Retain temporal fit as a deterministic diagnostic/tie-breaker. The
+      // boundary-first iteration reserves the clipped-boundary variants, and
+      // CTC remains the authority after global/local capacity is merged.
+      candidate.retrievalScore = Number((candidate.retrievalScore + 1 / (1 + temporalDistance)).toFixed(6));
+      const key = candidateKey(candidate);
+      if (!candidates.has(key)) candidates.set(key, candidate);
+    }
+  }
+  return [...candidates.values()].slice(0, limit);
+}
+
+export function reserveQuranCandidateLaneCapacity(global: readonly QuranPassageCandidate[], local: readonly QuranPassageCandidate[]) {
+  const reservedLocal = local.slice(0, FASTCONFORMER_IDENTIFICATION_DEFAULTS.localRerankReservation);
+  const reservedGlobal = global.slice(0, FASTCONFORMER_IDENTIFICATION_DEFAULTS.globalRerankCandidateLimitWithAnchor);
+  const merged = new Map<string, QuranPassageCandidate>();
+  for (const candidate of [...reservedLocal, ...reservedGlobal]) {
+    const key = candidateKey(candidate);
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, candidate);
+      continue;
+    }
+    merged.set(key, {
+      ...existing,
+      retrievalScore: Math.max(existing.retrievalScore, candidate.retrievalScore),
+      lexicalUniqueness: Math.max(existing.lexicalUniqueness, candidate.lexicalUniqueness),
+      lexicalCoverage: Math.max(existing.lexicalCoverage, candidate.lexicalCoverage),
+      origins: [...new Set([...(existing.origins ?? []), ...(candidate.origins ?? [])])],
+    });
+  }
+  // Dedupe may free capacity; fill it from the remaining global lane without
+  // exceeding the unchanged 24-candidate CTC budget.
+  for (const candidate of global.slice(FASTCONFORMER_IDENTIFICATION_DEFAULTS.globalRerankCandidateLimitWithAnchor)) {
+    if (merged.size >= FASTCONFORMER_IDENTIFICATION_DEFAULTS.rerankCandidateLimit) break;
+    if (!merged.has(candidateKey(candidate))) merged.set(candidateKey(candidate), candidate);
+  }
+  return [...merged.values()];
 }
 
 function logAdd(left: number, right: number) {
@@ -478,15 +602,22 @@ function greedyTokenCapacity(logits: CtcFrameLogits, blankTokenId: number) {
   return count;
 }
 
-export function identifyQuranWindow(index: QuranWideLexicalIndex, input: IdentificationWindowInput): IdentificationWindowResult {
+function candidateOrigin(candidate: QuranPassageCandidate | null): IdentificationWindowResult["continuation"]["selectedOrigin"] {
+  if (!candidate?.origins?.length) return null;
+  return candidate.origins.length > 1 ? "global+local" : candidate.origins[0]!;
+}
+
+export function identifyQuranWindow(index: QuranWideLexicalIndex, input: IdentificationWindowInput, continuation: QuranContinuationState | null = null): IdentificationWindowResult {
   const startedAt = performance.now();
   const greedy = greedyDecodeCtc(input.logits, input.vocabulary, input.blankTokenId);
   const retrievalStartedAt = performance.now();
   const retrieval = retrieveQuranCandidatesWithDiagnostics(index, greedy.lexicalTokens, FASTCONFORMER_IDENTIFICATION_DEFAULTS.coarseCandidateLimit);
   const coarse = retrieval.candidates;
+  const local = continuation ? generateLocalContinuationCandidates(index, greedy.lexicalTokens, continuation, input) : [];
   const retrievalMs = Math.round(performance.now() - retrievalStartedAt);
   const rerankStartedAt = performance.now();
-  const candidates = rerankQuranCandidates(index, coarse, input.logits, input.blankTokenId);
+  const rerankInput = continuation ? reserveQuranCandidateLaneCapacity(coarse, local) : coarse;
+  const candidates = rerankQuranCandidates(index, rerankInput, input.logits, input.blankTokenId);
   const rerankingMs = Math.round(performance.now() - rerankStartedAt);
   const best = candidates[0] ?? null;
   const margin = best?.marginFromSecond ?? null;
@@ -494,7 +625,101 @@ export function identifyQuranWindow(index: QuranWideLexicalIndex, input: Identif
     : margin !== null && margin < 0.015 ? "ambiguous"
       : best.confidence < 0.25 ? "weak-candidate"
         : "strong-candidate";
-  return { index: input.index, startMs: input.startMs, endMs: input.endMs, voicedMs: input.voicedMs, greedy, candidates, selectedCandidate: best, state, elapsedMs: Math.round(performance.now() - startedAt), performance: { retrievalMs, rerankingMs, candidatesReranked: Math.min(coarse.length, FASTCONFORMER_IDENTIFICATION_DEFAULTS.rerankCandidateLimit) }, crossSurahCandidatesRejected: retrieval.crossSurahCandidatesRejected };
+  return {
+    index: input.index, startMs: input.startMs, endMs: input.endMs, voicedMs: input.voicedMs, greedy, candidates, selectedCandidate: best, state,
+    elapsedMs: Math.round(performance.now() - startedAt),
+    performance: { retrievalMs, rerankingMs, candidatesReranked: Math.min(rerankInput.length, FASTCONFORMER_IDENTIFICATION_DEFAULTS.rerankCandidateLimit) },
+    crossSurahCandidatesRejected: retrieval.crossSurahCandidatesRejected,
+    continuation: {
+      anchorActive: continuation !== null,
+      anchorSpan: continuation ? { start: continuation.position.start, end: continuation.position.end } : null,
+      globalCandidateCount: coarse.length,
+      localCandidateCount: local.length,
+      selectedOrigin: candidateOrigin(best),
+      event: "none",
+      reason: null,
+    },
+  };
+}
+
+/** A lane may begin only from independently useful Quran-wide evidence. The
+ * acoustic, target-coverage, and uniqueness floors are existing production
+ * safety concepts; `strong-candidate` retains the existing per-window margin
+ * and confidence checks. */
+export function isStrongContinuationAnchor(window: IdentificationWindowResult, candidate = window.selectedCandidate): candidate is QuranPassageCandidate {
+  return Boolean(candidate
+    && window.state === "strong-candidate"
+    && candidate.start.surah === candidate.end.surah
+    && Number.isInteger(candidate.start.globalWordIndex)
+    && Number.isInteger(candidate.end.globalWordIndex)
+    && candidate.normalizedCtcScore !== null
+    && candidate.normalizedCtcScore >= FASTCONFORMER_CONTINUATION_ANCHOR_DEFAULTS.minimumNormalizedCtcScore
+    && candidate.confidence >= FASTCONFORMER_CONTINUATION_ANCHOR_DEFAULTS.minimumCandidateConfidence
+    && candidate.lexicalCoverage > 0
+    && candidate.lexicalUniqueness >= FASTCONFORMER_CONTINUATION_ANCHOR_DEFAULTS.minimumLexicalUniqueness
+    && candidate.targetCoverage >= FASTCONFORMER_CONTINUATION_ANCHOR_DEFAULTS.minimumTargetCoverage);
+}
+
+function bestFromOrigin(window: IdentificationWindowResult, origin: QuranCandidateOrigin) {
+  return window.candidates.find((candidate) => candidate.origins?.includes(origin)) ?? null;
+}
+
+function meaningfulCandidate(candidate: QuranPassageCandidate | null) {
+  return Boolean(candidate
+    && candidate.normalizedCtcScore !== null
+    && Number.isFinite(candidate.normalizedCtcScore)
+    && candidate.confidence >= FASTCONFORMER_CONTINUATION_ANCHOR_DEFAULTS.minimumCandidateConfidence
+    && candidate.targetCoverage >= FASTCONFORMER_CONTINUATION_ANCHOR_DEFAULTS.minimumTargetCoverage);
+}
+
+/** Advances or releases the recall lane without changing path authority. Two
+ * consecutive materially stronger independent global windows are required to
+ * re-anchor; two local misses release the lane so discontinuous audio is not
+ * extrapolated. */
+export function advanceQuranContinuationState(state: QuranContinuationState | null, window: IdentificationWindowResult): QuranContinuationState | null {
+  if (!state) {
+    if (!isStrongContinuationAnchor(window)) return null;
+    const anchor = window.selectedCandidate!;
+    window.continuation.anchorActive = true;
+    window.continuation.anchorSpan = { start: anchor.start, end: anchor.end };
+    window.continuation.event = "anchor-activated";
+    window.continuation.reason = "Independent Quran-wide evidence passed the acoustic, lexical, uniqueness, target-coverage, and window-strength anchor rule.";
+    return { strongAnchor: anchor, position: anchor, positionWindow: window, contradictoryGlobalWindows: 0, localFailureWindows: 0 };
+  }
+  const bestLocal = bestFromOrigin(window, "local");
+  const bestGlobal = bestFromOrigin(window, "global");
+  const localSameSurah = bestLocal?.start.surah === state.position.start.surah && bestLocal.end.surah === state.position.end.surah ? bestLocal : null;
+  const globalContradiction = bestGlobal && bestGlobal.start.surah !== state.position.start.surah && isStrongContinuationAnchor(window, bestGlobal)
+    && (!meaningfulCandidate(localSameSurah) || bestGlobal.normalizedCtcScore! - localSameSurah!.normalizedCtcScore! >= FASTCONFORMER_CONTINUATION_ANCHOR_DEFAULTS.materiallyStrongerGlobalMargin);
+  const contradictoryGlobalWindows = globalContradiction ? state.contradictoryGlobalWindows + 1 : 0;
+  if (globalContradiction && contradictoryGlobalWindows >= FASTCONFORMER_CONTINUATION_ANCHOR_DEFAULTS.contradictoryWindowsToReanchor) {
+    window.continuation.anchorActive = true;
+    window.continuation.anchorSpan = { start: bestGlobal.start, end: bestGlobal.end };
+    window.continuation.event = "re-anchored";
+    window.continuation.reason = "Two consecutive independently strong, materially better global windows contradicted the active surah.";
+    return { strongAnchor: bestGlobal, position: bestGlobal, positionWindow: window, contradictoryGlobalWindows: 0, localFailureWindows: 0 };
+  }
+  const sameSurah = [localSameSurah, bestGlobal?.start.surah === state.position.start.surah ? bestGlobal : null]
+    .filter((candidate): candidate is QuranPassageCandidate => meaningfulCandidate(candidate))
+    .sort((left, right) => right.normalizedCtcScore! - left.normalizedCtcScore!)[0] ?? null;
+  if (sameSurah) {
+    window.continuation.anchorActive = true;
+    window.continuation.anchorSpan = { start: sameSurah.start, end: sameSurah.end };
+    window.continuation.event = "anchor-advanced";
+    window.continuation.reason = "A structurally valid same-surah candidate with meaningful CTC and target coverage advanced the temporal position.";
+    return { ...state, position: sameSurah, positionWindow: window, contradictoryGlobalWindows, localFailureWindows: 0 };
+  }
+  const localFailureWindows = state.localFailureWindows + 1;
+  window.continuation.event = localFailureWindows >= 2 ? "anchor-released" : "local-miss";
+  window.continuation.reason = localFailureWindows >= 2
+    ? "Two consecutive windows lacked a meaningful same-surah continuation; local recall was released while global search remained available."
+    : "This window lacked a meaningful same-surah continuation; the prior anchor is retained across one noisy window.";
+  if (localFailureWindows >= 2) {
+    window.continuation.anchorActive = false;
+    window.continuation.anchorSpan = null;
+    return null;
+  }
+  return { ...state, contradictoryGlobalWindows, localFailureWindows };
 }
 
 function localScore(candidate: QuranPassageCandidate | null, windowIndex: number, windowCount: number) {
@@ -508,17 +733,36 @@ function localScore(candidate: QuranPassageCandidate | null, windowIndex: number
   return (candidate.normalizedCtcScore ?? -20) + lexical - shortTargetPenalty;
 }
 
-function transitionScore(previous: QuranPassageCandidate | null, current: QuranPassageCandidate | null, previousWindow: IdentificationWindowResult, currentWindow: IdentificationWindowResult) {
+export function transitionScore(previous: QuranPassageCandidate | null, current: QuranPassageCandidate | null, previousWindow: IdentificationWindowResult, currentWindow: IdentificationWindowResult) {
   if (!previous || !current) return current ? -0.5 : 0;
-  const elapsedRatio = Math.max(0, currentWindow.startMs - previousWindow.startMs) / Math.max(1, previousWindow.endMs - previousWindow.startMs);
+  if (current.start.surah !== previous.end.surah) return -14;
+  const previousDuration = Math.max(1, previousWindow.endMs - previousWindow.startMs);
+  const elapsedRatio = Math.max(0, currentWindow.startMs - previousWindow.startMs) / previousDuration;
   const previousLength = previous.endPosition - previous.startPosition + 1;
   const expectedStart = previous.startPosition + previousLength * elapsedRatio;
+  const expectedEnd = previous.endPosition + previousLength * Math.max(0, currentWindow.endMs - previousWindow.endMs) / previousDuration;
   const movement = current.startPosition - previous.startPosition;
   if (movement < -2) return -12 - Math.min(8, Math.abs(movement) * 0.04);
-  if (current.start.surah !== previous.end.surah && current.startPosition - previous.endPosition > 2) return -14;
-  const distancePenalty = Math.min(8, Math.abs(current.startPosition - expectedStart) * 0.055);
-  const sameOrAdjacentAyah = current.start.ayah === previous.end.ayah || (current.start.surah === previous.end.surah && current.start.ayah === previous.end.ayah + 1);
-  return (sameOrAdjacentAyah ? 0.65 : 0) - distancePenalty;
+  const startDistance = Math.abs(current.startPosition - expectedStart);
+  const endDistance = Math.abs(current.endPosition - expectedEnd);
+  const distancePenalty = Math.min(8, startDistance * 0.055 + endDistance * 0.025);
+  const audioOverlap = Math.max(0, Math.min(previousWindow.endMs, currentWindow.endMs) - Math.max(previousWindow.startMs, currentWindow.startMs));
+  const audioOverlapRatio = audioOverlap / previousDuration;
+  const intersection = Math.max(0, Math.min(previous.endPosition, current.endPosition) - Math.max(previous.startPosition, current.startPosition) + 1);
+  const quranOverlapRatio = intersection / Math.max(1, previousLength);
+  const overlapFit = Math.max(0, 1 - Math.abs(quranOverlapRatio - audioOverlapRatio));
+  const startFit = Math.max(0, 1 - startDistance / Math.max(1, previousLength * 0.5));
+  const endFit = Math.max(0, 1 - endDistance / Math.max(1, previousLength * 0.5));
+  const forwardExtension = current.endPosition > previous.endPosition && current.startPosition >= previous.startPosition - 2 ? 1 : 0;
+  const entersNextAyah = current.end.ayah > previous.end.ayah && forwardExtension ? 1 : 0;
+  // A voiced window which extends in time should distinguish acoustic support
+  // for the clipped beginning of the next ayah from a candidate which only
+  // completes/replays the overlap. Once that boundary is crossed, this term is
+  // flat: it does not reward an arbitrarily long target.
+  const geometry = 0.15 * overlapFit + 0.15 * startFit + 0.10 * endFit + 0.20 * forwardExtension + 0.40 * entersNextAyah;
+  const acousticallyUsable = meaningfulCandidate(current);
+  const boundedContinuityBonus = acousticallyUsable ? Math.min(0.90, 0.90 * geometry) : 0;
+  return boundedContinuityBonus - distancePenalty;
 }
 
 /** Global deterministic Viterbi chain. An explicit null state lets one bad
