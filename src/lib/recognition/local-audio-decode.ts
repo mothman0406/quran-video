@@ -7,12 +7,30 @@ export type DecodedAudioChannels = {
 
 export const RECOGNITION_SAMPLE_RATE = 16_000;
 
+function assertUsableDecodedAudio(decoded: DecodedAudioChannels): void {
+  if (!Number.isFinite(decoded.sampleRate) || decoded.sampleRate <= 0
+    || !Number.isSafeInteger(decoded.frameCount) || decoded.frameCount <= 0
+    || decoded.channelBuffers.length === 0) {
+    throw new Error("Decoded audio metadata is unusable.");
+  }
+  for (const buffer of decoded.channelBuffers) {
+    if (buffer.byteLength !== decoded.frameCount * Float32Array.BYTES_PER_ELEMENT) {
+      throw new Error("Decoded audio channel length is unusable.");
+    }
+    const channel = new Float32Array(buffer);
+    for (const sample of channel) {
+      if (!Number.isFinite(sample)) throw new Error("Decoded audio contains a non-finite sample.");
+    }
+  }
+}
+
 /**
  * Completes native media preparation outside the Quran worker. The output is
  * always one 16 kHz mono caller-owned channel, matching FFmpeg's f32le
  * extraction contract.
  */
 export function canonicalizeNativeRecognitionPcm(decoded: DecodedAudioChannels): DecodedAudioChannels {
+  assertUsableDecodedAudio(decoded);
   const channels = decoded.channelBuffers.map((buffer) => new Float32Array(buffer));
   const frameCount = Math.ceil(decoded.frameCount * RECOGNITION_SAMPLE_RATE / decoded.sampleRate);
   const mono = new Float32Array(frameCount);

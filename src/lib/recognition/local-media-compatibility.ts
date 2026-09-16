@@ -20,7 +20,7 @@ type PreparedEditorMedia = {
 export type PreparedRecognitionAudio = {
   pcm: DecodedAudioChannels;
   decodePath: "native" | "ffmpeg";
-  reason: "native-safe" | "non-integral-resample" | "native-decode-unavailable" | "media-audio-fallback";
+  reason: "native-safe" | "native-decode-unavailable" | "native-pcm-unusable" | "media-audio-fallback";
   inspection: MediaInspection;
 };
 
@@ -137,21 +137,20 @@ export async function inspectLocalMedia(file: File): Promise<MediaInspection> {
   return inspection;
 }
 
-/**
- * The recognition worker's native preparation uses linear resampling.  44.1
- * kHz sources therefore need a fractional 16 kHz conversion, unlike the
- * common 32/48 kHz paths.  For this known media boundary, FFmpeg owns the
- * canonical downmix/resample before Quran inference begins.  This is a media
- * decision, never a result of Quran evidence.
- */
-export function requiresFfmpegCanonicalPcm(inspection: MediaInspection): boolean {
-  const sampleRate = inspection.audioSampleRate;
-  return Boolean(sampleRate && Number.isFinite(sampleRate) && sampleRate % 16_000 !== 0);
+export function selectRecognitionAudioPath(inspection: MediaInspection): Pick<PreparedRecognitionAudio, "decodePath" | "reason"> {
+  return inspection.nativeRecognitionAudio
+    ? { decodePath: "native", reason: "native-safe" }
+    : { decodePath: "ffmpeg", reason: "media-audio-fallback" };
 }
 
-function recognitionPreparationReason(inspection: MediaInspection): PreparedRecognitionAudio["reason"] {
-  if (!inspection.nativeRecognitionAudio) return "media-audio-fallback";
-  return requiresFfmpegCanonicalPcm(inspection) ? "non-integral-resample" : "native-safe";
+export function isUsableCanonicalRecognitionPcm(pcm: DecodedAudioChannels): boolean {
+  if (pcm.sampleRate !== 16_000 || !Number.isSafeInteger(pcm.frameCount) || pcm.frameCount <= 0 || pcm.channelBuffers.length !== 1) return false;
+  const buffer = pcm.channelBuffers[0]!;
+  if (buffer.byteLength !== pcm.frameCount * Float32Array.BYTES_PER_ELEMENT) return false;
+  for (const sample of new Float32Array(buffer)) {
+    if (!Number.isFinite(sample)) return false;
+  }
+  return true;
 }
 
 function runtimeFailure(code: "ffmpeg-wrapper-import-failed" | "ffmpeg-worker-create-failed" | "ffmpeg-core-load-failed" | "ffmpeg-wasm-load-failed" | "ffmpeg-initialize-failed") {
@@ -500,8 +499,8 @@ async function reportRecognitionPreparation(
 
 /**
  * Extracts one independent recognition representation from the exact File the
- * user selected. Media compatibility and native-PCM recovery share this sole
- * FFmpeg path and its UMD runtime lifecycle.
+ * user selected. Every recognition-audio compatibility fallback shares this
+ * sole FFmpeg path and its UMD runtime lifecycle.
  */
 export async function extractRecognitionPcm(file: File, signal?: AbortSignal, onPreparation?: (event: LocalMediaPreparationEvent) => void): Promise<DecodedAudioChannels> {
   const inspection = await inspectLocalMedia(file);
@@ -548,7 +547,9 @@ export async function extractRecognitionPcm(file: File, signal?: AbortSignal, on
       const frameCount = copy.byteLength / Float32Array.BYTES_PER_ELEMENT;
       mediaDebug("pcm", { audioDecode: true, pcmDurationMs: Math.round(frameCount / 16), errorCode: null });
       mediaDebug("conversion-complete", { route });
-      return { sampleRate: 16_000, frameCount, channelBuffers: [copy.buffer] };
+      const pcm = { sampleRate: 16_000, frameCount, channelBuffers: [copy.buffer] };
+      if (!isUsableCanonicalRecognitionPcm(pcm)) throw new MediaCompatibilityError("pcmExtractionFailed");
+      return pcm;
     } catch (error) {
       if (error instanceof MediaCompatibilityError || isAbort(error)) {
         if (error instanceof MediaCompatibilityError) mediaDebug("failure", { audioDecode: false, errorCode: error.code });
@@ -582,23 +583,32 @@ export async function prepareRecognitionAudio(
 ): Promise<PreparedRecognitionAudio> {
   const inspection = await inspectLocalMedia(file);
   assertNotAborted(signal);
-  const initialReason = recognitionPreparationReason(inspection);
-  const useFfmpeg = initialReason !== "native-safe";
-  if (useFfmpeg) {
+  const selection = selectRecognitionAudioPath(inspection);
+  if (selection.decodePath === "ffmpeg") {
     const pcm = await extractRecognitionPcm(file, signal, onPreparation);
-    await reportRecognitionPreparation(file, inspection, "ffmpeg", initialReason, pcm);
-    return { pcm, decodePath: "ffmpeg", reason: initialReason, inspection };
+    await reportRecognitionPreparation(file, inspection, "ffmpeg", selection.reason, pcm);
+    return { pcm, decodePath: "ffmpeg", reason: selection.reason, inspection };
   }
+  const { canonicalizeNativeRecognitionPcm, decodeAudioChannels } = await import("./local-audio-decode.ts");
+  let decoded: DecodedAudioChannels;
   try {
-    const { canonicalizeNativeRecognitionPcm, decodeAudioChannels } = await import("./local-audio-decode.ts");
-    const pcm = canonicalizeNativeRecognitionPcm(await decodeAudioChannels(file));
-    await reportRecognitionPreparation(file, inspection, "native", "native-safe", pcm);
-    return { pcm, decodePath: "native", reason: "native-safe", inspection };
+    decoded = await decodeAudioChannels(file);
   } catch {
     assertNotAborted(signal);
     const pcm = await extractRecognitionPcm(file, signal, onPreparation);
     await reportRecognitionPreparation(file, inspection, "ffmpeg", "native-decode-unavailable", pcm);
     return { pcm, decodePath: "ffmpeg", reason: "native-decode-unavailable", inspection };
+  }
+  try {
+    const pcm = canonicalizeNativeRecognitionPcm(decoded);
+    if (!isUsableCanonicalRecognitionPcm(pcm)) throw new Error("Native canonical PCM is unusable.");
+    await reportRecognitionPreparation(file, inspection, "native", "native-safe", pcm);
+    return { pcm, decodePath: "native", reason: "native-safe", inspection };
+  } catch {
+    assertNotAborted(signal);
+    const pcm = await extractRecognitionPcm(file, signal, onPreparation);
+    await reportRecognitionPreparation(file, inspection, "ffmpeg", "native-pcm-unusable", pcm);
+    return { pcm, decodePath: "ffmpeg", reason: "native-pcm-unusable", inspection };
   }
 }
 

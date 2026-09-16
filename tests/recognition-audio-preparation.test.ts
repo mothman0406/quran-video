@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { canonicalizeNativeRecognitionPcm } from "../src/lib/recognition/local-audio-decode.ts";
-import { requiresFfmpegCanonicalPcm } from "../src/lib/recognition/local-media-compatibility.ts";
+import { isUsableCanonicalRecognitionPcm, selectRecognitionAudioPath } from "../src/lib/recognition/local-media-compatibility.ts";
 import type { MediaInspection } from "../src/lib/media-compatibility.ts";
 
 function inspection(overrides: Partial<MediaInspection> = {}): MediaInspection {
@@ -23,15 +23,22 @@ test("media preparation selects one canonical PCM before Quran recognition", () 
   const compatibility = readFileSync("src/lib/recognition/local-media-compatibility.ts", "utf8");
   assert.match(compatibility, /export async function prepareRecognitionAudio/);
   assert.match(compatibility, /Decoder choice is based solely on inspected media and native decoder/);
-  assert.match(compatibility, /return \{ pcm, decodePath: "ffmpeg", reason: initialReason, inspection \}/);
+  assert.match(compatibility, /return \{ pcm, decodePath: "ffmpeg", reason: selection\.reason, inspection \}/);
   assert.match(compatibility, /return \{ pcm, decodePath: "native", reason: "native-safe", inspection \}/);
   assert.doesNotMatch(compatibility, /FastConformer|canonicalSpan/);
 });
 
-test("the known non-integral native resample path uses FFmpeg before inference while integral native media stays efficient", () => {
-  assert.equal(requiresFfmpegCanonicalPcm(inspection({ audioSampleRate: 44_100, audioChannels: 2 })), true);
-  assert.equal(requiresFfmpegCanonicalPcm(inspection({ audioSampleRate: 48_000, audioChannels: 2 })), false);
-  assert.equal(requiresFfmpegCanonicalPcm(inspection({ audioSampleRate: 16_000, audioChannels: 1 })), false);
+test("sample rate alone never initializes FFmpeg for browser-decodable media", () => {
+  for (const audioSampleRate of [44_100, 22_050, 48_000, 16_000]) {
+    assert.deepEqual(selectRecognitionAudioPath(inspection({ audioSampleRate, audioChannels: 2 })), { decodePath: "native", reason: "native-safe" });
+  }
+});
+
+test("actual native decoder incompatibility selects the single FFmpeg fallback before recognition", () => {
+  assert.deepEqual(selectRecognitionAudioPath(inspection({ nativeRecognitionAudio: false, audioSampleRate: 44_100 })), { decodePath: "ffmpeg", reason: "media-audio-fallback" });
+  const compatibility = readFileSync("src/lib/recognition/local-media-compatibility.ts", "utf8");
+  assert.match(compatibility, /catch \{[\s\S]*?reason: "native-decode-unavailable"/);
+  assert.doesNotMatch(compatibility, /non-integral-resample|requiresFfmpegCanonicalPcm/);
 });
 
 test("native-safe preparation still hands the recognizer canonical 16 kHz mono PCM", () => {
@@ -42,6 +49,19 @@ test("native-safe preparation still hands the recognizer canonical 16 kHz mono P
   assert.equal(canonical.frameCount, 4);
   assert.equal(canonical.channelBuffers.length, 1);
   assert.deepEqual(Array.from(new Float32Array(canonical.channelBuffers[0]!)), [0, 0, 0, 0]);
+  assert.equal(isUsableCanonicalRecognitionPcm(canonical), true);
+});
+
+test("empty, malformed, detached, and non-finite PCM cannot enter recognition", () => {
+  assert.equal(isUsableCanonicalRecognitionPcm({ sampleRate: 16_000, frameCount: 0, channelBuffers: [new ArrayBuffer(0)] }), false);
+  assert.equal(isUsableCanonicalRecognitionPcm({ sampleRate: 48_000, frameCount: 1, channelBuffers: [new Float32Array([0]).buffer] }), false);
+  assert.equal(isUsableCanonicalRecognitionPcm({ sampleRate: 16_000, frameCount: 2, channelBuffers: [new Float32Array([0]).buffer] }), false);
+  assert.equal(isUsableCanonicalRecognitionPcm({ sampleRate: 16_000, frameCount: 1, channelBuffers: [new Float32Array([Number.NaN]).buffer] }), false);
+  assert.equal(isUsableCanonicalRecognitionPcm({ sampleRate: 16_000, frameCount: 1, channelBuffers: [new Float32Array([Number.POSITIVE_INFINITY]).buffer] }), false);
+  assert.throws(() => canonicalizeNativeRecognitionPcm({ sampleRate: 44_100, frameCount: 1, channelBuffers: [new Float32Array([Number.NaN]).buffer] }), /non-finite/);
+  const compatibility = readFileSync("src/lib/recognition/local-media-compatibility.ts", "utf8");
+  assert.match(compatibility, /"native-pcm-unusable"/);
+  assert.match(compatibility, /if \(!isUsableCanonicalRecognitionPcm\(pcm\)\) throw new MediaCompatibilityError\("pcmExtractionFailed"\)/);
 });
 
 test("editor and route-persistent generation pass one authoritative PCM into one top-level Quran identification", () => {

@@ -156,7 +156,7 @@ test("safe media debugging is opt-in and excludes the filename", () => {
 test("critical debug events serialize as stable copyable text without binary payloads", () => {
   const line = serializeMediaDebugLine("recognition-preparation", {
     path: "ffmpeg",
-    reason: "non-integral-resample",
+    reason: "native-decode-unavailable",
     nested: { z: 2, a: 1 },
     pcm: new Float32Array(50_000).fill(0.123456789),
   });
