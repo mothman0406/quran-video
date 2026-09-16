@@ -9,7 +9,7 @@ function candidate(surah = 74, ayah = 1): QuranPassageCandidate {
 }
 
 function window(index: number, value = candidate()): IdentificationWindowResult {
-  return { index, startMs: index * 6_000, endMs: index * 6_000 + 12_000, voicedMs: 8_000, greedy: { tokenIds: [], lexicalText: "", lexicalTokens: [] }, candidates: [value], selectedCandidate: value, state: "strong-candidate", elapsedMs: 0, performance: { retrievalMs: 0, rerankingMs: 0, candidatesReranked: 1 }, crossSurahCandidatesRejected: 0 };
+  return { index, startMs: index * 6_000, endMs: index * 6_000 + 12_000, voicedMs: 8_000, greedy: { tokenIds: [], lexicalText: "", lexicalTokens: [] }, candidates: [value], selectedCandidate: value, state: "strong-candidate", elapsedMs: 0, performance: { retrievalMs: 0, rerankingMs: 0, candidatesReranked: 1 }, crossSurahCandidatesRejected: 0, continuation: { anchorActive: false, anchorSpan: null, globalCandidateCount: 1, localCandidateCount: 0, selectedOrigin: null, event: "none", reason: null } };
 }
 
 function identification(overrides: Partial<FastConformerIdentificationResult> = {}): FastConformerIdentificationResult {

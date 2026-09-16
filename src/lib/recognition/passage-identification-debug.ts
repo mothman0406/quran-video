@@ -36,6 +36,7 @@ export type PassageIdentificationDebugReport = {
     normalizedModelOutput: string;
     ctcTokenSequence: readonly number[];
     state: string;
+    continuation: FastConformerIdentificationResult["windowResults"][number]["continuation"];
     candidates: Array<ReturnType<typeof candidateReport>>;
   }>;
 };
@@ -47,6 +48,7 @@ function candidateReport(candidate: QuranPassageCandidate, rank: number) {
     ayahRange: `${candidate.start.ayah}:${candidate.start.canonicalWordIndex}-${candidate.end.ayah}:${candidate.end.canonicalWordIndex}`,
     rawRetrievalScore: candidate.retrievalScore,
     rerankingScore: candidate.normalizedCtcScore,
+    origins: candidate.origins ?? [],
     ctcScore: candidate.ctcScore,
     coverage: {
       lexical: candidate.lexicalCoverage,
@@ -97,6 +99,7 @@ export function createPassageIdentificationDebugReport(
       normalizedModelOutput: window.greedy.lexicalText,
       ctcTokenSequence: window.greedy.tokenIds,
       state: window.state,
+      continuation: window.continuation,
       candidates: window.candidates.slice(0, 10).map(candidateReport),
     })),
   };
@@ -126,8 +129,8 @@ function failedAcceptanceRules(decision: FastConformerPassageDecision): string[]
   if (evidence.voicedAudioExplained < coverageMinimum) failed.push("coverage");
   if (!singleWindow && evidence.agreeingStrongWindows < 2) failed.push("window-agreement");
   if (!singleWindow && longTimeline && (evidence.coherentWindowRatio < 0.6 || evidence.longestUnexplainedWindowRun >= 3)) failed.push("coherent-window-support");
-  if (singleWindow && evidence.lexicalUniqueness < 0.08) failed.push("lexical-uniqueness");
-  if (!singleWindow && longTimeline && evidence.lexicalUniqueness < 0.08) failed.push("lexical-uniqueness");
+  if (singleWindow && evidence.lexicalUniqueness < FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.minimumLexicalUniqueness) failed.push("lexical-uniqueness");
+  if (!singleWindow && longTimeline && evidence.lexicalUniqueness < FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.minimumLexicalUniqueness) failed.push("lexical-uniqueness");
   return failed;
 }
 
@@ -203,6 +206,7 @@ export function quranRecognitionDebug(
       endMs: window.endMs,
       state: window.state,
       winningCandidate: compactCandidate(window.selectedCandidate),
+      continuation: window.continuation,
       participatesInFinalCoherentPath: coherentPath.get(window.index) != null,
     });
   }

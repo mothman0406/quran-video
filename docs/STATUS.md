@@ -1,5 +1,64 @@
 # Status
 
+## Current milestone: Add Quran continuity-seeded recognition
+
+Complete:
+
+- Kept the Quran-wide global lane and added a bounded same-surah continuation
+  lane after an independently strong anchor. Activation reuses the existing
+  strong-window classification, `-0.60` multi-window CTC floor, `0.08`
+  uniqueness floor, non-zero lexical coverage, valid coordinates, and the
+  existing `0.42` short-target coverage floor. Weak/ambiguous guesses cannot
+  seed local recall.
+- Projected expected Quran start/end positions from the previous canonical
+  word interval and the overlapping audio geometry. The local lane explores
+  bounded start uncertainty plus the prior end, its next word, and modest
+  forward-end variations. Eight of the unchanged 24 forward-CTC slots are
+  reserved for local candidates and sixteen for global candidates; both lanes
+  reuse the same logits and exact scorer.
+- Replaced ayah-end-only continuity with bounded interval geometry covering
+  audio/Quran overlap fit, expected start/end fit, forward extension, and a
+  flat partial-next-ayah term. Null remains available. One local miss retains
+  an anchor; two release it. Two consecutive independently strong global
+  contradictions, each materially better by the unchanged `0.05` margin,
+  re-anchor. Final hypotheses remain single-surah.
+- Extended privacy-safe diagnostics with anchor state/span, local/global
+  counts, selected candidate origin, and re-anchor/release reasons. No media,
+  VAD, model, decoder, window, CTC implementation, Whisper authority, passage
+  threshold, or caption-timing contract changed.
+- The ignored Muddaththir MP4 still has SHA-256
+  `042579aa04ded0237aac43c0fa430094d1784d5c6d0062f15b506940c63cd55a`.
+  Pinned FFmpeg-WASM in local headless Chrome produced 353,663 float samples /
+  22,104 ms with the required browser PCM SHA-256
+  `9c7b3eb1fb3929165bf9a597a0f3a3b87c8075199f95fe34d0a03409af9990b3`.
+  One top-level identification call used three existing window inference runs.
+  Its coherent path was `74:1w1-6w2` (`-0.364213`),
+  `74:4w1-8w3` (`-2.886115`), and `74:6w3-9w1` (`-1.495717`). The final
+  window's acoustic-only local winner remained the shorter `74:6w3-8w4`
+  (`-1.042350`), but bounded forward temporal coverage correctly selected the
+  partial ayah 9 boundary. The wrong global `23:100w14-101w4` candidate
+  (`-1.802227`) remained available as the escape lane.
+- The unchanged passage gate accepted 74:1-9 with best-window CTC `-0.364213`,
+  coherent mean `-1.582015`, margin `4.8539`, coverage `1.0`, three agreeing
+  windows, coherent ratio `1.0`, longest unsupported run `0`, and lexical
+  uniqueness `0.465882`. The separate canonical FastConformer alignment
+  completed all nine ayat with mean score `0.4547`, no optional basmalah, and
+  contiguous timing from ayah 1 onset at 1,117 ms through ayah 9 end at
+  22,104 ms.
+- Added deterministic coverage for reserved local capacity, reported browser
+  evidence, overlap and boundary geometry, weak-anchor refusal, noisy-window
+  retention/release, materially poor local CTC choosing null, repeated/global
+  ambiguity safety, two-window re-anchor, and discontinuous-passages remaining
+  separate.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`,
+`npm test` (442 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`,
+`npm run build`, and `git diff --check` pass. `npm run regression:quran`
+passes its production invariant probes, then exits non-zero only at the known
+optional external quran-align/EveryAyah benchmark; its failure-only generated
+report was not retained. The build retains the pre-existing VAD/ONNX dynamic
+dependency warnings and optional TikTok configuration reminder.
+
 ## Current milestone: Expose browser recognition diagnostics
 
 Complete:

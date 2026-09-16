@@ -12,7 +12,7 @@ function candidate(index: number): QuranPassageCandidate {
 test("developer passage report retains CTC evidence, ten candidates, and gate reason without media", () => {
   const candidates = Array.from({ length: 12 }, (_, index) => candidate(index));
   const span = { start: candidates[0]!.start, end: candidates[0]!.end };
-  const identification: FastConformerIdentificationResult = { status: "complete", span, canonicalSpan: span, wordLevelSpan: span, selectedSurah: 74, optionalPrelude: null, surahConsensus: { selectedSurah: 74, strongWindowCount: 1, agreeingStrongWindows: 1 }, windowResults: [{ index: 0, startMs: 0, endMs: 12000, voicedMs: 9000, greedy: { tokenIds: [4, 8, 15], lexicalText: "يا ايها المدثر", lexicalTokens: ["يا", "ايها", "المدثر"] }, candidates, selectedCandidate: candidates[0]!, state: "strong-candidate", elapsedMs: 1, performance: { retrievalMs: 1, rerankingMs: 1, candidatesReranked: 12 }, crossSurahCandidatesRejected: 2 }], retrievalCandidates: candidates, normalizedCtcScore: -0.2, margin: 0.2, continuityScore: 1, globalHypotheses: [], confidence: { composite: 0.8, normalizedBestCtcScore: -0.2, bestVsSecondMargin: 0.2, agreeingWindows: 1, voicedAudioExplained: 0.9 }, performance: { inferenceMs: 1, retrievalMs: 1, rerankingMs: 1, candidatesReranked: 12, totalMs: 3 }, CROSS_SURAH_CANDIDATES_REJECTED: 2 };
+  const identification: FastConformerIdentificationResult = { status: "complete", span, canonicalSpan: span, wordLevelSpan: span, selectedSurah: 74, optionalPrelude: null, surahConsensus: { selectedSurah: 74, strongWindowCount: 1, agreeingStrongWindows: 1 }, windowResults: [{ index: 0, startMs: 0, endMs: 12000, voicedMs: 9000, greedy: { tokenIds: [4, 8, 15], lexicalText: "يا ايها المدثر", lexicalTokens: ["يا", "ايها", "المدثر"] }, candidates, selectedCandidate: candidates[0]!, state: "strong-candidate", elapsedMs: 1, performance: { retrievalMs: 1, rerankingMs: 1, candidatesReranked: 12 }, crossSurahCandidatesRejected: 2, continuation: { anchorActive: false, anchorSpan: null, globalCandidateCount: 12, localCandidateCount: 0, selectedOrigin: null, event: "none", reason: null } }], retrievalCandidates: candidates, normalizedCtcScore: -0.2, margin: 0.2, continuityScore: 1, globalHypotheses: [], confidence: { composite: 0.8, normalizedBestCtcScore: -0.2, bestVsSecondMargin: 0.2, agreeingWindows: 1, voicedAudioExplained: 0.9 }, performance: { inferenceMs: 1, retrievalMs: 1, rerankingMs: 1, candidatesReranked: 12, totalMs: 3 }, CROSS_SURAH_CANDIDATES_REJECTED: 2 };
   const report = createPassageIdentificationDebugReport(identification, decideFastConformerPassage(identification, canonicalSpanFromFastConformerIdentification(span)));
   assert.equal(report.windows[0]?.candidates.length, 10);
   assert.deepEqual(report.windows[0]?.ctcTokenSequence, [4, 8, 15]);
@@ -34,6 +34,7 @@ function identificationWithWindows(windowCount: number, coherentCtc: number): Fa
     elapsedMs: 1,
     performance: { retrievalMs: 1, rerankingMs: 1, candidatesReranked: 1 },
     crossSurahCandidatesRejected: 0,
+    continuation: { anchorActive: false, anchorSpan: null, globalCandidateCount: 1, localCandidateCount: 0, selectedOrigin: null, event: "none" as const, reason: null },
   }));
   const span = { start: candidates[0]!.start, end: candidates.at(-1)!.end };
   return {

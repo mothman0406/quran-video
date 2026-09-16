@@ -10,7 +10,7 @@ import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { canonicalCtcWords } from "../../src/lib/recognition/ctc-forced-alignment.ts";
 import { hafsVerses } from "../../src/lib/recognition/core.ts";
-import { buildQuranWideLexicalIndex, identifyQuranWindow, retrieveQuranCandidates, rerankQuranCandidates, summarizeFastConformerIdentification, type QuranIdentificationWord } from "../../src/lib/recognition/fastconformer-identification.ts";
+import { advanceQuranContinuationState, buildQuranWideLexicalIndex, identifyQuranWindow, retrieveQuranCandidates, rerankQuranCandidates, summarizeFastConformerIdentification, type QuranContinuationState, type QuranIdentificationWord } from "../../src/lib/recognition/fastconformer-identification.ts";
 import { encodeFastConformerWords } from "../../src/lib/recognition/local-fastconformer.ts";
 
 const SAMPLE_RATE = 16_000;
@@ -78,6 +78,7 @@ const index = buildQuranWideLexicalIndex(encoded.canonicalWords.map((word): Qura
 const durationMs = Math.round(audio.length / SAMPLE_RATE * 1_000);
 const windows = [];
 const details = [];
+let continuation: QuranContinuationState | null = null;
 for (let startMs = 0, windowIndex = 0; startMs < durationMs; startMs += defaults.hopMs, windowIndex += 1) {
   const endMs = Math.min(durationMs, startMs + defaults.windowMs);
   const startSample = Math.floor(startMs * SAMPLE_RATE / 1_000);
@@ -88,11 +89,12 @@ for (let startMs = 0, windowIndex = 0; startMs < durationMs; startMs += defaults
   const [, frames, vocabularySize] = output.dims;
   if (!frames || !vocabularySize) throw new Error("Unexpected FastConformer output shape.");
   const logits = { values: output.data, frames, vocabularySize };
-  const probe = identifyQuranWindow(index, { index: windowIndex, startMs, endMs, voicedMs: endMs - startMs, logits, vocabulary, blankTokenId: BLANK_TOKEN_ID });
+  const probe = identifyQuranWindow(index, { index: windowIndex, startMs, endMs, voicedMs: endMs - startMs, logits, vocabulary, blankTokenId: BLANK_TOKEN_ID }, continuation);
+  continuation = advanceQuranContinuationState(continuation, probe);
   const rawRetrieval = retrieveQuranCandidates(index, probe.greedy.lexicalTokens, defaults.coarseCandidateLimit);
   const rawRerank = rerankQuranCandidates(index, rawRetrieval, logits, BLANK_TOKEN_ID, defaults.rerankCandidateLimit);
   const rank = (candidates: typeof rawRetrieval) => candidates.findIndex((candidate) => candidate.start.surah === 74 && candidate.start.ayah <= 1 && candidate.end.ayah >= 9) + 1;
-  details.push({ index: windowIndex, startMs, endMs, greedy: probe.greedy, expectedRetrievalRank: rank(rawRetrieval), expectedRerankRank: rank(rawRerank), retrievalCount: rawRetrieval.length, rerankedCount: rawRerank.length, topRetrieval: rawRetrieval.slice(0, 10), topReranked: rawRerank.slice(0, 10) });
+  details.push({ index: windowIndex, startMs, endMs, greedy: probe.greedy, continuation: probe.continuation, selected: probe.selectedCandidate, expectedRetrievalRank: rank(rawRetrieval), expectedRerankRank: rank(rawRerank), retrievalCount: rawRetrieval.length, rerankedCount: rawRerank.length, topRetrieval: rawRetrieval.slice(0, 10), topReranked: rawRerank.slice(0, 10) });
   windows.push(probe);
   if (endMs === durationMs) break;
 }

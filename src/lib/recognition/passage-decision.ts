@@ -21,6 +21,7 @@ export const FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS = {
   singleWindowMinimumMargin: 0.12,
   multiWindowMinimumVoicedExplained: 0.50,
   singleWindowMinimumVoicedExplained: 0.80,
+  minimumLexicalUniqueness: 0.08,
 } as const;
 
 export const FASTCONFORMER_LONG_TIMELINE_MINIMUM_WINDOW_COUNT = 5;
@@ -145,7 +146,7 @@ export function decideFastConformerPassage(
   // passage explanation; it is exactly the shape in which repeated phrases
   // can otherwise assemble a plausible-looking but wrong global span.
   if (!singleWindow && longTimeline && (coherentWindowRatio < 0.6 || longestUnsupportedRun >= 3)) return { accepted: false, state: "insufficient-evidence", reason: "The selected Quran path does not support enough of the long recording's voiced timeline.", evidence };
-  if (!singleWindow && longTimeline && winningHypothesis && winningHypothesis.lexicalUniqueness < 0.08) return { accepted: false, state: "ambiguous", reason: "The long recording relies too heavily on repeated Quran language without distinctive passage context.", evidence };
-  if (singleWindow && winningHypothesis && winningHypothesis.lexicalUniqueness < 0.08) return { accepted: false, state: "ambiguous", reason: "A short clip contains only common Quran language without disambiguating context.", evidence };
+  if (!singleWindow && longTimeline && winningHypothesis && winningHypothesis.lexicalUniqueness < FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.minimumLexicalUniqueness) return { accepted: false, state: "ambiguous", reason: "The long recording relies too heavily on repeated Quran language without distinctive passage context.", evidence };
+  if (singleWindow && winningHypothesis && winningHypothesis.lexicalUniqueness < FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.minimumLexicalUniqueness) return { accepted: false, state: "ambiguous", reason: "A short clip contains only common Quran language without disambiguating context.", evidence };
   return { accepted: true, state: "accepted", reason: singleWindow ? "Strong short-clip FastConformer evidence passed." : "Coherent multi-window FastConformer evidence passed.", evidence };
 }
