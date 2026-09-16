@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPassageIdentificationDebugReport } from "../src/lib/recognition/passage-identification-debug.ts";
+import { createFinalPassageDebugFacts, createPassageIdentificationDebugReport } from "../src/lib/recognition/passage-identification-debug.ts";
 import { decideFastConformerPassage } from "../src/lib/recognition/passage-decision.ts";
 import { canonicalSpanFromFastConformerIdentification } from "../src/lib/recognition/core.ts";
 import type { FastConformerIdentificationResult, QuranPassageCandidate } from "../src/lib/recognition/fastconformer-identification.ts";
@@ -18,4 +18,61 @@ test("developer passage report retains CTC evidence, ten candidates, and gate re
   assert.deepEqual(report.windows[0]?.ctcTokenSequence, [4, 8, 15]);
   assert.equal(report.final.crossSurahCandidatesRejected, 2);
   assert.equal(JSON.stringify(report).includes("audio"), false);
+});
+
+function identificationWithWindows(windowCount: number, coherentCtc: number): FastConformerIdentificationResult {
+  const candidates = Array.from({ length: windowCount }, (_, index) => candidate(index));
+  const windows = candidates.map((value, index) => ({
+    index,
+    startMs: index * 6_000,
+    endMs: index * 6_000 + 12_000,
+    voicedMs: 8_000,
+    greedy: { tokenIds: [], lexicalText: "", lexicalTokens: [] },
+    candidates: [value],
+    selectedCandidate: value,
+    state: "strong-candidate" as const,
+    elapsedMs: 1,
+    performance: { retrievalMs: 1, rerankingMs: 1, candidatesReranked: 1 },
+    crossSurahCandidatesRejected: 0,
+  }));
+  const span = { start: candidates[0]!.start, end: candidates.at(-1)!.end };
+  return {
+    status: "complete",
+    span,
+    canonicalSpan: span,
+    wordLevelSpan: span,
+    selectedSurah: 74,
+    optionalPrelude: null,
+    surahConsensus: { selectedSurah: 74, strongWindowCount: windowCount, agreeingStrongWindows: windowCount },
+    windowResults: windows,
+    retrievalCandidates: candidates,
+    normalizedCtcScore: -0.2,
+    margin: 0.2,
+    continuityScore: 1,
+    globalHypotheses: [{ surah: 74, span, path: candidates.map((value, windowIndex) => ({ windowIndex, candidate: value })), acousticScore: coherentCtc, lexicalUniqueness: 0.5, continuityScore: 1, voicedCoverage: 0.9, localSharedPhraseScore: 0.5, finalScore: 1, agreeingWindows: windowCount }],
+    confidence: { composite: 0.8, normalizedBestCtcScore: -0.2, bestVsSecondMargin: 0.2, agreeingWindows: windowCount, voicedAudioExplained: 0.9 },
+    performance: { inferenceMs: 1, retrievalMs: 1, rerankingMs: 1, candidatesReranked: windowCount, totalMs: 4 },
+    CROSS_SURAH_CANDIDATES_REJECTED: 0,
+  };
+}
+
+test("final passage diagnostics expose best-window gate mode and every decision field for a short recording", () => {
+  const identification = identificationWithWindows(3, -1.01);
+  const decision = decideFastConformerPassage(identification, canonicalSpanFromFastConformerIdentification(identification.canonicalSpan));
+  const facts = createFinalPassageDebugFacts(identification, decision);
+  assert.equal(decision.accepted, true, "short recordings do not gate on coherent-path mean CTC");
+  assert.equal(facts.gateMode, "short-recording-best-window-ctc");
+  assert.deepEqual(facts.failedAcceptanceRules, []);
+  for (const field of ["bestWindowCtc", "coherentPathMeanCtc", "margin", "coverage", "agreeingWindowCount", "totalWindowCount", "coherentRatio", "longestUnsupportedRun", "lexicalUniqueness", "structuralValidity", "surahConsistency", "reasons"]) {
+    assert.equal(field in facts, true, `missing ${field}`);
+  }
+});
+
+test("final passage diagnostics expose coherent-path gate mode and failed rules for a long recording", () => {
+  const identification = identificationWithWindows(5, -1.01);
+  const decision = decideFastConformerPassage(identification, canonicalSpanFromFastConformerIdentification(identification.canonicalSpan));
+  const facts = createFinalPassageDebugFacts(identification, decision);
+  assert.equal(decision.accepted, false);
+  assert.equal(facts.gateMode, "long-recording-best-and-coherent-path-ctc");
+  assert.deepEqual(facts.failedAcceptanceRules, ["coherent-path-ctc"]);
 });

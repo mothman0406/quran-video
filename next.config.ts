@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  env: {
+    // Netlify supplies COMMIT_REF during builds. This public value contains no
+    // secret and lets opt-in browser diagnostics identify the deployed code.
+    NEXT_PUBLIC_QURAN_BUILD_COMMIT: process.env.COMMIT_REF ?? process.env.NEXT_PUBLIC_QURAN_BUILD_COMMIT ?? "local-development",
+  },
   async headers() {
     return [{
       source: "/:path*",

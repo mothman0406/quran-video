@@ -23,7 +23,7 @@ export const FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS = {
   singleWindowMinimumVoicedExplained: 0.80,
 } as const;
 
-const LONG_TIMELINE_MINIMUM_WINDOW_COUNT = 5;
+export const FASTCONFORMER_LONG_TIMELINE_MINIMUM_WINDOW_COUNT = 5;
 
 export type FastConformerPassageAcceptanceState = "accepted" | "ambiguous" | "insufficient-evidence" | "failed";
 
@@ -127,7 +127,7 @@ export function decideFastConformerPassage(
   const ctcMinimum = singleWindow ? FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.singleWindowMinimumNormalizedCtcScore : FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumNormalizedCtcScore;
   const marginMinimum = singleWindow ? FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.singleWindowMinimumMargin : FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumMargin;
   const voicedMinimum = singleWindow ? FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.singleWindowMinimumVoicedExplained : FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumVoicedExplained;
-  const longTimeline = totalWindowCount >= LONG_TIMELINE_MINIMUM_WINDOW_COUNT;
+  const longTimeline = totalWindowCount >= FASTCONFORMER_LONG_TIMELINE_MINIMUM_WINDOW_COUNT;
   // Best-window evidence remains the authoritative acoustic floor for every
   // recording. A short coherent path may contain a noisier supporting window,
   // while the existing coverage, agreement, and structure gates still prevent

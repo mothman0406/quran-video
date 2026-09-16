@@ -68,6 +68,15 @@ test("generation retains the authoritative Quran recognition and timing path", (
   assert.match(generation, /No credible human speech was detected/);
 });
 
+test("quick create and editor emit the same shared recognition diagnostic schema", () => {
+  for (const source of [generation, editor]) {
+    assert.match(source, /quranRecognitionDebug\(/);
+    assert.match(source, /quranFallbackDebug\(/);
+    assert.match(source, /quranFinalIdentityDebug\(/);
+    assert.match(source, /quranForcedAlignmentDebug\(/);
+  }
+});
+
 test("advanced editor restores the generated local project/runtime and preserves export auth gating", () => {
   assert.match(editor, /const routeProjectId = new URLSearchParams\(window\.location\.search\)\.get\("project"\)/);
   assert.match(editor, /videoJobManager\.getRuntime\(project\.id\)/);

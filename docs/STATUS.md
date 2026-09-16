@@ -1,5 +1,48 @@
 # Status
 
+## Current milestone: Expose browser recognition diagnostics
+
+Complete:
+
+- Replaced expandable-object `?debugMedia=1` console output with stable,
+  copyable one-line JSON under `[Quran AutoCaption debug]`. The serializer
+  sorts object keys, bounds nested data, and replaces typed arrays and array
+  buffers with byte-count markers instead of emitting PCM or model payloads.
+- Added a once-per-page `build-marker`. Netlify's non-secret build-time
+  `COMMIT_REF` is inlined as `NEXT_PUBLIC_QURAN_BUILD_COMMIT`; non-Netlify
+  builds explicitly report `local-development`.
+- The shared Quick Create and editor diagnostics now cover source inspection,
+  the selected canonical decoder and PCM fingerprint, raw VAD/window summary,
+  every FastConformer window winner, final passage evidence and all failed
+  rules, the short-vs-long CTC gate mode, FastConformer authority, explicit
+  Whisper fallback entry/authority, final identity, and forced-alignment
+  start/success/failure. Recognition, media, fallback, and timing decisions are
+  unchanged.
+- The private Muddaththir fixture retained SHA-256
+  `042579aa04ded0237aac43c0fa430094d1784d5c6d0062f15b506940c63cd55a`.
+  The existing real production-path replay again selected FFmpeg PCM, invoked
+  Quran identification once, accepted 74:1–9, and completed alignment. Evidence
+  remained best CTC `-0.349854`, coherent mean `-1.012985`, coverage `0.6296`,
+  margin `3.6864`, two agreeing windows out of three, coherent ratio `0.6667`,
+  longest unsupported run `1`, and lexical uniqueness `0.460593`. The local
+  equivalent serialized `recognition-preparation` with `path:"ffmpeg"`,
+  `reason:"non-integral-resample"`, 16 kHz / 353,663 samples / 22,104 ms,
+  RMS `0.057825835859801486`, and PCM SHA-256
+  `b1aecc84711a4ee79778f206acd8e9cb2c488e9f330f83ba4ba099c4b8d89751`;
+  `final-passage-decision` reported
+  `gateMode:"short-recording-best-window-ctc"` and no failed rules.
+- Local Git and the tracked origin branch both contained `756b052` before this
+  milestone. This checkout has no linked Netlify site metadata, so no Deploy
+  Preview commit SHA was inferred or claimed.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`,
+`npm test` (436 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, and
+`npm run build` pass. `npm run regression:quran` passes its production
+invariant probes and exits non-zero only at the known optional external
+quran-align/EveryAyah timing benchmark. The generated failure-only report was
+not retained. The build retains the pre-existing VAD/ONNX dynamic-dependency
+warnings and optional TikTok configuration reminder.
+
 ## Current milestone: Scope the Quran whole-path CTC gate
 
 Complete:

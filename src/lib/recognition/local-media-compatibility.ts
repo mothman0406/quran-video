@@ -127,11 +127,12 @@ async function inspectTracks(file: File): Promise<MediaInspection> {
 /** Fast, lazy local preflight. It reads container metadata before FFmpeg work. */
 export async function inspectLocalMedia(file: File): Promise<MediaInspection> {
   const inspection = await inspectTracks(file);
-  mediaDebug("inspection", {
-    extension: visibleFileExtension(file.name), fileSize: file.size,
+  mediaDebug("source-inspection", {
+    container: visibleFileExtension(file.name), fileSize: file.size,
     browserPlayback: inspection.browserPlayback, nativeRecognitionAudio: inspection.nativeRecognitionAudio,
     audioStreams: inspection.audioStreamCount ?? 0, audioCodec: inspection.audioCodec ?? null,
-    audioSampleRate: inspection.audioSampleRate ?? null, audioChannels: inspection.audioChannels ?? null,
+    sourceSampleRate: inspection.audioSampleRate ?? null, channels: inspection.audioChannels ?? null,
+    durationMs: inspection.durationMs ?? null,
   });
   return inspection;
 }
@@ -450,27 +451,50 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, "0")).join("");
 }
 
-async function recordRecognitionPcmDiagnostics(bytes: Uint8Array, frameCount: number) {
-  if (!mediaDebugEnabled()) return;
-  const samples = new Float32Array(bytes.buffer, bytes.byteOffset, frameCount);
+async function recognitionPcmDiagnostics(pcm: DecodedAudioChannels) {
+  const buffer = pcm.channelBuffers[0] ?? new ArrayBuffer(0);
+  const bytes = new Uint8Array(buffer);
+  const samples = new Float32Array(buffer, 0, pcm.frameCount);
   let squaredTotal = 0;
-  let peak = 0;
-  let finalNonNegligibleSample = -1;
   for (let index = 0; index < samples.length; index += 1) {
-    const magnitude = Math.abs(samples[index]!);
-    squaredTotal += magnitude ** 2;
-    peak = Math.max(peak, magnitude);
-    if (magnitude > 0.000_001) finalNonNegligibleSample = index;
+    squaredTotal += samples[index]! ** 2;
   }
-  const finalWindowStart = Math.max(0, bytes.byteLength - 16_000 * Float32Array.BYTES_PER_ELEMENT);
-  mediaDebug("recognition-pcm", {
-    sampleCount: frameCount,
-    durationMs: Math.round(frameCount / 16),
-    sha256: await sha256Hex(bytes),
+  return {
+    canonicalSampleRate: pcm.sampleRate,
+    sampleCount: pcm.frameCount,
+    pcmDurationMs: Math.round(pcm.frameCount * 1_000 / pcm.sampleRate),
     rms: Math.sqrt(squaredTotal / Math.max(1, samples.length)),
-    peak,
-    finalNonNegligibleSample,
-    finalWindowSha256: await sha256Hex(bytes.subarray(finalWindowStart)),
+    pcmSha256: await sha256Hex(bytes),
+  };
+}
+
+async function reportRecognitionPreparation(
+  file: File,
+  inspection: MediaInspection,
+  path: PreparedRecognitionAudio["decodePath"],
+  reason: PreparedRecognitionAudio["reason"],
+  pcm: DecodedAudioChannels,
+) {
+  if (!mediaDebugEnabled()) return;
+  let diagnostics: Awaited<ReturnType<typeof recognitionPcmDiagnostics>> | null = null;
+  try {
+    diagnostics = await recognitionPcmDiagnostics(pcm);
+  } catch {
+    // Diagnostics must never affect decoder selection or recognition input.
+  }
+  mediaDebug("recognition-preparation", {
+    path,
+    reason,
+    container: visibleFileExtension(file.name),
+    audioCodec: inspection.audioCodec ?? null,
+    sourceSampleRate: inspection.audioSampleRate ?? null,
+    channels: inspection.audioChannels ?? null,
+    sourceDurationMs: inspection.durationMs ?? null,
+    canonicalSampleRate: diagnostics?.canonicalSampleRate ?? pcm.sampleRate,
+    sampleCount: diagnostics?.sampleCount ?? pcm.frameCount,
+    pcmDurationMs: diagnostics?.pcmDurationMs ?? Math.round(pcm.frameCount * 1_000 / pcm.sampleRate),
+    rms: diagnostics?.rms ?? null,
+    pcmSha256: diagnostics?.pcmSha256 ?? null,
   });
 }
 
@@ -522,7 +546,6 @@ export async function extractRecognitionPcm(file: File, signal?: AbortSignal, on
       const copy = new Uint8Array(bytes.byteLength);
       copy.set(bytes);
       const frameCount = copy.byteLength / Float32Array.BYTES_PER_ELEMENT;
-      await recordRecognitionPcmDiagnostics(copy, frameCount);
       mediaDebug("pcm", { audioDecode: true, pcmDurationMs: Math.round(frameCount / 16), errorCode: null });
       mediaDebug("conversion-complete", { route });
       return { sampleRate: 16_000, frameCount, channelBuffers: [copy.buffer] };
@@ -561,41 +584,20 @@ export async function prepareRecognitionAudio(
   assertNotAborted(signal);
   const initialReason = recognitionPreparationReason(inspection);
   const useFfmpeg = initialReason !== "native-safe";
-  mediaDebug("recognition-preparation", {
-    selectedDecodePath: useFfmpeg ? "ffmpeg" : "native",
-    reason: initialReason,
-    extension: visibleFileExtension(file.name),
-    audioCodec: inspection.audioCodec ?? null,
-    audioSampleRate: inspection.audioSampleRate ?? null,
-    audioChannels: inspection.audioChannels ?? null,
-    sourceDurationMs: inspection.durationMs ?? null,
-  });
   if (useFfmpeg) {
     const pcm = await extractRecognitionPcm(file, signal, onPreparation);
+    await reportRecognitionPreparation(file, inspection, "ffmpeg", initialReason, pcm);
     return { pcm, decodePath: "ffmpeg", reason: initialReason, inspection };
   }
   try {
     const { canonicalizeNativeRecognitionPcm, decodeAudioChannels } = await import("./local-audio-decode.ts");
     const pcm = canonicalizeNativeRecognitionPcm(await decodeAudioChannels(file));
-    mediaDebug("recognition-pcm", {
-      decodePath: "native",
-      sampleCount: pcm.frameCount,
-      durationMs: Math.round(pcm.frameCount * 1_000 / pcm.sampleRate),
-      canonicalSampleRate: pcm.sampleRate,
-      channelCount: pcm.channelBuffers.length,
-    });
+    await reportRecognitionPreparation(file, inspection, "native", "native-safe", pcm);
     return { pcm, decodePath: "native", reason: "native-safe", inspection };
   } catch {
     assertNotAborted(signal);
-    mediaDebug("recognition-preparation", {
-      selectedDecodePath: "ffmpeg",
-      reason: "native-decode-unavailable",
-      audioCodec: inspection.audioCodec ?? null,
-      audioSampleRate: inspection.audioSampleRate ?? null,
-      audioChannels: inspection.audioChannels ?? null,
-      sourceDurationMs: inspection.durationMs ?? null,
-    });
     const pcm = await extractRecognitionPcm(file, signal, onPreparation);
+    await reportRecognitionPreparation(file, inspection, "ffmpeg", "native-decode-unavailable", pcm);
     return { pcm, decodePath: "ffmpeg", reason: "native-decode-unavailable", inspection };
   }
 }

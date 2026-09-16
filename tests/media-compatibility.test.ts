@@ -4,7 +4,7 @@ import test from "node:test";
 import { MAX_FULL_NORMALIZATION_BYTES, MAX_RECOGNITION_PCM_BYTES, MEDIA_COMPATIBILITY_ERRORS, MediaCompatibilityError, mediaCompatibilityErrorMessage, recognitionPcmBytes, routeMediaCompatibility, type MediaInspection } from "../src/lib/media-compatibility.ts";
 import { MEDIA_FILE_ACCEPT, mediaFileError, mediaKindForFile } from "../src/lib/editor/media.ts";
 import { FFMPEG_RUNTIME_ASSETS, ffmpegInitializationDebugFacts, mediaFailureFromFfmpegLog, resolveFfmpegRuntimeAssetUrl } from "../src/lib/recognition/local-media-compatibility.ts";
-import { mediaDebugEnabled, visibleFileExtension } from "../src/lib/recognition/media-debug.ts";
+import { mediaDebug, mediaDebugEnabled, serializeMediaDebugLine, visibleFileExtension } from "../src/lib/recognition/media-debug.ts";
 
 const editor = readFileSync("src/components/editor-client.tsx", "utf8");
 const workspace = readFileSync("src/components/editor-workspace.tsx", "utf8");
@@ -147,17 +147,53 @@ test("safe media debugging is opt-in and excludes the filename", () => {
   assert.equal(mediaDebugEnabled("?debugMedia=0"), false);
   assert.equal(visibleFileExtension("Screen Recording 2026-09-11 at 10.32.15.mov"), "mov");
   assert.equal(visibleFileExtension("recitation"), null);
-  assert.match(fallback, /mediaDebug\("inspection"/);
+  assert.match(fallback, /mediaDebug\("source-inspection"/);
   assert.match(fallback, /audioStreams/);
   assert.match(fallback, /pcmDurationMs/);
   assert.doesNotMatch(fallback, /mediaDebug\([^\n]*file\.name/);
 });
 
+test("critical debug events serialize as stable copyable text without binary payloads", () => {
+  const line = serializeMediaDebugLine("recognition-preparation", {
+    path: "ffmpeg",
+    reason: "non-integral-resample",
+    nested: { z: 2, a: 1 },
+    pcm: new Float32Array(50_000).fill(0.123456789),
+  });
+  assert.match(line, /^\[Quran AutoCaption debug\] recognition-preparation \{/);
+  assert.match(line, /"nested":\{"a":1,"z":2\}/);
+  assert.match(line, /"pcm":"\[omitted typed array: 200000 bytes\]"/);
+  assert.doesNotMatch(line, /0\.123456789/);
+});
+
+test("normal non-debug execution emits no diagnostics", () => {
+  const original = console.info;
+  const lines: unknown[][] = [];
+  console.info = (...args: unknown[]) => { lines.push(args); };
+  try {
+    mediaDebug("should-not-print", { enabled: false });
+  } finally {
+    console.info = original;
+  }
+  assert.deepEqual(lines, []);
+});
+
+test("recognition preparation diagnostics contain the complete canonical PCM fingerprint", () => {
+  for (const field of ["path", "reason", "container", "audioCodec", "sourceSampleRate", "channels", "sourceDurationMs", "canonicalSampleRate", "sampleCount", "pcmDurationMs", "rms", "pcmSha256"]) {
+    assert.match(fallback, new RegExp(`${field}:`));
+  }
+  assert.doesNotMatch(fallback, /mediaDebug\([^\n]*channelBuffers/);
+});
+
 test("the explicit media debug flag remains available through a same-tab generation route", () => {
   const debug = readFileSync("src/lib/recognition/media-debug.ts", "utf8");
+  const nextConfig = readFileSync("next.config.ts", "utf8");
   assert.match(debug, /quran-autocaption-debug-media/);
   assert.match(debug, /sessionStorage\.setItem\(MEDIA_DEBUG_SESSION_KEY, "1"\)/);
   assert.match(debug, /sessionStorage\.getItem\(MEDIA_DEBUG_SESSION_KEY\) === "1"/);
+  assert.match(debug, /mediaDebugLine\("build-marker"|serializeMediaDebugLine\("build-marker"/);
+  assert.match(nextConfig, /process\.env\.COMMIT_REF/);
+  assert.match(nextConfig, /NEXT_PUBLIC_QURAN_BUILD_COMMIT/);
 });
 
 test("fallback work is local, cancellable, cleaned up, and cannot introduce a backend conversion service", () => {
