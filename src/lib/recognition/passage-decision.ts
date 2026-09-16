@@ -5,8 +5,10 @@ import type { FastConformerIdentificationResult } from "./fastconformer-identifi
  * Production-only calibration for Quran-wide FastConformer identification.
  * These are deliberately independent signals: composite is diagnostic only.
  *
- * - -0.60 allows the observed clean/noisy CTC range while excluding very poor
- *   paths; -0.35 is required when a single short window must stand alone.
+ * - -0.60 allows the observed clean/noisy best-window CTC range while
+ *   excluding very poor paths; -0.35 is required when a single short window
+ *   must stand alone. Long timelines also require their coherent-path mean to
+ *   meet the same multi-window threshold.
  * - 0.05 requires a meaningful alternative-path separation for multi-window
  *   clips; 0.12 is required for a single-window clip.
  * - 0.50 requires at least half of VAD-qualified audio to be explained by the
@@ -20,6 +22,8 @@ export const FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS = {
   multiWindowMinimumVoicedExplained: 0.50,
   singleWindowMinimumVoicedExplained: 0.80,
 } as const;
+
+const LONG_TIMELINE_MINIMUM_WINDOW_COUNT = 5;
 
 export type FastConformerPassageAcceptanceState = "accepted" | "ambiguous" | "insufficient-evidence" | "failed";
 
@@ -92,7 +96,10 @@ export function decideFastConformerPassage(
   if (span && (!Number.isInteger(span.start.ayah) || !Number.isInteger(span.end.ayah) || !Number.isInteger(span.start.canonicalWordIndex) || !Number.isInteger(span.end.canonicalWordIndex) || span.start.ayah < 1 || span.end.ayah < 1 || span.start.canonicalWordIndex < 1 || span.end.canonicalWordIndex < 1)) structuralReasons.push("FastConformer returned illegal Quran coordinates.");
   if (span && (span.start.ayah > span.end.ayah || (span.start.ayah === span.end.ayah && span.start.canonicalWordIndex > span.end.canonicalWordIndex))) structuralReasons.push("FastConformer span starts after it ends.");
   if (!strong.length) structuralReasons.push("No usable acoustic window produced a strong candidate.");
-  if (!finiteOrNull(identification?.normalizedCtcScore ?? null) || !finiteOrNull(identification?.margin ?? null) || !Number.isFinite(identification?.confidence.voicedAudioExplained ?? Number.NaN) || !Number.isFinite(identification?.continuityScore ?? Number.NaN)) structuralReasons.push("FastConformer evidence contains a non-finite score.");
+  const nonFiniteGlobalEvidence = winningHypothesis
+    ? [winningHypothesis.acousticScore, winningHypothesis.lexicalUniqueness, winningHypothesis.continuityScore, winningHypothesis.voicedCoverage, winningHypothesis.localSharedPhraseScore, winningHypothesis.finalScore].some((value) => !Number.isFinite(value))
+    : false;
+  if (!finiteOrNull(identification?.normalizedCtcScore ?? null) || !finiteOrNull(identification?.margin ?? null) || !Number.isFinite(identification?.confidence.voicedAudioExplained ?? Number.NaN) || !Number.isFinite(identification?.continuityScore ?? Number.NaN) || nonFiniteGlobalEvidence) structuralReasons.push("FastConformer evidence contains a non-finite score.");
 
   const evidence: FastConformerPassageEvidence = {
     strongWindowCount: strong.length,
@@ -120,11 +127,16 @@ export function decideFastConformerPassage(
   const ctcMinimum = singleWindow ? FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.singleWindowMinimumNormalizedCtcScore : FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumNormalizedCtcScore;
   const marginMinimum = singleWindow ? FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.singleWindowMinimumMargin : FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumMargin;
   const voicedMinimum = singleWindow ? FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.singleWindowMinimumVoicedExplained : FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumVoicedExplained;
-  // The whole path, rather than a single locally excellent window, must meet
-  // the published fit threshold. This prevents a long recording from being
-  // promoted by an isolated phrase while its remaining selected windows are
-  // acoustically poor.
-  if ((evidence.normalizedCoherentCtcScore ?? Number.NEGATIVE_INFINITY) < ctcMinimum) return { accepted: false, state: "insufficient-evidence", reason: "The coherent FastConformer path CTC fit is below the documented production threshold.", evidence };
+  const longTimeline = totalWindowCount >= LONG_TIMELINE_MINIMUM_WINDOW_COUNT;
+  // Best-window evidence remains the authoritative acoustic floor for every
+  // recording. A short coherent path may contain a noisier supporting window,
+  // while the existing coverage, agreement, and structure gates still prevent
+  // one isolated phrase from deciding the passage.
+  if ((evidence.normalizedBestCtcScore ?? Number.NEGATIVE_INFINITY) < ctcMinimum) return { accepted: false, state: "insufficient-evidence", reason: "FastConformer best-window CTC fit is below the documented production threshold.", evidence };
+  // Five or more generated windows already define the long-timeline safety
+  // boundary below. Only those recordings additionally require the entire
+  // coherent path to meet the acoustic threshold.
+  if (longTimeline && (evidence.normalizedCoherentCtcScore ?? Number.NEGATIVE_INFINITY) < ctcMinimum) return { accepted: false, state: "insufficient-evidence", reason: "The coherent FastConformer path CTC fit is below the documented production threshold.", evidence };
   if ((identification!.margin ?? Number.NEGATIVE_INFINITY) < marginMinimum) return { accepted: false, state: "ambiguous", reason: "FastConformer best-path margin is too small.", evidence };
   if (identification!.confidence.voicedAudioExplained < voicedMinimum) return { accepted: false, state: "insufficient-evidence", reason: "Too little VAD-qualified audio is explained by the FastConformer path.", evidence };
   if (!singleWindow && identification!.surahConsensus.agreeingStrongWindows < 2) return { accepted: false, state: "ambiguous", reason: "Multiple useful windows did not form a coherent Quran path.", evidence };
@@ -132,8 +144,8 @@ export function decideFastConformerPassage(
   // recording, repeatedly skipping those voiced windows is not a coherent
   // passage explanation; it is exactly the shape in which repeated phrases
   // can otherwise assemble a plausible-looking but wrong global span.
-  if (!singleWindow && totalWindowCount >= 5 && (coherentWindowRatio < 0.6 || longestUnsupportedRun >= 3)) return { accepted: false, state: "insufficient-evidence", reason: "The selected Quran path does not support enough of the long recording's voiced timeline.", evidence };
-  if (!singleWindow && totalWindowCount >= 5 && winningHypothesis && winningHypothesis.lexicalUniqueness < 0.08) return { accepted: false, state: "ambiguous", reason: "The long recording relies too heavily on repeated Quran language without distinctive passage context.", evidence };
+  if (!singleWindow && longTimeline && (coherentWindowRatio < 0.6 || longestUnsupportedRun >= 3)) return { accepted: false, state: "insufficient-evidence", reason: "The selected Quran path does not support enough of the long recording's voiced timeline.", evidence };
+  if (!singleWindow && longTimeline && winningHypothesis && winningHypothesis.lexicalUniqueness < 0.08) return { accepted: false, state: "ambiguous", reason: "The long recording relies too heavily on repeated Quran language without distinctive passage context.", evidence };
   if (singleWindow && winningHypothesis && winningHypothesis.lexicalUniqueness < 0.08) return { accepted: false, state: "ambiguous", reason: "A short clip contains only common Quran language without disambiguating context.", evidence };
   return { accepted: true, state: "accepted", reason: singleWindow ? "Strong short-clip FastConformer evidence passed." : "Coherent multi-window FastConformer evidence passed.", evidence };
 }

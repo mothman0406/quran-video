@@ -1,5 +1,41 @@
 # Status
 
+## Current milestone: Scope the Quran whole-path CTC gate
+
+Complete:
+
+- Restored the stable best-window CTC requirement for every recording without
+  changing the `-0.60`/`-0.35` thresholds or any margin, coverage, agreement,
+  VAD, media-preparation, FastConformer, or timing behavior.
+- Reused the existing long-timeline definition of five or more generated
+  identification windows. Those recordings additionally retain the coherent-
+  path mean CTC gate; their multi-window paths retain the usable/coherent-
+  window ratio, unsupported-run, and repeated-language uniqueness protections.
+  Shorter recordings still require
+  valid finite evidence, same-surah structure, best-window CTC, margin,
+  VAD-qualified coverage, and multi-window agreement.
+- Added deterministic coverage for the real three-window decision shape and
+  for weak short acoustics, weak long whole-path acoustics, three-window gaps,
+  long repeated language, low coverage, small margin, insufficient agreement,
+  surah inconsistency, and non-finite evidence.
+- The ignored Muddaththir fixture still matches SHA-256
+  `042579aa04ded0237aac43c0fa430094d1784d5c6d0062f15b506940c63cd55a`.
+  A private local real-audio replay used the production FFmpeg extraction
+  command, configured Silero VAD, current FastConformer identification and
+  passage decision, and current forced alignment. Its sole top-level Quran
+  identification call accepted 74:1–9 with best-window CTC `-0.349854`,
+  coherent-path mean `-1.012985`, coverage `0.6296`, margin `3.6864`, two
+  agreeing windows, coherent ratio `0.6667`, longest unsupported run `1`, and
+  lexical uniqueness `0.460593`; forced alignment completed.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`,
+`npm test` (430 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`,
+`npm run build`, and `git diff --check` pass. `npm run regression:quran` passes
+its production invariant probes, then exits non-zero only because the optional
+quran-align/EveryAyah FastConformer artifact fetch fails; its generated report
+was not retained. The build retains the pre-existing VAD/ONNX dynamic
+dependency warnings and optional TikTok configuration reminder.
+
 ## Current milestone: Restore canonical media preparation before Quran recognition
 
 Complete:

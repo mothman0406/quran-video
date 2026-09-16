@@ -28,7 +28,7 @@ The correction moves this finding to media preparation: 44.1 kHz requires a
 fractional native-worker resample, so compatibility selects the existing
 FFmpeg mono/16 kHz extraction before VAD and FastConformer begin. Recognition
 then makes one Quran-wide identification pass on that authoritative PCM.
-Decoder choice never uses Quran evidence, and the unchanged evidence gate
+Decoder choice never uses Quran evidence, and the centralized evidence gate
 continues to abstain on weak or incoherent recordings.
 
 The current code is already a two-stage local design: recall-first Quran-wide
@@ -39,6 +39,13 @@ If the correct passage is not in that set, Stage B cannot recover it. The
 evidence gate appropriately abstains on low CTC fit, small global margin,
 insufficient VAD-qualified coverage, contradictory surahs, weak single-window
 uniqueness, or invalid coordinates.
+
+The acoustic gate uses the best-window CTC score for every recording. The
+existing long-timeline boundary of five generated identification windows adds
+the coherent-path mean CTC requirement plus support-ratio, unsupported-gap,
+and repeated-language safeguards. This keeps a noisy supporting window from
+rejecting a short coherent passage without allowing one strong local phrase to
+promote a weak long recording.
 
 ## Current production path
 

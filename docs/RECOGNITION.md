@@ -15,6 +15,14 @@ Recognition is a browser-local, accuracy-first hybrid pipeline:
 
 The canonical Hafs corpus is the displayed text authority. FastConformer identification decides what passage was recited; FastConformer forced alignment decides when its canonical words occur. Whisper is fallback passage evidence only.
 
+The production evidence gate always requires a passing best-window CTC score,
+margin, VAD-qualified coverage, multi-window agreement, structural validity,
+and same-surah coherence. Short recordings use those signals without requiring
+every supporting window to meet the aggregate acoustic threshold. Recordings
+with five or more generated identification windows additionally require a
+passing coherent-path mean CTC score and the long-timeline support, gap, and
+lexical-uniqueness safeguards.
+
 ## Alternatives considered
 
 - Better use of Whisper word timestamps alone: rejected because timestamps cannot represent repeated canonical words and are not a forced-alignment model.
