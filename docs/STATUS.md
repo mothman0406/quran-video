@@ -1,5 +1,47 @@
 # Status
 
+## Current milestone: Fast local MOV transmux
+
+Complete:
+
+- Production media routing is now explicit: browser-playable sources retain the
+  original, conservatively eligible AVC/AAC MOV/ISOBMFF video uses bounded-memory
+  exact local packet copy, and every other source retains the existing
+  FFmpeg-WASM compatibility/full-normalization route.
+- Runtime ownership distinguishes the immutable original source from its editor
+  playback representation. Recognition, retry, cloud source persistence, and
+  export remain bound to the original; preview and thumbnail work may use the
+  temporary editor MP4.
+- Quick Create and the editor prepare the one canonical recognition PCM from
+  the original concurrently with editor media. The existing single top-level
+  Quran identification and all FastConformer, passage-decision, VAD, CTC, and
+  alignment behavior remain unchanged.
+- Exact eligibility fails closed on uncertain parsing, track, codec, forced-copy,
+  metadata, timing, browser playback, OPFS, service-worker, quota, or cleanup
+  evidence. The initial safety gate is 500 MiB plus reported free space of at
+  least `max(1.25 × source bytes, source bytes + 256 MiB)`.
+- Production output uses ranged `BlobSource` reads, forced AVC/AAC copy,
+  `fastStart:false`, chunked `StreamTarget`, and asynchronous OPFS writes. It
+  validates codecs, track metadata, source timestamps, independent edit lists,
+  duration, and browser metadata before the editor may use the output.
+- The versioned range service worker exposes only exact app-owned opaque UUID
+  names, supports GET/HEAD and 200/206/416 semantics, and never exposes raw OPFS
+  paths. Abort, write failure, replacement, deletion, abandonment, and explicit
+  disposal remove owned output; stale sweeping preserves recent and unrelated
+  OPFS entries.
+- Headed Chrome 152 exercised the normal `/create?debugMedia=1` preparation path
+  with the ignored 154,990,091-byte ReplayKit MOV. It selected `exact-transmux`,
+  wrote 154,986,044 bytes in 440 ms, exposed 33.033333 seconds, reached
+  readyState 4, played, and sought to 1/10/20/30 seconds. FFmpeg-WASM did not
+  initialize, recognition preparation used the original MOV, Generate reached
+  `/videos` with a live caption job, and abandonment removed the current
+  temporary output.
+- Verification passed: FFmpeg assets, Quran ID schema (8 logical fixtures),
+  463/463 tests, strict TypeScript, quiet lint, production build, whitespace
+  checks, and recognition freeze diffs. The optional full Quran runner passed
+  its production invariant probes and reported only the known unavailable
+  external quran-align/EveryAyah timing artifact.
+
 ## Current milestone: Validate bounded-memory MOV transmux
 
 Complete:

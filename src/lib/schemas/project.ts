@@ -15,7 +15,7 @@ const MediaMetadataSchema = z.strictObject({
   origin: z.enum(["local-file", "youtube-import"]).optional(),
   sourceUrl: z.string().url().optional(),
   displayName: z.string().min(1).optional(),
-  compatibility: z.enum(["native", "audio-fallback", "full-normalization"]).optional(),
+  compatibility: z.enum(["native", "audio-fallback", "exact-transmux", "full-normalization"]).optional(),
   originalFileName: z.string().min(1).optional(),
   originalMimeType: z.string().min(1).optional(),
 });

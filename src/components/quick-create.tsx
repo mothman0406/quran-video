@@ -20,8 +20,10 @@ import type { ProjectFormatPreset, SavedProject } from "@/lib/schemas/project";
 import { videoJobManager } from "@/lib/video-jobs";
 
 type PreparedSelection = {
-  file: File;
-  original: File;
+  originalSource: File;
+  editorMedia: File;
+  editorPlaybackUrl: string | null;
+  disposeEditorMedia(): Promise<void>;
   source: NonNullable<SavedProject["sourceMedia"]>;
   preparedAudio?: DecodedAudioChannels;
 };
@@ -39,7 +41,7 @@ function preparationLabel(progress: LocalMediaPreparationProgress | null, ready:
     case "inspecting-recording": return "Inspecting recording…";
     case "converting-recording": return "Converting recording…";
     case "preparing-audio": return "Preparing audio for detection…";
-    case "preparing-editor": return "Finishing media preparation…";
+    case "preparing-editor": return "Preparing video…";
     default: return "Checking compatibility…";
   }
 }
@@ -62,6 +64,7 @@ export default function QuickCreate() {
   const [cloudCount, setCloudCount] = useState(0);
   const [dragging, setDragging] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const preparedRef = useRef<PreparedSelection | null>(null);
   const previewUrlRef = useRef<string | null>(null);
   const preparationId = useRef(0);
   const progressController = useRef(new LocalMediaPreparationProgressController());
@@ -84,6 +87,15 @@ export default function QuickCreate() {
   useEffect(() => () => {
     abortRef.current?.abort();
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    void preparedRef.current?.disposeEditorMedia();
+  }, []);
+
+  useEffect(() => {
+    const abandon = (event: PageTransitionEvent) => {
+      if (!event.persisted) void preparedRef.current?.disposeEditorMedia();
+    };
+    window.addEventListener("pagehide", abandon);
+    return () => window.removeEventListener("pagehide", abandon);
   }, []);
 
   function replacePreviewUrl(next: string) {
@@ -118,6 +130,9 @@ export default function QuickCreate() {
     const validation = mediaFileError(next);
     if (validation) { setError(validation); return; }
     abortRef.current?.abort();
+    const superseded = preparedRef.current;
+    preparedRef.current = null;
+    if (superseded) await superseded.disposeEditorMedia();
     const abort = new AbortController();
     abortRef.current = abort;
     const job = ++preparationId.current;
@@ -127,29 +142,46 @@ export default function QuickCreate() {
     replacePreviewUrl(originalUrl);
     try {
       const { prepareLocalMedia, prepareRecognitionAudio } = await import("@/lib/recognition/local-media-compatibility");
-      const result = await prepareLocalMedia(next, abort.signal, (event) => publishPreparation(job, event));
-      if (abort.signal.aborted || job !== preparationId.current) return;
-      // Decoder choice completes before this job leaves /create. The generated
-      // PCM is the sole recognition input across /create → /videos.
-      const preparedAudio = (await prepareRecognitionAudio(result.file, abort.signal, (event) => publishPreparation(job, event))).pcm;
-      if (abort.signal.aborted || job !== preparationId.current) return;
+      // Recognition and editor preparation are independent branches. Both
+      // begin from the immutable original source; neither waits on the other.
+      const editorPromise = prepareLocalMedia(next, abort.signal, (event) => publishPreparation(job, event));
+      const recognitionPromise = prepareRecognitionAudio(next, abort.signal, (event) => publishPreparation(job, event));
+      const [editorOutcome, recognitionOutcome] = await Promise.allSettled([editorPromise, recognitionPromise]);
+      if (editorOutcome.status === "rejected") {
+        abort.abort();
+        throw editorOutcome.reason;
+      }
+      if (recognitionOutcome.status === "rejected") {
+        abort.abort();
+        await editorOutcome.value.dispose();
+        throw recognitionOutcome.reason;
+      }
+      const result = editorOutcome.value;
+      const recognition = recognitionOutcome.value;
+      const preparedAudio = recognition.pcm;
+      if (abort.signal.aborted || job !== preparationId.current) { await result.dispose(); return; }
       const assetId = crypto.randomUUID();
-      const source = mediaSourceFromFile(result.file, result.kind, {
+      const source = mediaSourceFromFile(result.originalSource, result.kind, {
         assetId,
         compatibility: result.route,
-        originalFileName: result.original.name,
-        originalMimeType: result.original.type || undefined,
-        displayName: result.original.name,
+        originalFileName: result.originalSource.name,
+        originalMimeType: result.originalSource.type || undefined,
+        displayName: result.originalSource.name,
         durationMs: result.inspection.durationMs,
         width: result.inspection.width,
         height: result.inspection.height,
       });
       applyDetectedFormat(result.inspection);
-      if (result.file !== next) {
-        replacePreviewUrl(URL.createObjectURL(result.file));
+      if (result.editorPlaybackUrl) {
+        replacePreviewUrl(result.editorPlaybackUrl);
+        setPreviewPlayable(true);
+      } else if (result.editorMedia !== next) {
+        replacePreviewUrl(URL.createObjectURL(result.editorMedia));
         setPreviewPlayable(true);
       }
-      setPrepared({ file: result.file, original: next, source, preparedAudio });
+      const selection = { originalSource: next, editorMedia: result.editorMedia, editorPlaybackUrl: result.editorPlaybackUrl, disposeEditorMedia: result.dispose, source, preparedAudio };
+      preparedRef.current = selection;
+      setPrepared(selection);
       setProgress(null);
     } catch (caught) {
       if (!abort.signal.aborted) {
@@ -199,7 +231,7 @@ export default function QuickCreate() {
     const project: SavedProject = {
       version: 2,
       id: crypto.randomUUID(),
-      title: cleanTitle(prepared.original.name),
+      title: cleanTitle(prepared.originalSource.name),
       sourceMedia: prepared.source,
       projectAssets: [projectAssetFromMediaSource(prepared.source, assetId, now)],
       activeMediaAssetId: assetId,
@@ -217,7 +249,8 @@ export default function QuickCreate() {
       createdAt: now,
       updatedAt: now,
     };
-    videoJobManager.start({ project, file: prepared.file, preparedAudio: prepared.preparedAudio, session, entitlements });
+    videoJobManager.start({ project, originalSource: prepared.originalSource, editorMedia: prepared.editorMedia, editorPlaybackUrl: prepared.editorPlaybackUrl, disposeEditorMedia: prepared.disposeEditorMedia, preparedAudio: prepared.preparedAudio, session, entitlements });
+    preparedRef.current = null;
     router.push("/videos");
   }
 

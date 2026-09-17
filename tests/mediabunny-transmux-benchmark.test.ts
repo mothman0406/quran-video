@@ -120,10 +120,12 @@ test("OPFS cleanup refuses non-app-owned files", async () => {
 
 test("startup cleanup removes stale transmux files but preserves unrelated OPFS data", async () => {
   const { directory, files } = mockDirectory();
-  files.add(`${EPHEMERAL_TRANSMUX_PREFIX}stale.mp4`);
+  const staleName = `${EPHEMERAL_TRANSMUX_PREFIX}00000000-0000-4000-8000-000000000000.mp4`;
+  files.add(staleName);
+  files.add(`${EPHEMERAL_TRANSMUX_PREFIX}not-an-owned-opaque-name.mp4`);
   files.add("unrelated-project-data");
 
   const removed = await removeStaleEphemeralOpfsFiles(directory);
-  assert.deepEqual(removed, [`${EPHEMERAL_TRANSMUX_PREFIX}stale.mp4`]);
-  assert.deepEqual([...files], ["unrelated-project-data"]);
+  assert.deepEqual(removed, [staleName]);
+  assert.deepEqual([...files], [`${EPHEMERAL_TRANSMUX_PREFIX}not-an-owned-opaque-name.mp4`, "unrelated-project-data"]);
 });

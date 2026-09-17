@@ -36,20 +36,27 @@ export type VideoJob = {
 };
 
 export type VideoRuntime = {
-  file: File;
+  originalSource: File;
+  editorMedia: File;
+  editorPlaybackUrl: string | null;
   sourceUrl: string;
   posterUrl: string | null;
 };
 
 export type StartVideoJobInput = {
   project: SavedProject;
-  file: File;
+  originalSource: File;
+  editorMedia: File;
+  editorPlaybackUrl: string | null;
+  disposeEditorMedia(): Promise<void>;
   preparedAudio?: DecodedAudioChannels;
   session: Session | null;
   entitlements: AccountEntitlements;
 };
 
 type RuntimeEntry = VideoRuntime & {
+  ownsSourceUrl: boolean;
+  disposeEditorMedia(): Promise<void>;
   poster: Blob | null;
   preparedAudio?: DecodedAudioChannels;
   session: Session | null;
@@ -126,11 +133,16 @@ class VideoJobManager {
       previous.abort.abort();
       if (previous.workerJobId !== null) this.worker?.cancel(previous.workerJobId);
       this.revokeRuntime(previous);
+      void previous.disposeEditorMedia();
     }
-    const sourceUrl = URL.createObjectURL(input.file);
+    const sourceUrl = input.editorPlaybackUrl ?? URL.createObjectURL(input.editorMedia);
     this.runtimes.set(id, {
-      file: input.file,
+      originalSource: input.originalSource,
+      editorMedia: input.editorMedia,
+      editorPlaybackUrl: input.editorPlaybackUrl,
       sourceUrl,
+      ownsSourceUrl: input.editorPlaybackUrl === null,
+      disposeEditorMedia: input.disposeEditorMedia,
       posterUrl: null,
       poster: null,
       preparedAudio: input.preparedAudio,
@@ -166,16 +178,20 @@ class VideoJobManager {
 
   getRuntime(id: string): VideoRuntime | null {
     const runtime = this.runtimes.get(id);
-    return runtime ? { file: runtime.file, sourceUrl: runtime.sourceUrl, posterUrl: runtime.posterUrl } : null;
+    return runtime ? { originalSource: runtime.originalSource, editorMedia: runtime.editorMedia, editorPlaybackUrl: runtime.editorPlaybackUrl, sourceUrl: runtime.sourceUrl, posterUrl: runtime.posterUrl } : null;
   }
 
   attachRuntime(id: string, file: File): VideoRuntime {
     const current = this.runtimes.get(id);
-    if (current) this.revokeRuntime(current);
+    if (current) { this.revokeRuntime(current); void current.disposeEditorMedia(); }
     const sourceUrl = URL.createObjectURL(file);
     const runtime: RuntimeEntry = {
-      file,
+      originalSource: file,
+      editorMedia: file,
+      editorPlaybackUrl: null,
       sourceUrl,
+      ownsSourceUrl: true,
+      disposeEditorMedia: async () => {},
       posterUrl: null,
       poster: null,
       session: null,
@@ -185,14 +201,27 @@ class VideoJobManager {
       abort: new AbortController(),
     };
     this.runtimes.set(id, runtime);
-    return { file, sourceUrl, posterUrl: null };
+    return { originalSource: file, editorMedia: file, editorPlaybackUrl: null, sourceUrl, posterUrl: null };
+  }
+
+  abandon(): void {
+    for (const runtime of this.runtimes.values()) {
+      runtime.abort.abort();
+      if (runtime.workerJobId !== null) this.worker?.cancel(runtime.workerJobId);
+      this.revokeRuntime(runtime);
+      void runtime.disposeEditorMedia();
+    }
+    this.runtimes.clear();
   }
 
   async remove(id: string, removeCloud = false): Promise<void> {
     const runtime = this.runtimes.get(id);
     runtime?.abort.abort();
     if (runtime?.workerJobId !== null && runtime?.workerJobId !== undefined) this.worker?.cancel(runtime.workerJobId);
-    if (runtime) this.revokeRuntime(runtime);
+    if (runtime) {
+      this.revokeRuntime(runtime);
+      await runtime.disposeEditorMedia();
+    }
     this.runtimes.delete(id);
     this.jobs.delete(id);
     await this.initialize();
@@ -215,13 +244,13 @@ class VideoJobManager {
       runtime.preparedAudio = undefined;
       if (!authoritativePcm) {
         const { prepareRecognitionAudio } = await import("./recognition/local-media-compatibility.ts");
-        authoritativePcm = (await prepareRecognitionAudio(runtime.file, runtime.abort.signal)).pcm;
+        authoritativePcm = (await prepareRecognitionAudio(runtime.originalSource, runtime.abort.signal)).pcm;
       }
       const { generateVideoCaptions } = await import("./video-generation.ts");
       const result = await generateVideoCaptions({
         jobId: workerJobId,
-        file: runtime.file,
-        sourceUrl: runtime.sourceUrl,
+        file: runtime.originalSource,
+        sourceUrl: null,
         authoritativePcm,
         signal: runtime.abort.signal,
         worker: this.worker ??= new LocalRecognitionWorkerClient(),
@@ -261,7 +290,7 @@ class VideoJobManager {
     const job = this.jobs.get(id);
     if (!runtime || !job) return;
     try {
-      const poster = await createProjectThumbnail(runtime.file, Boolean(job.project.sourceMedia?.hasVideo));
+      const poster = await createProjectThumbnail(runtime.editorMedia, Boolean(job.project.sourceMedia?.hasVideo));
       const active = this.runtimes.get(id);
       if (!active || active.runToken !== token) return;
       if (active.posterUrl) URL.revokeObjectURL(active.posterUrl);
@@ -293,10 +322,10 @@ class VideoJobManager {
       await beginCloudProjectSave(job.project);
       reserved = true;
       assertActive();
-      const sourcePath = newCloudSourcePath(runtime.session.user.id, id, runtime.file);
+      const sourcePath = newCloudSourcePath(runtime.session.user.id, id, runtime.originalSource);
       const thumbnailPath = newCloudThumbnailPath(runtime.session.user.id, id);
-      const poster = runtime.poster ?? await createProjectThumbnail(runtime.file, Boolean(job.project.sourceMedia?.hasVideo));
-      await uploadPrivateProjectObject(sourcePath, runtime.file, runtime.file.type || "application/octet-stream", "source-upload");
+      const poster = runtime.poster ?? await createProjectThumbnail(runtime.editorMedia, Boolean(job.project.sourceMedia?.hasVideo));
+      await uploadPrivateProjectObject(sourcePath, runtime.originalSource, runtime.originalSource.type || "application/octet-stream", "source-upload");
       uploaded.push(sourcePath);
       assertActive();
       await uploadPrivateProjectObject(thumbnailPath, poster, "image/webp", "thumbnail");
@@ -304,9 +333,9 @@ class VideoJobManager {
       assertActive();
       await completeCloudProjectSave(job.project, {
         source_media_path: sourcePath,
-        source_media_type: runtime.file.type || "application/octet-stream",
-        source_media_name: runtime.file.name,
-        source_media_size_bytes: runtime.file.size,
+        source_media_type: runtime.originalSource.type || "application/octet-stream",
+        source_media_name: runtime.originalSource.name,
+        source_media_size_bytes: runtime.originalSource.size,
         thumbnail_path: thumbnailPath,
         thumbnail_size_bytes: poster.size,
       });
@@ -329,7 +358,7 @@ class VideoJobManager {
   }
 
   private revokeRuntime(runtime: RuntimeEntry) {
-    URL.revokeObjectURL(runtime.sourceUrl);
+    if (runtime.ownsSourceUrl) URL.revokeObjectURL(runtime.sourceUrl);
     if (runtime.posterUrl) URL.revokeObjectURL(runtime.posterUrl);
   }
 

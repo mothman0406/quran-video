@@ -211,7 +211,8 @@ test("fallback work is local, cancellable, cleaned up, and cannot introduce a ba
 });
 
 test("native media remains FFmpeg-free while a successful fallback initializes before normalization", () => {
-  assert.match(fallback, /if \(route !== "full-normalization"\) \{\s*return \{ file, kind: inspection\.kind, route, inspection, original: file \};\s*\}/);
+  assert.match(fallback, /if \(route !== "full-normalization"\) \{\s*return \{ originalSource: file, editorMedia: file/);
+  assert.match(fallback, /exactTransmuxToOpfs/);
   assert.match(fallback, /const runtime = await loadFfmpeg\(signal\);[\s\S]*?await probeFfmpeg\(runtime, inputName/);
   assert.equal(routeMediaCompatibility(2 * 1024 * 1024 * 1024, inspection()), "native");
 });

@@ -16,6 +16,7 @@
     "timing:benchmark:merge": "node --experimental-strip-types tools/timing-benchmark/merge-real-runs.ts",
     "benchmark:mediabunny-transmux": "node --experimental-strip-types scripts/benchmark-mediabunny-transmux.ts",
     "benchmark:mediabunny-transmux:chrome": "node --experimental-strip-types scripts/validate-mediabunny-transmux-chrome.ts",
+    "regression:production-transmux:chrome": "node --experimental-strip-types scripts/validate-production-transmux-chrome.ts",
     "regression:quran": "node --experimental-strip-types tools/regression/run-quran.ts",
     "regression:quran-id": "node --experimental-strip-types tools/regression/run-quran-id.ts",
     "analyze:netlify-server": "node scripts/analyze-netlify-server.mjs",

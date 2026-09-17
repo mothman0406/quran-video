@@ -8,12 +8,18 @@ import type { MediaKind } from "../editor/media.ts";
 import type { DecodedAudioChannels } from "./local-audio-decode.ts";
 import { mediaDebug, mediaDebugEnabled, visibleFileExtension } from "./media-debug.ts";
 
-type PreparedEditorMedia = {
-  file: File;
+export type PreparedEditorMedia = {
+  /** Immutable authoritative source for recognition, export, save, and retry. */
+  originalSource: File;
+  /** Browser-compatible working representation used only for editor playback. */
+  editorMedia: File;
+  /** Range-backed URL for temporary OPFS media; null means the File is directly playable. */
+  editorPlaybackUrl: string | null;
   kind: MediaKind;
   route: MediaCompatibilityRoute;
   inspection: MediaInspection;
-  original: Pick<File, "name" | "type" | "size">;
+  temporary: boolean;
+  dispose(): Promise<void>;
 };
 
 /** The only PCM representation passed into Quran identification and timing. */
@@ -382,11 +388,29 @@ function temporaryName(file: File, suffix: string) {
 export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPreparation?: (event: LocalMediaPreparationEvent) => void): Promise<PreparedEditorMedia> {
   const inspection = await inspectLocalMedia(file);
   onPreparation?.({ stage: "inspecting-recording", inspection });
-  const route = routeMediaCompatibility(file.size, inspection);
-  mediaDebug("route", { selected: route });
   assertNotAborted(signal);
+  if (inspection.browserPlayback) {
+    const route = routeMediaCompatibility(file.size, inspection);
+    mediaDebug("media-route-decision", { route: "direct", compatibilityRoute: route });
+    return { originalSource: file, editorMedia: file, editorPlaybackUrl: null, kind: inspection.kind, route, inspection, temporary: false, dispose: async () => {} };
+  }
+
+  if (inspection.kind === "video") {
+    onPreparation?.({ stage: "preparing-editor" });
+    const { exactTransmuxToOpfs } = await import("../media/exact-transmux.ts");
+    const exact = await exactTransmuxToOpfs(file, inspection, crypto.randomUUID(), signal);
+    assertNotAborted(signal);
+    if (exact) {
+      mediaDebug("media-route-decision", { route: "exact-transmux", sourceBytes: file.size, outputBytes: exact.outputBytes, elapsedMilliseconds: exact.elapsedMilliseconds });
+      return { originalSource: file, editorMedia: exact.file, editorPlaybackUrl: exact.playbackUrl, kind: "video", route: "exact-transmux", inspection, temporary: true, dispose: exact.dispose };
+    }
+    mediaDebug("media-route-decision", { route: "compatibility", compatibilityRoute: "full-normalization", reason: "exact-transmux-ineligible-or-failed" });
+  }
+
+  const route = routeMediaCompatibility(file.size, inspection);
+  mediaDebug("media-route-decision", { route: "compatibility", compatibilityRoute: route });
   if (route !== "full-normalization") {
-    return { file, kind: inspection.kind, route, inspection, original: file };
+    return { originalSource: file, editorMedia: file, editorPlaybackUrl: null, kind: inspection.kind, route, inspection, temporary: false, dispose: async () => {} };
   }
 
   onPreparation?.({ stage: "preparing-converter" });
@@ -427,7 +451,7 @@ export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPrep
       const normalized = new File([normalizedBytes.buffer], `${file.name.replace(/\.[^.]+$/u, "") || "recitation"}.${audioOnly ? "m4a" : "mp4"}`, { type: audioOnly ? "audio/mp4" : "video/mp4", lastModified: file.lastModified });
       mediaDebug("working-media-create-complete", { byteLength: normalized.size });
       mediaDebug("conversion-complete", { route });
-      return { file: normalized, kind: audioOnly ? "audio" : "video", route, inspection, original: file };
+      return { originalSource: file, editorMedia: normalized, editorPlaybackUrl: null, kind: audioOnly ? "audio" : "video", route, inspection, temporary: false, dispose: async () => {} };
     } catch (error) {
       if (error instanceof MediaCompatibilityError || isAbort(error)) throw error;
       throw compatibilityErrorFromUnknown(error, "pcmExtractionFailed");
@@ -482,6 +506,7 @@ async function reportRecognitionPreparation(
     // Diagnostics must never affect decoder selection or recognition input.
   }
   mediaDebug("recognition-preparation", {
+    sourceRepresentation: "original",
     path,
     reason,
     container: visibleFileExtension(file.name),

@@ -179,7 +179,7 @@ type ExportState =
   | "complete"
   | "error"
   | null;
-type AutomaticRecognitionRequest = { identity: string; file: File; sourceUrl: string | null; restoredCompletedRecognition: boolean };
+type AutomaticRecognitionRequest = { identity: string; file: File; sourceUrl: string | null; preparedAudio?: PreparedRecognitionAudio; restoredCompletedRecognition: boolean };
 type EditorProjectHistoryState = {
   segments: CaptionSegment[];
   mediaTrim: MediaTrim;
@@ -245,6 +245,7 @@ type AlignmentDebug = {
 export default function Home() {
   const basmalahDiagnosticCaptureEnabled = typeof window !== "undefined" && basmalahDiagnosticsEnabled(window.location.search);
   const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [originalSourceFile, setOriginalSourceFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [videoMetadata, setVideoMetadata] = useState<VideoMetadata | null>(
     null,
@@ -394,7 +395,8 @@ export default function Home() {
   const exportAbort = useRef<AbortController | null>(null);
   const completedExport = useRef<CompletedExport | null>(null);
   const exportStarting = useRef(false);
-  const assetFiles = useRef(new Map<string, { file: File; source: MediaSource }>());
+  const assetFiles = useRef(new Map<string, { originalSource: File; editorMedia: File; editorPlaybackUrl: string | null; disposeEditorMedia(): Promise<void>; source: MediaSource }>());
+  const editorMediaDisposer = useRef<(() => Promise<void>) | null>(null);
   const exportCoordinator = useRef(new ExportCoordinator());
   const exportPreflightOverride = useRef(new ExportPreflightOverride<AuthorizedExportRequest>());
   const playbackClock = useRef<MediaPlaybackClock | null>(null);
@@ -628,7 +630,7 @@ export default function Home() {
               const runtime = videoJobManager.getRuntime(project.id);
               if (runtime) {
                 cloudProjectLoadStarted.current = true;
-                loadSelectedSource(runtime.file, project.sourceMedia ?? mediaSourceFromFile(runtime.file, mediaKindForFile(runtime.file) ?? "video"), { preserveCaptions: true, restoredCompletedRecognition: project.captionSegments.length > 0 });
+                loadSelectedSource(runtime.originalSource, runtime.editorMedia, project.sourceMedia ?? mediaSourceFromFile(runtime.originalSource, mediaKindForFile(runtime.originalSource) ?? "video"), { preserveCaptions: true, restoredCompletedRecognition: project.captionSegments.length > 0, editorPlaybackUrl: runtime.editorPlaybackUrl });
               }
             }
           })
@@ -717,7 +719,7 @@ export default function Home() {
   }, [authRestoreReady, session]);
   useEffect(
     () => () => {
-      if (videoUrl) URL.revokeObjectURL(videoUrl);
+      if (videoUrl?.startsWith("blob:")) URL.revokeObjectURL(videoUrl);
     },
     [videoUrl],
   );
@@ -729,6 +731,14 @@ export default function Home() {
     void import("@/lib/recognition/local-media-compatibility").then(({ releaseLocalMediaRuntime }) => releaseLocalMediaRuntime());
     const previous = completedExport.current;
     if (previous) URL.revokeObjectURL(previous.objectUrl);
+    void editorMediaDisposer.current?.();
+  }, []);
+  useEffect(() => {
+    const abandon = (event: PageTransitionEvent) => {
+      if (!event.persisted) void editorMediaDisposer.current?.();
+    };
+    window.addEventListener("pagehide", abandon);
+    return () => window.removeEventListener("pagehide", abandon);
   }, []);
   useEffect(() => {
     const font = quranFontDefinitions[typography.quranStyle];
@@ -758,7 +768,7 @@ export default function Home() {
     showVerseNumber,
   });
   const currentExportFingerprint = JSON.stringify({
-    source: videoFile ? { name: videoFile.name, size: videoFile.size, lastModified: videoFile.lastModified } : null,
+    source: originalSourceFile ? { name: originalSourceFile.name, size: originalSourceFile.size, lastModified: originalSourceFile.lastModified } : null,
     activeMediaAssetId,
     mediaTrim,
     projectFormat,
@@ -858,30 +868,35 @@ export default function Home() {
       /* Arabic remains available when translation enrichment fails. */
     }
   }
-  function loadSelectedSource(next: File, nextSource: MediaSource, options?: { preserveCaptions?: boolean; restoredCompletedRecognition?: boolean }) {
+  function loadSelectedSource(originalSource: File, editorMedia: File, nextSource: MediaSource, options?: { preserveCaptions?: boolean; restoredCompletedRecognition?: boolean; editorPlaybackUrl?: string | null; disposeEditorMedia?: () => Promise<void>; preparedAudio?: PreparedRecognitionAudio }) {
     exportAbort.current?.abort();
     clearCompletedExport();
     invalidateRecognitionForSourceChange();
     const waveformJob = ++waveformGeneration.current;
     setWaveformData(null);
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    if (videoUrl?.startsWith("blob:")) URL.revokeObjectURL(videoUrl);
+    const previousDisposer = editorMediaDisposer.current;
+    editorMediaDisposer.current = options?.disposeEditorMedia ?? null;
+    if (previousDisposer && previousDisposer !== options?.disposeEditorMedia) void previousDisposer();
     const opening = pendingOpenProject;
-    setVideoFile(next);
-    const nextUrl = URL.createObjectURL(next);
+    setOriginalSourceFile(originalSource);
+    setVideoFile(editorMedia);
+    const nextUrl = options?.editorPlaybackUrl ?? URL.createObjectURL(editorMedia);
     setVideoUrl(nextUrl);
     setMediaSource(nextSource);
     setMediaTrim(opening?.mediaTrim ?? (options?.preserveCaptions ? mediaTrim : createMediaTrim(projectDurationMs(nextSource))));
     setTimelineViewport(createTimelineViewport(projectDurationMs(nextSource)));
-    void loadWaveform(next, waveformJob);
+    void loadWaveform(editorMedia, waveformJob);
     setVideoMetadata(null);
-    setErrorMessage(opening ? `Reselect source media: ${opening.sourceMedia?.fileName ?? next.name}` : null);
+    setErrorMessage(opening ? `Reselect source media: ${opening.sourceMedia?.fileName ?? originalSource.name}` : null);
     setShowCorrection(false);
     setStage("idle");
     setProgress(null);
     setAutomaticRecognitionRequest({
-      identity: `${nextSource.assetId ?? "source"}:${nextSource.fingerprint ?? `${next.name}:${next.size}:${next.type}`}:${next.lastModified}`,
-      file: next,
-      sourceUrl: nextUrl,
+      identity: `${nextSource.assetId ?? "source"}:${nextSource.fingerprint ?? `${originalSource.name}:${originalSource.size}:${originalSource.type}`}:${originalSource.lastModified}`,
+      file: originalSource,
+      sourceUrl: null,
+      preparedAudio: options?.preparedAudio,
       restoredCompletedRecognition: options?.restoredCompletedRecognition ?? Boolean((options?.preserveCaptions || opening) && (opening?.captionSegments.length || segments.length)),
     });
     if (!opening && !options?.preserveCaptions) {
@@ -919,7 +934,7 @@ export default function Home() {
     }
     setPendingOpenProject(null);
     setErrorMessage(null);
-    loadSelectedSource(restored.file, record.project.sourceMedia ?? mediaSourceFromFile(restored.file, record.row.source_media_type?.startsWith("audio/") ? "audio" : "video"), { preserveCaptions: true, restoredCompletedRecognition: record.project.captionSegments.length > 0 });
+    loadSelectedSource(restored.file, restored.file, record.project.sourceMedia ?? mediaSourceFromFile(restored.file, record.row.source_media_type?.startsWith("audio/") ? "audio" : "video"), { preserveCaptions: true, restoredCompletedRecognition: record.project.captionSegments.length > 0 });
   }
   function retryCloudSourceRestore() {
     const record = pendingCloudSourceRestore.current;
@@ -932,9 +947,13 @@ export default function Home() {
     setProjectFormatExplicitlyChosen(false);
     invalidateRecognitionForSourceChange();
     waveformGeneration.current += 1;
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    if (videoUrl?.startsWith("blob:")) URL.revokeObjectURL(videoUrl);
+    void editorMediaDisposer.current?.();
+    editorMediaDisposer.current = null;
+    for (const runtime of assetFiles.current.values()) void runtime.disposeEditorMedia();
     assetFiles.current.clear();
     setVideoFile(null);
+    setOriginalSourceFile(null);
     setVideoUrl(null);
     setVideoMetadata(null);
     setMediaSource(null);
@@ -1024,7 +1043,7 @@ export default function Home() {
     const title = window
       .prompt(
         "Project name",
-        projectName || videoFile?.name || "Untitled project",
+        projectName || originalSourceFile?.name || videoFile?.name || "Untitled project",
       )
       ?.trim();
     if (!title) return;
@@ -1051,7 +1070,7 @@ export default function Home() {
   async function checkpointProjectForAuthentication() {
     if (!repository.current) throw new Error("Local project storage is unavailable, so this editor cannot safely leave for sign-in.");
     const now = new Date().toISOString();
-    const snapshot = projectSnapshot(savedProject?.id ?? crypto.randomUUID(), projectName || videoFile?.name || "Untitled project", savedProject?.createdAt ?? now);
+    const snapshot = projectSnapshot(savedProject?.id ?? crypto.randomUUID(), projectName || originalSourceFile?.name || videoFile?.name || "Untitled project", savedProject?.createdAt ?? now);
     await repository.current.put(snapshot);
     rememberAuthResumeProject(snapshot.id);
     setSavedProject(snapshot);
@@ -1094,21 +1113,21 @@ export default function Home() {
         const remote = await getCloudProject(cloudProjectId);
         if (remote && cloudBaselineUpdatedAt.current && remote.updatedAt !== cloudBaselineUpdatedAt.current && !window.confirm("The cloud version changed since this project was opened. Choose OK to replace it with this local version, or Cancel to open the cloud version.")) return;
       }
-      const sourceChanged = Boolean(videoFile && (videoFile !== null && (mediaSource?.fingerprint ?? `${videoFile.name}:${videoFile.size}`) !== cloudMedia.current.sourceFingerprint));
+      const sourceChanged = Boolean(originalSourceFile && (mediaSource?.fingerprint ?? `${originalSourceFile.name}:${originalSourceFile.size}`) !== cloudMedia.current.sourceFingerprint);
       let sourcePath = oldSourcePath;
       let sourceType = savedProject?.sourceMedia?.mimeType ?? null;
       let sourceName = savedProject?.sourceMedia?.fileName ?? null;
       let sourceSize = savedProject?.sourceMedia?.fileSize ?? null;
       let thumbnailPath = oldThumbnailPath;
       let thumbnailSize: number | null = cloudMedia.current.thumbnailSize;
-      if (sourceChanged && videoFile) {
+      if (sourceChanged && originalSourceFile) {
         cloudSaveStage = "source-upload";
         setCloudSaveStatus("Uploading source media…");
-        sourcePath = newCloudSourcePath(session.user.id, id, videoFile);
-        await uploadPrivateProjectObject(sourcePath, videoFile, videoFile.type || "application/octet-stream", cloudSaveStage);
+        sourcePath = newCloudSourcePath(session.user.id, id, originalSourceFile);
+        await uploadPrivateProjectObject(sourcePath, originalSourceFile, originalSourceFile.type || "application/octet-stream", cloudSaveStage);
         uploaded.push(sourcePath);
-        sourceType = videoFile.type || mediaSource?.mimeType || "application/octet-stream";
-        sourceName = videoFile.name; sourceSize = videoFile.size;
+        sourceType = originalSourceFile.type || mediaSource?.mimeType || "application/octet-stream";
+        sourceName = originalSourceFile.name; sourceSize = originalSourceFile.size;
       }
       if (sourceChanged || !thumbnailPath) {
         cloudSaveStage = "thumbnail";
@@ -1275,21 +1294,37 @@ export default function Home() {
     setMediaCompatibilityError(false);
     setErrorMessage(null);
     try {
-      const { prepareLocalMedia } = await import("@/lib/recognition/local-media-compatibility");
-      const prepared = await prepareLocalMedia(next, abort.signal, (event) => publishMediaPreparation(mediaJob, event));
-      if (abort.signal.aborted) return;
+      const { prepareLocalMedia, prepareRecognitionAudio } = await import("@/lib/recognition/local-media-compatibility");
+      const [editorOutcome, recognitionOutcome] = await Promise.allSettled([
+        prepareLocalMedia(next, abort.signal, (event) => publishMediaPreparation(mediaJob, event)),
+        prepareRecognitionAudio(next, abort.signal, (event) => publishMediaPreparation(mediaJob, event)),
+      ]);
+      if (editorOutcome.status === "rejected") {
+        abort.abort();
+        throw editorOutcome.reason;
+      }
+      if (recognitionOutcome.status === "rejected") {
+        abort.abort();
+        await editorOutcome.value.dispose();
+        throw recognitionOutcome.reason;
+      }
+      const prepared = editorOutcome.value;
+      if (abort.signal.aborted) { await prepared.dispose(); return; }
       const assetId = crypto.randomUUID();
-      const source = mediaSourceFromFile(prepared.file, prepared.kind, {
+      const source = mediaSourceFromFile(prepared.originalSource, prepared.kind, {
         assetId,
         compatibility: prepared.route,
-        originalFileName: prepared.original.name,
-        originalMimeType: prepared.original.type || undefined,
-        displayName: prepared.original.name,
+        originalFileName: prepared.originalSource.name,
+        originalMimeType: prepared.originalSource.type || undefined,
+        displayName: prepared.originalSource.name,
+        durationMs: prepared.inspection.durationMs,
+        width: prepared.inspection.width,
+        height: prepared.inspection.height,
       });
-      assetFiles.current.set(assetId, { file: prepared.file, source });
+      assetFiles.current.set(assetId, { originalSource: prepared.originalSource, editorMedia: prepared.editorMedia, editorPlaybackUrl: prepared.editorPlaybackUrl, disposeEditorMedia: prepared.dispose, source });
       setProjectAssets((current) => [...current, projectAssetFromMediaSource(source, assetId)]);
       setActiveMediaAssetId(assetId);
-      loadSelectedSource(prepared.file, source);
+      loadSelectedSource(prepared.originalSource, prepared.editorMedia, source, { editorPlaybackUrl: prepared.editorPlaybackUrl, disposeEditorMedia: prepared.dispose, preparedAudio: recognitionOutcome.value });
     } catch (error) {
       if (!abort.signal.aborted) {
         const message = mediaCompatibilityErrorMessage(error);
@@ -1316,10 +1351,10 @@ export default function Home() {
     const wouldDiscardCaptions = Boolean(segments.length && activeMediaAssetId !== assetId);
     if (wouldDiscardCaptions && !window.confirm("Switching source clears the current recognition and caption timing. Continue?")) return;
     const source = mediaSourceFromFile(next, mediaKindForFile(next)!, { assetId, durationMs: asset.durationMs, width: asset.width, height: asset.height, origin: asset.sourceOrigin === "youtube-import" ? "youtube-import" : "local-file", sourceUrl: asset.sourceUrl, displayName: asset.name });
-    assetFiles.current.set(assetId, { file: next, source });
+    assetFiles.current.set(assetId, { originalSource: next, editorMedia: next, editorPlaybackUrl: null, disposeEditorMedia: async () => {}, source });
     setProjectAssets((current) => current.map((candidate) => candidate.id === assetId ? { ...candidate, name: next.name, mimeType: next.type, availability: "available" } : candidate));
     setActiveMediaAssetId(assetId);
-    loadSelectedSource(next, source, { preserveCaptions: !wouldDiscardCaptions });
+    loadSelectedSource(next, next, source, { preserveCaptions: !wouldDiscardCaptions });
   }
   function activateProjectAsset(assetId: string) {
     const runtime = assetFiles.current.get(assetId);
@@ -1328,18 +1363,20 @@ export default function Home() {
     if (wouldDiscardCaptions && !window.confirm("Switching source clears the current recognition and caption timing. Continue?")) return;
     setActiveMediaAssetId(assetId);
     setRightInspectorMode(rightInspectorModeForSelection("editor-object"));
-    loadSelectedSource(runtime.file, runtime.source, { preserveCaptions: !wouldDiscardCaptions });
+    loadSelectedSource(runtime.originalSource, runtime.editorMedia, runtime.source, { preserveCaptions: !wouldDiscardCaptions, editorPlaybackUrl: runtime.editorPlaybackUrl, disposeEditorMedia: runtime.disposeEditorMedia });
   }
   function removeProjectAsset(assetId: string) {
     const asset = projectAssets.find((candidate) => candidate.id === assetId);
     if (!asset || !window.confirm(`Remove “${asset.name}” from this project?`)) return;
+    const removedRuntime = assetFiles.current.get(assetId);
     assetFiles.current.delete(assetId);
+    void removedRuntime?.disposeEditorMedia();
     setProjectAssets((current) => current.filter((candidate) => candidate.id !== assetId));
     if (activeMediaAssetId === assetId) {
       invalidateRecognitionForSourceChange();
       setActiveMediaAssetId(null);
-      if (videoUrl) URL.revokeObjectURL(videoUrl);
-      setVideoFile(null); setVideoUrl(null); setVideoMetadata(null); setMediaSource(null); setMediaTrim(createMediaTrim(0)); setWaveformData(null); setTimelineViewport(createTimelineViewport(0));
+      if (videoUrl?.startsWith("blob:")) URL.revokeObjectURL(videoUrl);
+      setVideoFile(null); setOriginalSourceFile(null); setVideoUrl(null); setVideoMetadata(null); setMediaSource(null); setMediaTrim(createMediaTrim(0)); setWaveformData(null); setTimelineViewport(createTimelineViewport(0));
     }
   }
   function loadedVideoMetadata(event: SyntheticEvent<HTMLMediaElement>) {
@@ -1363,7 +1400,7 @@ export default function Home() {
     setTimelineViewport((current) => current.visibleEndMs > 0 ? clampTimelineViewport(current, durationMs) : createTimelineViewport(durationMs));
     if (pendingOpenProject) {
       const result = verifySourceFile(
-        videoFile!,
+        originalSourceFile ?? videoFile!,
         pendingOpenProject.sourceMedia,
         Math.round(metadata.durationSeconds * 1_000),
       );
@@ -1377,8 +1414,8 @@ export default function Home() {
       }
     }
   }
-  async function detect(request?: Pick<AutomaticRecognitionRequest, "file" | "sourceUrl">) {
-    const sourceFile = request?.file ?? videoFile;
+  async function detect(request?: Pick<AutomaticRecognitionRequest, "file" | "sourceUrl" | "preparedAudio">) {
+    const sourceFile = request?.file ?? originalSourceFile;
     const sourceUrl = request?.sourceUrl ?? videoUrl;
     if (!sourceFile || !support?.supported || busyStages.includes(stage)) return;
     const sourceIdentity = `${sourceFile.name}:${sourceFile.size}:${sourceFile.lastModified}`;
@@ -1418,18 +1455,20 @@ export default function Home() {
     };
     try {
       reportProgress("preparing-media");
-      const { prepareRecognitionAudio } = await import("@/lib/recognition/local-media-compatibility");
+      let authoritativeAudio = request?.preparedAudio;
       const abort = new AbortController();
-      mediaPreparationAbort.current?.abort();
-      mediaPreparationAbort.current = abort;
-      const mediaJob = beginMediaPreparation("preparing-converter");
-      let authoritativeAudio: PreparedRecognitionAudio;
-      try {
-        authoritativeAudio = await prepareRecognitionAudio(sourceFile, abort.signal, (event) => publishMediaPreparation(mediaJob, event));
-      } finally {
-        if (mediaPreparationAbort.current === abort) {
-          mediaPreparationAbort.current = null;
-          clearMediaPreparation(mediaJob);
+      if (!authoritativeAudio) {
+        const { prepareRecognitionAudio } = await import("@/lib/recognition/local-media-compatibility");
+        mediaPreparationAbort.current?.abort();
+        mediaPreparationAbort.current = abort;
+        const mediaJob = beginMediaPreparation("preparing-converter");
+        try {
+          authoritativeAudio = await prepareRecognitionAudio(sourceFile, abort.signal, (event) => publishMediaPreparation(mediaJob, event));
+        } finally {
+          if (mediaPreparationAbort.current === abort) {
+            mediaPreparationAbort.current = null;
+            clearMediaPreparation(mediaJob);
+          }
         }
       }
       if (abort.signal.aborted) return;
@@ -1809,8 +1848,11 @@ export default function Home() {
     waveformGeneration.current += 1;
     setWaveformData(null);
     setTimelineViewport(createTimelineViewport(0));
-    if (videoUrl) URL.revokeObjectURL(videoUrl);
+    if (videoUrl?.startsWith("blob:")) URL.revokeObjectURL(videoUrl);
+    void editorMediaDisposer.current?.();
+    editorMediaDisposer.current = null;
     setVideoFile(null);
+    setOriginalSourceFile(null);
     setVideoUrl(null);
     setVideoMetadata(null);
     setMediaSource(null);
@@ -1846,7 +1888,7 @@ export default function Home() {
       setErrorMessage("Enter a valid surah and ayah range.");
       return;
     }
-    const ownership = recognitionJobs.current.start(`manual:${videoFile?.name ?? "source"}:${videoFile?.size ?? 0}`, true);
+    const ownership = recognitionJobs.current.start(`manual:${originalSourceFile?.name ?? "source"}:${originalSourceFile?.size ?? 0}`, true);
     if (!ownership) return;
     const job = ownership.id;
     generation.current = job;
@@ -2613,16 +2655,16 @@ export default function Home() {
         quality: authorization.quality,
         watermarkRequired: authorization.watermarkRequired,
       });
-      if (!videoFile) {
+      if (!originalSourceFile) {
         setExportError("Choose a source video before exporting.");
         setExportState("error");
         setExportOpen(true);
         return;
       }
       const preflightProject = projectSnapshot(savedProject?.id ?? "export-preflight", projectName || "Untitled project", savedProject?.createdAt ?? new Date(0).toISOString());
-      const preflight = await checkExportPreflight(preflightProject, videoFile, configuration);
+      const preflight = await checkExportPreflight(preflightProject, originalSourceFile, configuration);
       const request: AuthorizedExportRequest = {
-        source: videoFile,
+        source: originalSourceFile,
         configuration,
         preflight,
         authorization,
