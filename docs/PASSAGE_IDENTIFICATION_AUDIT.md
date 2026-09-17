@@ -135,3 +135,156 @@ The local-only diagnostic is `tools/regression/diagnose-real-quran-id.ts`; it
 accepts derived 16 kHz float PCM and pinned public Tilawa assets, emitting only
 candidate and gate evidence. It is suitable for future bisects without adding
 customer media to the repository.
+
+## 2026-09-17 CTC-gate metric audit
+
+The per-window `normalizedCtcScore` is the exact forward CTC log likelihood of
+that candidate's word-level canonical BPE target (or the better optional-
+prelude-plus-canonical target) over every acoustic frame in its 12-second,
+6-second-hop identification window, divided by the number of acoustic frames.
+VAD qualifies a window but does not trim silence or breaths from it. The
+forward sum includes every valid blank/repeat path; only the separate greedy
+capacity calculation collapses repeats and removes blank tokens.
+
+The final `coherentPathMeanCtc` is the unweighted arithmetic mean of those
+per-frame-normalized scores for every non-null candidate on the winning
+surah's Viterbi path. It is not a single whole-passage CTC recomputation. The
+identity gate never expands its target to complete ayat: retrieval and local
+continuation retain exact mid-ayah word boundaries. Complete-ayah expansion
+occurs only after identity acceptance, when the separate forced-alignment run
+scores the known display passage with a max-path Viterbi score per frame.
+
+At diagnostic commit `f309a1e`, the field named `bestWindowCtc` was mislabeled
+and behaviorally incorrect. `summarizeFastConformerIdentification` took
+`selectedInsideSurah[0]`, the first non-null candidate in chronological path
+order, rather than the maximum normalized score. The production gate consumes
+that summary value. Meanwhile `fastconformer-window-result` logs the independently
+reranked winner for each window, which can differ from the candidate selected
+by the global Viterbi path. Thus the two logs intentionally describe different
+candidates, but selecting the first path candidate as "best" is not
+intentional best-window semantics. The acceptance-fix milestone below corrects
+that defect. No target is recomputed and no full-ayah
+span is scored at this gate.
+
+Debug-media output now emits one `ctc-gate-input` record per window and one
+`final-ctc-gate-components` record. They expose the independent winner, exact
+coherent-path candidate, audio/sample interval, target word coordinates, token
+count, raw and normalized score, frame denominator, first-path value, actual
+coherent-path maximum, and recomputed mean without changing acceptance.
+
+The five-window long-timeline rule came from `c69a018`: a recovery could
+otherwise assemble a plausible span from one strong local phrase plus weak,
+mixed, or skipped windows. Commit `756b052` scoped the mean gate to five or
+more generated windows after the real three-window Muddaththir recovery showed
+that a noisy supporting edge (`-1.676116`) could pull the two-candidate mean to
+`-1.012985` even though the correct opening scored `-0.349854`. Long clips
+therefore still require both the reported best-window value and coherent-path
+mean to reach `-0.60`, plus 60% coherent-window support, no unsupported run of
+three, at least 50% VAD-qualified voiced coverage, two agreeing windows, a
+0.05 global margin, same-surah structure, and lexical uniqueness of at least
+0.08.
+
+The supplied 2:258-259 and 6:74-77 recordings were not present in the local
+workspace, attachments, or retained private fixture directory, so their raw
+path arrays and Whisper transcripts could not be replayed. The reported Surah
+2 margin (`38.5135`), 18/19 path support, 0.95 voiced-window coverage, monotonic
+same-surah span, and one-window maximum gap nevertheless establish overwhelming
+dominance over the runner-up under the current global solver. Whisper's
+abstention is independent text-match weakness, not contradictory acoustic
+evidence: the fallback neither consumes nor vetoes FastConformer evidence.
+
+Frame normalization removes raw duration accumulation but does not make target
+choice length-neutral. Added unrecited tokens must be emitted and worsen fit;
+very short targets can explain remaining frames as blank. The solver's
+`targetCoverage` short-target penalty exists for that latter bias, but the
+reported CTC metric itself remains only log likelihood per acoustic frame.
+Partial-ayah start/end handling does not cause the reported Surah 2 gate
+failure because identity candidates are word-bounded; full-ayah forced
+alignment happens only after acceptance. A future fix should first make
+best-window mean the maximum candidate score on the winning coherent path,
+then use retained real reports to design an edge/partial-window-aware long-path
+statistic while preserving the isolated-phrase, repeated-language, coverage,
+gap, margin, and wrong-surah protections.
+
+## 2026-09-17 acceptance-fix calibration
+
+Three privacy-safe logical fixtures now retain the supplied coherent-path score
+order, null windows, approximate anchor index, coverage, coherent ratio,
+agreement count, longest gap, margin, structural validity, and surah
+consistency. Lexical uniqueness and per-window voiced-duration/target-coverage
+weights were not present in the supplied reports and are therefore retained as
+unknown rather than invented. The weighted calculations below use explicit
+uniform proxy weights; they are arithmetic-mean-equivalent and cannot calibrate
+a production weighted rule.
+
+The objective defect is fixed independently: `bestWindowCtc` is now the
+maximum finite `normalizedCtcScore` among candidates selected by the winning
+coherent same-surah path. It is never taken from an independent per-window
+winner. The retained before → after values are 2:258–259 `-1.656940 →
+-0.168907`, 6:74–77 `-2.952631 → -0.207528`, and 20:100–104 `-0.672825 →
+-0.540149`.
+
+The diagnostic statistics have these exact definitions for finite coherent
+scores `s`: arithmetic mean; means weighted by voiced duration or target
+coverage; ordinary median; a 10% two-sided trimmed mean with
+`floor(0.1 n)` observations removed per tail; a matching 10% winsorized mean;
+linearly interpolated 75th percentile; mean of the strongest three; an
+anchor-aware mean with pre-anchor weight `0.25` and anchor/post-anchor weight
+`1`; post-anchor mean including the activation window; `max(s) - 0.5 × (1 -
+fraction(s >= -0.60))`; and the mean of the strongest `ceil(n/2)` scores.
+
+| Statistic | 2:258–259 | 6:74–77 | 20:100–104 (observational) | Protected negatives newly accepted at `-0.60` | Protected negatives still rejected |
+| --- | ---: | ---: | ---: | --- | --- |
+| Arithmetic mean | -0.844800 | -1.177863 | -0.837851 | none | all 13 |
+| Voiced-duration-weighted mean (uniform proxy) | -0.844800 | -1.177863 | -0.837851 | none | all 13 |
+| Target-coverage-weighted mean (uniform proxy) | -0.844800 | -1.177863 | -0.837851 | none | all 13 |
+| Median | -0.646189 | -0.726755 | -0.640654 | none | all 13 |
+| 10% trimmed mean | -0.811121 | -1.077308 | -0.837851 | none | all 13 |
+| 10% winsorized mean | -0.830422 | -1.130956 | -0.837851 | none | all 13 |
+| 75th percentile | -0.434903 | -0.495891 | -0.591399 | none | all 13 (other gates protect 12) |
+| Strongest-three mean | -0.199509 | -0.338614 | -0.607152 | none | all 13 |
+| Anchor-aware mean | -0.668121 | -0.959340 | -0.679730 | none | all 13 |
+| Post-anchor mean | -0.592401 | -0.813659 | -0.574316 | none | all 13 |
+| Best plus support ratio | -0.446685 | -0.557528 | -0.915149 | isolated-strong-window | 12 |
+| Strongest-half mean | -0.392379 | -0.473052 | -0.574316 | none | all 13 |
+
+The 13 protected shapes are: isolated strong evidence with weak surroundings,
+a three-window unsupported gap, repeated/shared Quran language, low lexical
+uniqueness, low VAD coverage, small global margin, wrong-surah transitions,
+backward jumps, invalid structure, non-finite evidence, a short target with
+too little acoustic capacity, basmalah-only evidence, and mixed unrelated
+window matches. Except for the isolated-strong fixture, their independent
+production guard rejects them regardless of the acoustic aggregate. That is
+useful invariant coverage, but it is not negative acoustic calibration data.
+The only retained acoustic-only negative uses the historical `-1.01` mean
+shape, not real per-window measurements. The best-plus-support formula lands
+exactly on `-0.60` for it and would newly accept it; upper-tail methods also
+remain vulnerable to two or three isolated strong phrases even where this
+five-window synthetic shape stays below threshold.
+
+Pre-anchor evidence is the main mean degradation for 2:258–259 (pre `-1.728193`,
+post `-0.592401`) and 20:100–104 (pre `-1.101387`, post `-0.574316`). It is not
+a sufficient explanation for 6:74–77: its pre-anchor mean is `-1.542066`, but
+post-anchor remains failing at `-0.813659` because a later `-2.333734` window
+survives. Ignoring the prefix would therefore both miss the known positive
+control and permit a lucky late anchor to discard contradictory history.
+
+The poor values are consistent with expected 12-second/6-second-hop boundary
+effects: VAD qualifies but does not trim breaths or silence, and an overlapping
+window may score a wider partial-word target chosen for global continuity than
+its independent local winner. The evidence does not prove every low value is
+an artifact; the post-anchor Surah 6 outlier is why these values must continue
+to count as potentially contradictory evidence until frame counts, per-window
+weights, and real negative paths are retained.
+
+No robust aggregate or replacement threshold is selected. Several statistics
+pass the two retained positives, but available protected negatives cannot
+safely calibrate their acoustic false-positive boundary, and the observational
+Surah 20 truth is unknown. The production long-path arithmetic mean and
+`-0.60` threshold therefore remain unchanged. With only the objective max fix,
+2:258–259 and FastConformer 6:74–77 still abstain at the mean gate; 6:74–77
+continues to be rescued by Whisper, and 20:100–104 remains an abstention.
+Required next evidence is privacy-safe per-window coherent scores, voiced
+durations, target coverage, anchor events, and gate metadata for actual
+false-positive/abstention recordings—especially isolated strong phrases and
+mixed/repeated Quran matches.

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createFinalPassageDebugFacts, createPassageIdentificationDebugReport } from "../src/lib/recognition/passage-identification-debug.ts";
+import { createCtcGateDebugFacts, createFinalPassageDebugFacts, createPassageIdentificationDebugReport } from "../src/lib/recognition/passage-identification-debug.ts";
 import { decideFastConformerPassage } from "../src/lib/recognition/passage-decision.ts";
 import { canonicalSpanFromFastConformerIdentification } from "../src/lib/recognition/core.ts";
 import type { FastConformerIdentificationResult, QuranPassageCandidate } from "../src/lib/recognition/fastconformer-identification.ts";
@@ -76,4 +76,28 @@ test("final passage diagnostics expose coherent-path gate mode and failed rules 
   assert.equal(decision.accepted, false);
   assert.equal(facts.gateMode, "long-recording-best-and-coherent-path-ctc");
   assert.deepEqual(facts.failedAcceptanceRules, ["coherent-path-ctc"]);
+});
+
+test("CTC gate diagnostics report the maximum coherent-path candidate as the best window", () => {
+  const identification = identificationWithWindows(5, -0.46);
+  const first = { ...identification.windowResults[0]!.selectedCandidate!, normalizedCtcScore: -1.65, ctcScore: -165 };
+  const actualBest = { ...identification.windowResults[1]!.selectedCandidate!, normalizedCtcScore: -0.17, ctcScore: -17 };
+  const path = identification.globalHypotheses[0]!.path.map((entry, index) => ({
+    ...entry,
+    candidate: index === 0 ? first : index === 1 ? actualBest : entry.candidate,
+  }));
+  const audited: FastConformerIdentificationResult = {
+    ...identification,
+    normalizedCtcScore: -0.17,
+    confidence: { ...identification.confidence, normalizedBestCtcScore: -0.17 },
+    globalHypotheses: [{ ...identification.globalHypotheses[0]!, path }],
+  };
+  const decision = decideFastConformerPassage(audited, canonicalSpanFromFastConformerIdentification(audited.canonicalSpan));
+  const facts = createCtcGateDebugFacts(audited, decision);
+  assert.equal(facts.final.reportedBestWindowCtc, -0.17);
+  assert.equal(facts.final.reportedBestWindowCtcSource, "maximum-finite-coherent-path-candidate");
+  assert.equal(facts.final.actualBestCoherentPathCtc, -0.17);
+  assert.equal(facts.windows[0]?.usedByReportedBestWindowGate, false);
+  assert.equal(facts.windows[1]?.usedByReportedBestWindowGate, true);
+  assert.equal(facts.windows.every((window) => window.usedByCoherentPathMeanGate), true);
 });

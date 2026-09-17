@@ -1,4 +1,4 @@
-import type { FastConformerIdentificationResult, QuranPassageCandidate } from "./fastconformer-identification.ts";
+import { bestCoherentPathCandidate, type FastConformerIdentificationResult, type QuranPassageCandidate } from "./fastconformer-identification.ts";
 import { FASTCONFORMER_LONG_TIMELINE_MINIMUM_WINDOW_COUNT, FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS, type FastConformerPassageDecision } from "./passage-decision.ts";
 import type { VadSpeechRegion } from "./speech-regions.ts";
 import { mediaDebug, type MediaDebugFacts } from "./media-debug.ts";
@@ -177,6 +177,74 @@ function compactCandidate(candidate: QuranPassageCandidate | null) {
   };
 }
 
+function ctcGateCandidate(candidate: QuranPassageCandidate | null) {
+  if (!candidate) return null;
+  return {
+    start: candidate.start,
+    end: candidate.end,
+    targetTokenCount: candidate.ctcTokenCount,
+    rawCtcScore: candidate.ctcScore,
+    normalizedCtcScore: candidate.normalizedCtcScore,
+    targetCoverage: candidate.targetCoverage,
+    origins: candidate.origins ?? [],
+  };
+}
+
+/** Debug-only audit of the exact values entering the production CTC gates.
+ * It keeps the first-path value visible beside the coherent-path maximum and
+ * independent per-window winners so future regressions cannot conflate them. */
+export function createCtcGateDebugFacts(
+  identification: FastConformerIdentificationResult | null,
+  decision: FastConformerPassageDecision,
+) {
+  const windows = identification?.windowResults ?? [];
+  const coherentPath = new Map((identification?.globalHypotheses[0]?.path ?? []).map((entry) => [entry.windowIndex, entry.candidate]));
+  const coherentCandidates = (identification?.globalHypotheses[0]?.path ?? []).flatMap((entry) => entry.candidate ? [entry.candidate] : []);
+  const coherentScores = coherentCandidates.flatMap((candidate) => candidate.normalizedCtcScore !== null && Number.isFinite(candidate.normalizedCtcScore) ? [candidate.normalizedCtcScore] : []);
+  const coherentBestCandidate = bestCoherentPathCandidate(identification?.globalHypotheses[0]?.path ?? [], identification?.selectedSurah ?? null);
+  const firstCoherentPathCtc = coherentScores[0] ?? null;
+  const actualBestCoherentPathCtc = coherentScores.length ? Math.max(...coherentScores) : null;
+  const recomputedCoherentPathMeanCtc = coherentScores.length
+    ? Number((coherentScores.reduce((sum, score) => sum + score, 0) / coherentScores.length).toFixed(6))
+    : null;
+  const singleWindow = decision.evidence.strongWindowCount === 1;
+  const ctcThreshold = singleWindow
+    ? FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.singleWindowMinimumNormalizedCtcScore
+    : FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS.multiWindowMinimumNormalizedCtcScore;
+  return {
+    windows: windows.map((window) => {
+      const coherentCandidate = coherentPath.get(window.index) ?? null;
+      return {
+        windowIndex: window.index,
+        audioStartMs: window.startMs,
+        audioEndMs: window.endMs,
+        audioStartSample: Math.floor(window.startMs * 16_000 / 1_000),
+        audioEndSample: Math.ceil(window.endMs * 16_000 / 1_000),
+        voicedMs: window.voicedMs,
+        ctcFrameCount: window.ctcFrameCount ?? null,
+        independentWindowWinner: ctcGateCandidate(window.selectedCandidate),
+        coherentPathCandidate: ctcGateCandidate(coherentCandidate),
+        usedByReportedBestWindowGate: coherentCandidate !== null && coherentCandidate === coherentBestCandidate,
+        usedByCoherentPathMeanGate: coherentCandidate !== null,
+      };
+    }),
+    final: {
+      gateMode: fastConformerCtcGateMode(decision),
+      ctcThreshold,
+      reportedBestWindowCtc: decision.evidence.normalizedBestCtcScore,
+      reportedBestWindowCtcSource: "maximum-finite-coherent-path-candidate",
+      firstCoherentPathCtc,
+      actualBestCoherentPathCtc,
+      reportedCoherentPathMeanCtc: decision.evidence.normalizedCoherentCtcScore,
+      recomputedCoherentPathMeanCtc,
+      coherentCandidateCount: coherentScores.length,
+      bestWindowGatePassed: (decision.evidence.normalizedBestCtcScore ?? Number.NEGATIVE_INFINITY) >= ctcThreshold,
+      coherentPathGateApplied: decision.evidence.totalWindowCount >= FASTCONFORMER_LONG_TIMELINE_MINIMUM_WINDOW_COUNT,
+      coherentPathGatePassed: (decision.evidence.normalizedCoherentCtcScore ?? Number.NEGATIVE_INFINITY) >= ctcThreshold,
+    },
+  } as const;
+}
+
 /** Shared /create and /editor ?debugMedia=1 recognition evidence. */
 export function quranRecognitionDebug(
   identification: FastConformerIdentificationResult | null,
@@ -184,6 +252,7 @@ export function quranRecognitionDebug(
   context?: { speechRegions: readonly VadSpeechRegion[]; durationMs: number },
 ): void {
   const windows = identification?.windowResults ?? [];
+  const ctcGate = createCtcGateDebugFacts(identification, decision);
   const rawVadVoicedDurationMs = context?.speechRegions.reduce((sum, region) => sum + region.durationMs, 0) ?? null;
   mediaDebug("vad-window-summary", {
     rawVadVoicedDurationMs,
@@ -210,6 +279,8 @@ export function quranRecognitionDebug(
       participatesInFinalCoherentPath: coherentPath.get(window.index) != null,
     });
   }
+  for (const gateInput of ctcGate.windows) mediaDebug("ctc-gate-input", gateInput);
+  mediaDebug("final-ctc-gate-components", ctcGate.final);
   mediaDebug("fastconformer-primary", {
     decision: decision.accepted ? "accepted" : "abstained",
     accepted: decision.accepted,

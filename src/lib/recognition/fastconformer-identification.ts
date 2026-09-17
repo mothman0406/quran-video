@@ -107,6 +107,9 @@ export type IdentificationWindowResult = {
   startMs: number;
   endMs: number;
   voicedMs: number;
+  /** Acoustic-frame denominator used by every candidate's normalized CTC
+   * score. Retained for diagnostics; it has no scoring authority. */
+  ctcFrameCount?: number;
   greedy: GreedyCtcDecode;
   candidates: QuranPassageCandidate[];
   selectedCandidate: QuranPassageCandidate | null;
@@ -200,6 +203,20 @@ export type PassageIdentificationCompare = {
   fastConformer: FastConformerIdentificationResult;
   agreement: { sameSurah: boolean | null; overlappingAyat: boolean | null; exactSpan: boolean | null };
 };
+
+export function bestCoherentPathCandidate(
+  path: readonly { candidate: QuranPassageCandidate | null }[],
+  selectedSurah: number | null,
+) {
+  return path.reduce<QuranPassageCandidate | null>((currentBest, entry) => {
+    const candidate = entry.candidate;
+    if (!candidate || candidate.start.surah !== selectedSurah || candidate.end.surah !== selectedSurah) return currentBest;
+    const score = candidate.normalizedCtcScore;
+    if (score === null || !Number.isFinite(score)) return currentBest;
+    const currentScore = currentBest?.normalizedCtcScore;
+    return currentScore === null || currentScore === undefined || score > currentScore ? candidate : currentBest;
+  }, null);
+}
 
 export function comparePassageIdentification(
   currentProduction: PassageIdentificationCompare["currentProduction"],
@@ -626,7 +643,7 @@ export function identifyQuranWindow(index: QuranWideLexicalIndex, input: Identif
       : best.confidence < 0.25 ? "weak-candidate"
         : "strong-candidate";
   return {
-    index: input.index, startMs: input.startMs, endMs: input.endMs, voicedMs: input.voicedMs, greedy, candidates, selectedCandidate: best, state,
+    index: input.index, startMs: input.startMs, endMs: input.endMs, voicedMs: input.voicedMs, ctcFrameCount: input.logits.frames, greedy, candidates, selectedCandidate: best, state,
     elapsedMs: Math.round(performance.now() - startedAt),
     performance: { retrievalMs, rerankingMs, candidatesReranked: Math.min(rerankInput.length, FASTCONFORMER_IDENTIFICATION_DEFAULTS.rerankCandidateLimit) },
     crossSurahCandidatesRejected: retrieval.crossSurahCandidatesRejected,
@@ -844,7 +861,7 @@ export function summarizeFastConformerIdentification(windows: readonly Identific
   const solution = solveQuranContinuity(windows);
   const selected = solution.path.flatMap((entry) => entry.candidate ? [entry.candidate] : []);
   const selectedInsideSurah = selected.filter((candidate) => candidate.start.surah === solution.selectedSurah && candidate.end.surah === solution.selectedSurah);
-  const best = selectedInsideSurah[0] ?? null;
+  const best = bestCoherentPathCandidate(solution.path, solution.selectedSurah);
   const optionalPrelude = selectedInsideSurah.find((candidate) => candidate.optionalPrelude.selected === "present")?.optionalPrelude
     ?? selectedInsideSurah.find((candidate) => candidate.optionalPrelude.available)?.optionalPrelude
     ?? null;
