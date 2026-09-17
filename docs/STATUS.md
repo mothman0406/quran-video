@@ -1,5 +1,38 @@
 # Status
 
+## Current milestone: Collect real Quran CTC calibration data
+
+Complete:
+
+- Added a privacy-safe, whitelist-only converter for existing
+  `?debugMedia=1` logs plus six retained JSON captures: one real positive and
+  five locally derived negatives. Media, transcripts, filenames, paths, PCM,
+  hashes, Quran text, and personal metadata are excluded.
+- Exercised isolated, weak and strong repeated, mixed/non-contiguous, and
+  backward-order audio through the unchanged production recognition path. The
+  source media and all derivatives remain ignored and unmodified/uncommitted.
+- Preserved a discovered false positive without patching it: repeated 6:77
+  makes FastConformer abstain on margin/coverage/support, but Whisper fallback
+  accepts 6:77–78.
+- Re-evaluated all 12 existing offline statistics. Only upper quartile and
+  strongest-half have gate-conditioned separation, just `0.052458`; no
+  statistic separates every positive from all real and logical negatives on
+  its own. Anchor-aware scoring worsens the strong-repetition boundary.
+- Production scoring, thresholds, Whisper, VAD, candidate retrieval,
+  continuation, forced alignment, media ingest, FFmpeg, exact transmux, OPFS,
+  service worker, and public assets remain unchanged. No production gate
+  change is recommended.
+
+Verification: all six browser captures used the normal production preparation
+and identification flow. `npm run check:ffmpeg-assets`, `npm run
+regression:quran-id`, `npm test` (471 passing), `npx tsc --noEmit`, `npm run
+lint -- --quiet`, `npm run build`, and `git diff --check` pass. Diffs under
+`src/lib/recognition`, `src/lib/media`, `src/app/create`, and `public` are
+empty. The build retains the existing VAD/ONNX warnings and TikTok
+configuration reminder.
+
+Detailed evidence: `docs/CTC_CALIBRATION_CORPUS.md`.
+
 ## Current milestone: Design and validate recognition acceptance fix
 
 Complete:

@@ -288,3 +288,25 @@ Required next evidence is privacy-safe per-window coherent scores, voiced
 durations, target coverage, anchor events, and gate metadata for actual
 false-positive/abstention recordings—especially isolated strong phrases and
 mixed/repeated Quran matches.
+
+## 2026-09-17 real acoustic calibration corpus
+
+Five derived negative recordings and the retained Muddaththir positive were
+run through the unchanged browser production path and reduced to a strict
+privacy-safe capture schema. The strongest negative is repeated 6:77: its
+FastConformer mean is `-0.494320`, but margin, coverage, and coherent support
+correctly abstain. Whisper fallback then accepts 6:77–78, preserving a newly
+discovered real false positive without changing either engine.
+
+All twelve existing offline statistics were rerun with real voiced-duration
+and target-coverage weights where captured. Only 75th percentile and
+strongest-half have any gate-conditioned separation, and both have the same
+fragile `0.052458` margin between Muddaththir 74:1–9 (`-0.632733`) and its
+isolated excerpt (`-0.685191`). Neither has raw separation: strong repetition
+and reverse-order audio score above the positive boundary and are safe only
+because independent production gates remain intact. Anchor-aware and
+post-anchor scoring make the strong repetition look better, not safer.
+
+No long-path production change is ready. Full corpus fields, inventory,
+commands, per-case chronology, results, and the exact next evidence are in
+`docs/CTC_CALIBRATION_CORPUS.md`.

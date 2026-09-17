@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "id": "repeated-6-77",
+  "expected": {
+    "outcome": "negative",
+    "intent": "Repeating one strong ayah must not masquerade as forward Quran progression.",
+    "surah": 6,
+    "startAyah": 77,
+    "endAyah": 77
+  },
+  "totalGeneratedWindows": 9,
+  "usableWindows": 9,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 11808,
+      "coherentPathCtc": -0.6899,
+      "targetCoverage": 0.75,
+      "targetTokenCount": 30,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 1,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.145233,
+      "targetCoverage": 1,
+      "targetTokenCount": 25,
+      "anchorActive": true,
+      "anchorEvent": "anchor-activated",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 2,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.647827,
+      "targetCoverage": 0.821429,
+      "targetTokenCount": 23,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local"
+      ]
+    },
+    {
+      "index": 3,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": []
+    },
+    {
+      "index": 4,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": []
+    },
+    {
+      "index": 5,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": []
+    },
+    {
+      "index": 6,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": []
+    },
+    {
+      "index": 7,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": []
+    },
+    {
+      "index": 8,
+      "voicedMs": 11424,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": []
+    }
+  ],
+  "agreeingWindowCount": 3,
+  "coherentRatio": 0.3333,
+  "coverage": 0.3339,
+  "longestUnsupportedRun": 6,
+  "margin": null,
+  "lexicalUniqueness": 0.339145,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -0.145233,
+  "coherentPathMeanCtc": -0.49432,
+  "fastConformerProposedRange": {
+    "surah": 6,
+    "startAyah": 77,
+    "endAyah": 78
+  },
+  "fastConformerOutcome": "abstained",
+  "finalProposedRange": {
+    "surah": 6,
+    "startAyah": 77,
+    "endAyah": 78
+  },
+  "finalOutcome": "accepted",
+  "finalAuthority": "whisper-fallback",
+  "failedAcceptanceRules": [
+    "margin",
+    "coverage",
+    "coherent-window-support"
+  ]
+}

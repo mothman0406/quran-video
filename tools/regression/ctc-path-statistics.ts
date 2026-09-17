@@ -3,7 +3,7 @@ export const CTC_REFERENCE_THRESHOLD = -0.60;
 export type CtcPathFixture = {
   id: string;
   intent: string;
-  classification: "retained-positive" | "observational" | "protected-negative";
+  classification: "retained-positive" | "observational" | "real-negative" | "protected-negative";
   scores: readonly (number | null)[];
   anchorActivationIndex: number | null;
   voicedDurationWeights: readonly number[];

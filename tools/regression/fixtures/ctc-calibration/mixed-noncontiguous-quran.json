@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "id": "mixed-noncontiguous-quran",
+  "expected": {
+    "outcome": "negative",
+    "intent": "Non-contiguous Quran audio must not be accepted as one continuous passage.",
+    "surah": null,
+    "startAyah": null,
+    "endAyah": null
+  },
+  "totalGeneratedWindows": 9,
+  "usableWindows": 9,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 7968,
+      "coherentPathCtc": -3.293638,
+      "targetCoverage": 0.631579,
+      "targetTokenCount": 24,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 1,
+      "voicedMs": 12000,
+      "coherentPathCtc": -2.483728,
+      "targetCoverage": 0.571429,
+      "targetTokenCount": 28,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 2,
+      "voicedMs": 11424,
+      "coherentPathCtc": -1.004629,
+      "targetCoverage": 0.740741,
+      "targetTokenCount": 20,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 3,
+      "voicedMs": 11424,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 4,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 5,
+      "voicedMs": 10848,
+      "coherentPathCtc": -2.006666,
+      "targetCoverage": 0.536585,
+      "targetTokenCount": 22,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 6,
+      "voicedMs": 10848,
+      "coherentPathCtc": -2.090891,
+      "targetCoverage": 0.571429,
+      "targetTokenCount": 20,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 7,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.33734,
+      "targetCoverage": 0.935484,
+      "targetTokenCount": 29,
+      "anchorActive": true,
+      "anchorEvent": "anchor-activated",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 8,
+      "voicedMs": 9312,
+      "coherentPathCtc": -0.465856,
+      "targetCoverage": 1,
+      "targetTokenCount": 19,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    }
+  ],
+  "agreeingWindowCount": 7,
+  "coherentRatio": 0.7778,
+  "coverage": 0.7605,
+  "longestUnsupportedRun": 2,
+  "margin": 6.5618,
+  "lexicalUniqueness": 0.366967,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -0.33734,
+  "coherentPathMeanCtc": -1.668964,
+  "fastConformerProposedRange": {
+    "surah": 6,
+    "startAyah": 74,
+    "endAyah": 78
+  },
+  "fastConformerOutcome": "abstained",
+  "finalProposedRange": {
+    "surah": 6,
+    "startAyah": 74,
+    "endAyah": 74
+  },
+  "finalOutcome": "abstained",
+  "finalAuthority": "whisper-fallback",
+  "failedAcceptanceRules": [
+    "coherent-path-ctc"
+  ]
+}

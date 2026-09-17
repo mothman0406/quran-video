@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "id": "isolated-muddaththir-excerpt",
+  "expected": {
+    "outcome": "negative",
+    "intent": "One short phrase must not extrapolate the broader Muddaththir passage.",
+    "surah": 74,
+    "startAyah": 1,
+    "endAyah": 9
+  },
+  "totalGeneratedWindows": 1,
+  "usableWindows": 1,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 4800,
+      "coherentPathCtc": -0.685191,
+      "targetCoverage": 0.583333,
+      "targetTokenCount": 14,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    }
+  ],
+  "agreeingWindowCount": 1,
+  "coherentRatio": 1,
+  "coverage": 1,
+  "longestUnsupportedRun": 0,
+  "margin": 2.2668,
+  "lexicalUniqueness": 0.8,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -0.685191,
+  "coherentPathMeanCtc": -0.685191,
+  "fastConformerProposedRange": {
+    "surah": 74,
+    "startAyah": 4,
+    "endAyah": 5
+  },
+  "fastConformerOutcome": "abstained",
+  "finalProposedRange": {
+    "surah": 2,
+    "startAyah": 165,
+    "endAyah": 165
+  },
+  "finalOutcome": "abstained",
+  "finalAuthority": "whisper-fallback",
+  "failedAcceptanceRules": [
+    "best-window-ctc"
+  ]
+}
