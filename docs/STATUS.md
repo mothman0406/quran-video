@@ -1,5 +1,45 @@
 # Status
 
+## Current milestone: Audit fast media ingest paths
+
+Complete:
+
+- Traced the selected-file path through Mediabunny inspection, FFmpeg-WASM
+  normalization, canonical recognition audio, `/create` → `/videos`, editor
+  playback, Supabase saving, and local export. Documented the exact coupling:
+  `browserPlayback:false` unconditionally selects full normalization before
+  recognition despite independently usable native audio.
+- Located and inspected the 154,990,091-byte ReplayKit screen recording
+  without modifying it. It is a non-fragmented QuickTime MOV containing
+  MP4-compatible H.264 Main (`avc1.4d0033`) 2376×1334 variable-rate BT.709
+  video and AAC-LC 48 kHz stereo audio, with no rotation.
+- Proved native packet copy to fast-start MP4 in 0.23 s. Installed Mediabunny
+  1.55.3 supports MOV→MP4 packet copy in general, but this file's negative raw
+  edited timestamps make its stock Conversion choose transcoding; forcing its
+  copy path changed the timeline and was rejected. Current online Conversion
+  copy controls are not present in the installed package.
+- Measured a same-Mac VideoToolbox H.264 control at 8.46 s, 46,862,683 output
+  bytes, 32.98 s, and about 341 MB maximum RSS while copying AAC. A headless
+  Chrome WebCodecs run did not yield a reliable completion, so browser hardware
+  timing remains an explicit follow-up rather than a fabricated result. The
+  supplied existing FFmpeg-WASM observation remains about five minutes and was
+  not rerun.
+- Recommended direct → exact transmux → local WebCodecs proxy → AWS
+  S3/MediaConvert cloud fallback → explicit offline FFmpeg-WASM, with original,
+  recognition PCM, editor media, and export source represented independently.
+  Defined proxy, upload/resume, concurrency, 24-hour retention, security,
+  cleanup, cost, entitlement, and minimal staged implementation guidance in
+  `docs/FAST_MEDIA_INGEST_AUDIT.md`.
+- No production code, infrastructure, billing, or recognition behavior changed.
+
+Verification: baseline `npm run check:ffmpeg-assets`, `npm run
+regression:quran-id` (8 logical fixtures), `npm test` (444 passing), `npx tsc
+--noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check`
+pass. The first standalone TypeScript invocation raced a concurrent Next build
+over generated `.next/types`; the required sequential rerun passed. The build
+retains the pre-existing VAD/ONNX warnings and optional TikTok configuration
+reminder.
+
 ## Current milestone: Refine canonical audio selection
 
 Complete:
