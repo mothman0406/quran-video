@@ -278,14 +278,14 @@ async function main() {
   }
   const inputPath = process.argv[2];
   if (!inputPath) {
-    throw new Error("Usage: npm run benchmark:mediabunny-transmux -- <input.mov> [output.mp4] [in-memory|fragmented|off]");
+    throw new Error("Usage: npm run benchmark:mediabunny-transmux -- <input.mov> [output.mp4] [in-memory|reserve|fragmented|off]");
   }
   const outputPath = process.argv[3] ?? join(tmpdir(), `mediabunny-transmux-${process.pid}.mp4`);
   const fastStartOption = process.argv[4] ?? "in-memory";
-  if (!(["in-memory", "fragmented", "off"] as const).includes(fastStartOption as "in-memory" | "fragmented" | "off")) {
-    throw new Error("Fast-start mode must be in-memory, fragmented, or off.");
+  if (!(["in-memory", "reserve", "fragmented", "off"] as const).includes(fastStartOption as "in-memory" | "reserve" | "fragmented" | "off")) {
+    throw new Error("Fast-start mode must be in-memory, reserve, fragmented, or off.");
   }
-  const fastStart = fastStartOption === "off" ? false : fastStartOption as "in-memory" | "fragmented";
+  const fastStart = fastStartOption === "off" ? false : fastStartOption as "in-memory" | "reserve" | "fragmented";
   assertSafeOutput(inputPath, outputPath);
 
   const inputStats = await stat(inputPath);
@@ -296,6 +296,12 @@ async function main() {
   const target = new FilePathTarget(outputPath);
   const output = new Output({ format, target });
   const copyPolicy = { mode: "forced", shiftTolerance: 0, boundaryPolicy: "expand" } as const;
+  const packetCounts = fastStart === "reserve"
+    ? await Promise.all([
+        input.getPrimaryVideoTrack().then((track) => track?.computePacketStats()),
+        input.getPrimaryAudioTrack().then((track) => track?.computePacketStats()),
+      ])
+    : null;
 
   let peakRss = process.memoryUsage().rss;
   const memorySampler = setInterval(() => {
@@ -315,6 +321,13 @@ async function main() {
       copy: copyPolicy,
       showWarnings: false,
     });
+    if (fastStart === "reserve") {
+      for (const track of output.tracks) {
+        const packetCount = track.isVideoTrack() ? packetCounts?.[0]?.packetCount : packetCounts?.[1]?.packetCount;
+        if (packetCount === undefined) throw new Error(`Packet count unavailable for ${track.type}.`);
+        track.metadata.maximumPacketCount = Math.ceil(packetCount * 4 / 3);
+      }
+    }
     if (!conversion.isValid || conversion.discardedTracks.length > 0) {
       throw new Error(`Forced-copy plan rejected tracks: ${JSON.stringify(conversion.discardedTracks.map((item) => ({
         type: item.track.type,

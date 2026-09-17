@@ -9,6 +9,11 @@ are unchanged.
 
 ## Decision
 
+> Follow-up: bounded-memory output is now proven. See
+> `docs/MEDIABUNNY_BOUNDED_TRANSMUX.md`. The winning diagnostic path writes a
+> non-fragmented end-`moov` MP4 to OPFS and exposes bounded file-backed range
+> responses for local playback. Production routing is still unchanged.
+
 Mediabunny 1.57.0 can packet-copy this MOV's H.264 and AAC into a correct,
 non-fragmented, fast-start MP4. The previous 0.911646-second audio displacement
 is gone. The encoded packet counts, bytes, SHA-256 payload hashes, packet

@@ -64,8 +64,8 @@ async function waitFor<T>(read: () => Promise<T>, predicate: (value: T) => boole
 async function main() {
   const sourcePath = process.argv[2];
   const outputMode = process.argv[3] ?? "buffer-fast-start";
-  if (!sourcePath) throw new Error("Usage: node scripts/validate-mediabunny-transmux-chrome.ts <source.mov> [buffer-fast-start|opfs-fragmented]");
-  if (!new Set(["buffer-fast-start", "opfs-fragmented"]).has(outputMode)) throw new Error("Unknown output mode.");
+  if (!sourcePath) throw new Error("Usage: node scripts/validate-mediabunny-transmux-chrome.ts <source.mov> [buffer-fast-start|opfs-reserve|opfs-moov-end|opfs-fragmented]");
+  if (!new Set(["buffer-fast-start", "opfs-reserve", "opfs-moov-end", "opfs-fragmented"]).has(outputMode)) throw new Error("Unknown output mode.");
 
   const targets = await fetch(`${DEFAULT_DEBUG_URL}/json/list`).then((response) => response.json()) as Array<{
     type: string;
@@ -86,6 +86,10 @@ async function main() {
     });
     if (!input.nodeId) throw new Error("Source file input was not found.");
     await client.command("DOM.setFileInputFiles", { nodeId: input.nodeId, files: [sourcePath] });
+    await waitFor(
+      () => evaluate<boolean>(client, `document.querySelector('[data-testid="generate-transmux"]')?.hasAttribute('disabled') ?? true`),
+      (disabled) => !disabled,
+    );
     await evaluate(client, `(() => {
       const select = document.querySelector('select');
       if (!(select instanceof HTMLSelectElement)) throw new Error('Mode selector missing');
@@ -96,8 +100,8 @@ async function main() {
     await evaluate(client, `document.querySelector('[data-testid="generate-transmux"]')?.click()`, true);
     const generationStatus = await waitFor(
       () => evaluate<string>(client, `document.querySelector('[data-testid="transmux-status"]')?.textContent ?? ''`),
-      (value) => value.includes("Generated and loaded") || value.includes("REJECTED") || value.includes("failed") || value.includes("Error"),
-      60_000,
+      (value) => value.includes("Generated and loaded") || value.includes("REJECTED") || value.includes("failed") || value.includes("Error") || value.includes("Timed out"),
+      120_000,
     );
     if (!generationStatus.includes("Generated and loaded")) {
       const rejectedReport = JSON.parse(await evaluate<string>(client, `document.querySelector('[data-testid="transmux-report"]')?.textContent ?? '{}'`));

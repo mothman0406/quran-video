@@ -1,5 +1,51 @@
 # Status
 
+## Current milestone: Validate bounded-memory MOV transmux
+
+Complete:
+
+- Traced the prior roughly 546 MB browser heap increase to the output path,
+  not the source `File`: `fastStart:"in-memory"` retained about 155 MB of
+  packets, `BufferTarget` grew to 256 MiB, and finalization created a second
+  154,986,036-byte buffer. Blob/object-URL creation added no measurable heap
+  step.
+- Proved a bounded path for the exact 154,990,091-byte ReplayKit MOV:
+  `BlobSource` ranged reads -> forced AVC/AAC copy -> non-fragmented
+  `fastStart:false` -> chunked `StreamTarget` -> ephemeral OPFS. A local
+  service-worker range URL supplies file-backed Blob slices for editor
+  playback without materializing the output in JavaScript.
+- The final headed Chrome 152 run converted in 238 ms, loaded metadata in
+  13.1 ms, wrote 154,986,044 bytes, exposed 33.033333 seconds at 2376x1334,
+  reached readyState 4, played, paused, sought/decoded around 1/10/20/30
+  seconds, and ended correctly. Sampled used-JS-heap growth was about 98.8 MB,
+  down from about 545.9 MB. The Node control completed in 182.3 ms with about
+  112.7 MB peak RSS growth.
+- Full packet scans prove identical H.264 and AAC packet counts, payload
+  hashes, timeline hashes, and decoder descriptions. Separate 0.950000-second
+  video and 0.038354167-second audio edit-list media times remain intact; no
+  decode/re-encode, FFmpeg-WASM, WebCodecs, or global timestamp shift occurred.
+- Rejected fragmented MP4. Mediabunny emits its initialization `moov` while
+  fragmented sample tables still have zero presentation span, producing zero
+  movie/track/edit durations. Chrome therefore exposes the 33.983333-second
+  raw video span, and the fragmented video packet-timeline hash also differs.
+- Also proved reserved-front-`moov` OPFS output, but selected end-`moov` plus
+  ranges because it is smaller and needs no packet-count sizing pass. Added
+  cancellation, source-replacement cleanup, app-owned filename checks, crash
+  orphan sweeping, and bounded 200/206 range responses.
+- Current browser policy is Chromium-only until Safari and Firefox pass the
+  same real-file suite. Recommend a conservative 500 MB experimental cap with
+  a dynamic free-quota gate; do not advertise 2 GB or 10 GB yet.
+- Production media routing, storage semantics, cloud integrations, and Quran
+  recognition remain unchanged. Manual perceptual sync was not rechecked and
+  remains the final human test.
+- Final verification passed: FFmpeg asset pinning, Quran ID schema (8 logical
+  fixtures), 453/453 tests, strict TypeScript, quiet lint, production build,
+  and whitespace checks. The optional full Quran runner passed its production
+  invariant probes but could not run the external quran-align/EveryAyah timing
+  artifact; no recognition behavior was changed.
+
+Detailed evidence: `docs/MEDIABUNNY_BOUNDED_TRANSMUX.md`.
+
 ## Current milestone: Validate Mediabunny MOV transmux
 
 Complete:

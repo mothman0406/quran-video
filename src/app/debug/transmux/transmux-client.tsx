@@ -16,8 +16,15 @@ import {
   type StreamTargetChunk,
   type Target,
 } from "mediabunny";
+import {
+  createEphemeralOpfsFile,
+  removeEphemeralOpfsFile,
+  removeStaleEphemeralOpfsFiles,
+  type EphemeralOpfsFile,
+} from "@/lib/media/ephemeral-opfs-file";
+import { isTransmuxDurationAccepted } from "@/lib/media/transmux-timeline-validation";
 
-type OutputMode = "buffer-fast-start" | "opfs-fragmented";
+type OutputMode = "buffer-fast-start" | "opfs-reserve" | "opfs-moov-end" | "opfs-fragmented";
 type JsonRecord = Record<string, unknown>;
 type ChromePerformance = Performance & {
   memory?: { usedJSHeapSize: number; totalJSHeapSize: number; jsHeapSizeLimit: number };
@@ -26,9 +33,9 @@ type ChromePerformance = Performance & {
 
 const COPY_POLICY = { mode: "forced", shiftTolerance: 0, boundaryPolicy: "expand" } as const;
 const OUTPUT_CODEC = 'video/mp4; codecs="avc1.4d0033, mp4a.40.2"';
-const OPFS_FILENAME = "mediabunny-transmux-benchmark.mp4";
 
 async function trackSummary(track: InputTrack) {
+  const packetStats = await track.computePacketStats();
   const common = {
     type: track.type,
     codec: await track.getCodec(),
@@ -37,6 +44,7 @@ async function trackSummary(track: InputTrack) {
     finalTimestamp: await track.computeDuration(),
     metadataDuration: await track.getDurationFromMetadata(),
     timeResolution: await track.getTimeResolution(),
+    packetStats,
   };
   if (track.isVideoTrack()) {
     const video = track as InputVideoTrack;
@@ -99,6 +107,28 @@ async function userAgentMemory() {
   }
 }
 
+async function ensureOpfsPlaybackController() {
+  if (!("serviceWorker" in navigator)) throw new Error("Service workers are unavailable for OPFS playback.");
+  const registration = await navigator.serviceWorker.register("/debug-transmux-opfs-sw.js?v=3", {
+    scope: "/debug/",
+  });
+  await registration.update();
+  if (navigator.serviceWorker.controller) return;
+  registration.active?.postMessage("claim-debug-clients");
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      reject(new Error("Timed out waiting for the OPFS playback service worker."));
+    }, 10_000);
+    const onControllerChange = () => {
+      window.clearTimeout(timeout);
+      navigator.serviceWorker.removeEventListener("controllerchange", onControllerChange);
+      resolve();
+    };
+    navigator.serviceWorker.addEventListener("controllerchange", onControllerChange);
+  });
+}
+
 function waitForMediaEvent(media: HTMLMediaElement, event: string, timeoutMs = 10_000) {
   return new Promise<void>((resolve, reject) => {
     const timeout = window.setTimeout(() => {
@@ -119,10 +149,10 @@ function waitForMediaEvent(media: HTMLMediaElement, event: string, timeoutMs = 1
 
 async function seekAndDecode(video: HTMLVideoElement, requestedTime: number) {
   const target = Math.min(requestedTime, Math.max(0, video.duration - 0.05));
+  video.pause();
+  const before = video.getVideoPlaybackQuality?.();
   const seeked = waitForMediaEvent(video, "seeked");
   video.currentTime = target;
-  await seeked;
-  const before = video.getVideoPlaybackQuality?.();
   let frameMediaTime: number | null = null;
   const frame = new Promise<void>((resolve) => {
     video.requestVideoFrameCallback((_now, metadata) => {
@@ -130,6 +160,7 @@ async function seekAndDecode(video: HTMLVideoElement, requestedTime: number) {
       resolve();
     });
   });
+  await seeked;
   await video.play();
   await frame;
   video.pause();
@@ -149,6 +180,10 @@ async function seekAndDecode(video: HTMLVideoElement, requestedTime: number) {
 export default function TransmuxClient() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const objectUrlRef = useRef<string | null>(null);
+  const conversionRef = useRef<Conversion | null>(null);
+  const inputRef = useRef<Input | null>(null);
+  const workingFileRef = useRef<EphemeralOpfsFile | null>(null);
+  const jobGenerationRef = useRef(0);
   const [source, setSource] = useState<File | null>(null);
   const [mode, setMode] = useState<OutputMode>("buffer-fast-start");
   const [busy, setBusy] = useState(false);
@@ -157,34 +192,96 @@ export default function TransmuxClient() {
   const [report, setReport] = useState<JsonRecord>({});
   const [events, setEvents] = useState<Array<{ event: string; currentTime: number; readyState: number }>>([]);
 
+  async function releaseWorkingMedia() {
+    const video = videoRef.current;
+    if (video) {
+      video.pause();
+      const emptied = video.networkState !== HTMLMediaElement.NETWORK_EMPTY
+        ? waitForMediaEvent(video, "emptied", 5_000).catch(() => {})
+        : Promise.resolve();
+      video.removeAttribute("src");
+      video.load();
+      await emptied;
+    }
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+    const workingFile = workingFileRef.current;
+    workingFileRef.current = null;
+    await removeEphemeralOpfsFile(workingFile);
+  }
+
+  async function cancelActiveJob(statusMessage?: string) {
+    jobGenerationRef.current += 1;
+    const conversion = conversionRef.current;
+    conversionRef.current = null;
+    if (conversion) await conversion.cancel();
+    inputRef.current?.dispose();
+    inputRef.current = null;
+    await releaseWorkingMedia();
+    setOutputReady(false);
+    setBusy(false);
+    if (statusMessage) setStatus(statusMessage);
+  }
+
   useEffect(() => () => {
+    jobGenerationRef.current += 1;
+    void conversionRef.current?.cancel();
+    inputRef.current?.dispose();
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    void removeEphemeralOpfsFile(workingFileRef.current);
   }, []);
+
+  function selectSource(nextSource: File | null) {
+    setBusy(true);
+    setSource(null);
+    void cancelActiveJob(nextSource ? "Source replaced; prior working media removed." : "Source cleared.")
+      .finally(() => setSource(nextSource));
+  }
 
   async function generate() {
     if (!source || busy) return;
+    const jobGeneration = ++jobGenerationRef.current;
     setBusy(true);
     setOutputReady(false);
     setStatus("Inspecting source and initializing forced packet copy…");
     setEvents([]);
+    let workingFile: EphemeralOpfsFile | null = null;
+    let input: Input | null = null;
     try {
+      await releaseWorkingMedia();
+      if (jobGeneration !== jobGenerationRef.current) return;
       const sourceMetadata = await inspectBlob(source);
       const heapBefore = heapSnapshot();
       const measuredMemoryBefore = await userAgentMemory();
-      const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(source) });
-      const format = new Mp4OutputFormat({ fastStart: mode === "buffer-fast-start" ? "in-memory" : "fragmented" });
+      const heapMilestones: Record<string, ReturnType<typeof heapSnapshot>> = {
+        afterSourceInspection: heapSnapshot(),
+      };
+      input = new Input({ formats: ALL_FORMATS, source: new BlobSource(source) });
+      inputRef.current = input;
+      const fastStart = mode === "buffer-fast-start"
+        ? "in-memory"
+        : mode === "opfs-fragmented"
+          ? "fragmented"
+          : mode === "opfs-reserve"
+            ? "reserve"
+            : false;
+      const format = new Mp4OutputFormat({ fastStart });
       let target: Target;
       let bufferTarget: BufferTarget | null = null;
-      let opfsHandle: FileSystemFileHandle | null = null;
       if (mode === "buffer-fast-start") {
         bufferTarget = new BufferTarget();
         target = bufferTarget;
       } else {
         const root = await navigator.storage.getDirectory();
-        opfsHandle = await root.getFileHandle(OPFS_FILENAME, { create: true });
-        const writable = await opfsHandle.createWritable();
+        await removeStaleEphemeralOpfsFiles(root);
+        workingFile = await createEphemeralOpfsFile(root);
+        workingFileRef.current = workingFile;
+        const writable = await workingFile.handle.createWritable();
         target = new StreamTarget(writable as unknown as WritableStream<StreamTargetChunk>, { chunked: true });
       }
+      heapMilestones.afterTargetCreation = heapSnapshot();
       const output = new Output({ format, target });
       const startedAt = performance.now();
       const conversion = await Conversion.init({
@@ -197,6 +294,21 @@ export default function TransmuxClient() {
         copy: COPY_POLICY,
         showWarnings: false,
       });
+      conversionRef.current = conversion;
+      if (mode === "opfs-reserve") {
+        for (const track of output.tracks) {
+          const packetCount = track.isVideoTrack()
+            ? sourceMetadata.video?.packetStats.packetCount
+            : track.isAudioTrack()
+              ? sourceMetadata.audio?.packetStats.packetCount
+              : null;
+          if (packetCount === null || packetCount === undefined) {
+            throw new Error(`Cannot reserve MP4 sample tables for ${track.type}: packet count unavailable.`);
+          }
+          track.metadata.maximumPacketCount = Math.ceil(packetCount * 4 / 3);
+        }
+      }
+      heapMilestones.afterConversionInit = heapSnapshot();
       const plan = {
         isValid: conversion.isValid,
         utilizedTrackTypes: conversion.utilizedTracks.map((track) => track.type),
@@ -208,28 +320,42 @@ export default function TransmuxClient() {
       }
       setStatus("Copying encoded AVC and AAC packets…");
       await conversion.execute();
+      conversionRef.current = null;
       const wallClockMilliseconds = performance.now() - startedAt;
+      heapMilestones.afterConversionExecute = heapSnapshot();
       input.dispose();
+      inputRef.current = null;
+      input = null;
+      if (jobGeneration !== jobGenerationRef.current) return;
       let result: Blob;
       if (bufferTarget) {
         if (!bufferTarget.buffer) throw new Error("Mediabunny did not produce an output buffer.");
         result = new Blob([bufferTarget.buffer], { type: "video/mp4" });
       } else {
-        if (!opfsHandle) throw new Error("OPFS output handle was not created.");
-        result = await opfsHandle.getFile();
+        if (!workingFile) throw new Error("OPFS output handle was not created.");
+        result = await workingFile.handle.getFile();
       }
+      heapMilestones.afterResultReference = heapSnapshot();
       const outputMetadata = await inspectBlob(result);
+      heapMilestones.afterOutputInspection = heapSnapshot();
       const heapAfter = heapSnapshot();
       const measuredMemoryAfter = await userAgentMemory();
       if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = URL.createObjectURL(result);
       const video = videoRef.current;
       if (!video) throw new Error("Output video element is unavailable.");
-      video.src = objectUrlRef.current;
+      const playbackLoadStartedAt = performance.now();
+      if (workingFile) {
+        await ensureOpfsPlaybackController();
+        video.src = `/debug/transmux/opfs-media?name=${encodeURIComponent(workingFile.name)}`;
+      } else {
+        objectUrlRef.current = URL.createObjectURL(result);
+        video.src = objectUrlRef.current;
+      }
       video.load();
-      await waitForMediaEvent(video, "loadedmetadata");
+      await waitForMediaEvent(video, "loadedmetadata", 60_000);
+      const playbackLoadMilliseconds = performance.now() - playbackLoadStartedAt;
       const chromeDurationDifference = Math.abs(video.duration - outputMetadata.duration);
-      const chromeTimelineAccepted = chromeDurationDifference <= 0.05;
+      const chromeTimelineAccepted = isTransmuxDurationAccepted(video.duration, outputMetadata.duration);
       setOutputReady(true);
       setReport({
         mediabunnyVersion: "1.57.0",
@@ -237,6 +363,10 @@ export default function TransmuxClient() {
         conversion: {
           wallClockMilliseconds,
           outputMode: mode,
+          outputDestination: workingFile ? `opfs:/${workingFile.name}` : "in-memory ArrayBuffer/Blob",
+          playbackObject: workingFile ? "same-origin service-worker byte-range URL backed by OPFS" : "in-memory Blob URL",
+          fragmented: mode === "opfs-fragmented",
+          moovPlacement: mode === "opfs-moov-end" ? "end" : "front",
           copyPolicy: COPY_POLICY,
           ...plan,
           videoStrategy: "copy",
@@ -253,6 +383,7 @@ export default function TransmuxClient() {
           videoWidth: video.videoWidth,
           videoHeight: video.videoHeight,
           readyState: video.readyState,
+          playbackLoadMilliseconds,
           durationDifference: chromeDurationDifference,
           timelineAccepted: chromeTimelineAccepted,
         },
@@ -261,18 +392,35 @@ export default function TransmuxClient() {
           heapAfter,
           measuredMemoryBefore,
           measuredMemoryAfter,
+          heapMilestones,
           architecture: mode === "buffer-fast-start"
-            ? "BlobSource reads ranges, but MP4 fastStart=in-memory and BufferTarget retain a complete output in memory."
-            : "BlobSource reads ranges and StreamTarget writes fragmented fast-start MP4 directly to OPFS with backpressure.",
+            ? "BlobSource reads ranges, but MP4 fastStart=in-memory retains encoded packets and BufferTarget retains both its capacity buffer and finalized output buffer."
+            : mode === "opfs-fragmented"
+              ? "BlobSource reads ranges and StreamTarget writes fragmented MP4 directly to an ephemeral OPFS file with backpressure."
+              : mode === "opfs-reserve"
+                ? "A metadata-only packet-count pass sizes a front-of-file moov reservation; BlobSource then reads ranges while StreamTarget writes non-fragmented media directly to ephemeral OPFS and backpatches the reserved region."
+                : "BlobSource reads ranges and StreamTarget writes non-fragmented MP4 media directly to an ephemeral OPFS file; moov is appended at finalization.",
         },
       });
       setStatus(chromeTimelineAccepted
         ? "Generated and loaded. Run the Chrome seek/play suite, then inspect sync manually with sound on."
         : `REJECTED: Chrome duration ${video.duration.toFixed(6)} s differs from the packet timeline by ${chromeDurationDifference.toFixed(6)} s.`);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
+      if (conversionRef.current) {
+        await conversionRef.current.cancel().catch(() => {});
+        conversionRef.current = null;
+      }
+      if (workingFile && workingFileRef.current === workingFile) {
+        workingFileRef.current = null;
+        await removeEphemeralOpfsFile(workingFile).catch(() => {});
+      }
+      if (jobGeneration === jobGenerationRef.current) {
+        setStatus(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setBusy(false);
+      input?.dispose();
+      if (inputRef.current === input) inputRef.current = null;
+      if (jobGeneration === jobGenerationRef.current) setBusy(false);
     }
   }
 
@@ -324,14 +472,17 @@ export default function TransmuxClient() {
         Development-only. This never imports FFmpeg and never changes editor routing. Use the exact audited ReplayKit MOV.
       </p>
       <section style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "end", margin: "24px 0" }}>
-        <label>Source MOV<br /><input data-testid="transmux-source" type="file" accept=".mov,video/quicktime" onChange={(event) => setSource(event.target.files?.[0] ?? null)} /></label>
+        <label>Source MOV<br /><input data-testid="transmux-source" type="file" accept=".mov,video/quicktime" onChange={(event) => selectSource(event.target.files?.[0] ?? null)} /></label>
         <label>Output strategy<br />
           <select value={mode} onChange={(event) => setMode(event.target.value as OutputMode)}>
             <option value="buffer-fast-start">Non-fragmented fast-start (RAM)</option>
+            <option value="opfs-reserve">Non-fragmented reserved fast-start (OPFS bounded memory)</option>
+            <option value="opfs-moov-end">Non-fragmented moov-at-end (OPFS bounded memory)</option>
             <option value="opfs-fragmented">Fragmented fast-start (OPFS diagnostic; rejected on fixture)</option>
           </select>
         </label>
         <button data-testid="generate-transmux" type="button" disabled={!source || busy} onClick={() => void generate()}>Generate MP4</button>
+        <button data-testid="cancel-transmux" type="button" disabled={!busy} onClick={() => void cancelActiveJob("Canceled; temporary output removed.")}>Cancel</button>
         <button data-testid="run-chrome-suite" type="button" disabled={!outputReady || busy} onClick={() => void runChromeSuite()}>Run Chrome suite</button>
       </section>
       <p data-testid="transmux-status" style={{ padding: 12, background: "#20262d", borderRadius: 6 }}>{status}</p>
