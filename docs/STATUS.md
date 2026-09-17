@@ -1,5 +1,52 @@
 # Status
 
+## Current milestone: Validate Mediabunny MOV transmux
+
+Complete:
+
+- Upgraded only Mediabunny from 1.55.3 to 1.57.0. Version 1.56.0 introduced
+  the required forced-copy controls and negative-timestamp ISOBMFF edit lists;
+  1.57.0 retains the existing production APIs and improves transformation
+  metadata pass-through.
+- Proved exact H.264 and AAC packet copy for the audited 154,990,091-byte MOV.
+  Packet counts, payload bytes/hashes, packet timeline hashes, and codec
+  descriptions are identical. Separate video/audio edit lists preserve the
+  source presentation timeline and eliminate the old 0.911646-second audio
+  delay without a fixture-specific correction.
+- The correct non-fragmented fast-start output is 154,986,036 bytes and
+  33.033333 seconds. It completed in 0.1125 seconds in headed Chrome and 0.3074
+  seconds in the Node control. A fresh native FFmpeg packet-copy control was
+  155,004,343 bytes and 33.017 seconds, completing in 0.54 seconds cold and
+  0.16 seconds warm.
+- Real headed Chrome 152 reports MP4 support as `probably`, loads 2376×1334 at
+  33.033333 seconds, plays and ends, and seeks/decodes at 1/10/20/30 seconds.
+  Rotation 0, square pixels, identity transform, variable 60 fps lattice,
+  limited-range BT.709, H.264 Main, and AAC-LC 48 kHz stereo are preserved.
+- Added a development-only `/debug/transmux` page, a repeatable Node packet and
+  edit-list harness, and a Chrome DevTools driver. No FFmpeg-WASM is imported or
+  initialized by either benchmark.
+- Rejected the lower-memory OPFS fragmented output because Chrome exposes
+  33.983333 seconds. The correct in-memory path increased headed Chrome used JS
+  heap by about 546 MB and Node RSS by about 632 MB for the 155 MB input. It is
+  therefore not yet safe for the 500 MB / 2 GB / 10 GB source limits.
+- Production media routing and Quran recognition remain unchanged. Perceptual
+  A/V sync is left as an explicit manual headed-browser listen/watch check.
+
+Recommendation: **do not wire the route into production yet**. Packet/timeline
+correctness is proven for the non-fragmented output, but bounded streaming and
+manual perceptual sync sign-off remain required. Full evidence and reproduction
+steps are in `docs/MEDIABUNNY_TRANSMUX_BENCHMARK.md`.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id` (8
+logical fixtures), `npm test` (446 passing), `npx tsc --noEmit`, `npm run lint
+-- --quiet`, 86 focused export/media/transmux tests, `npm run build`, and `git
+diff --check` pass. `npm run regression:quran` passes its production invariant
+probes and exits non-zero only at the known optional external
+quran-align/EveryAyah artifact; its generated failure-only report was not
+retained. The recognition freeze diff is empty, and the built production app
+returns HTTP 404 for `/debug/transmux`. The build retains the pre-existing
+VAD/ONNX warnings and optional TikTok configuration reminder.
+
 ## Current milestone: Audit fast media ingest paths
 
 Complete:
