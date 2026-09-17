@@ -1,5 +1,59 @@
 # Status
 
+## Current milestone: Refine canonical audio selection
+
+Complete:
+
+- Removed the generic non-integral/44.1 kHz rule. Decoder selection now uses
+  only inspected browser decode capability, actual Web Audio success, and a
+  strict non-empty finite 16 kHz mono PCM validity check. Unsupported tracks,
+  decode failures, and unusable PCM retain the existing FFmpeg-WASM
+  compatibility fallback before recognition begins.
+- Preserved one source → one selected PCM → one top-level Quran identification
+  call → one passage decision → forced alignment. Mediabunny remains the
+  container/capability inspector; Web Audio is the normal decoder; FFmpeg
+  remains the audio compatibility and full-normalization tool. No recognition
+  algorithm, model, VAD, window, threshold, corpus, Whisper-authority, or
+  forced-alignment behavior changed.
+- Re-tested the ignored 3,673,925-byte H.264/AAC Muddaththir fixture (coded
+  44.1 kHz stereo, 22,104 ms). Current Chrome Web Audio emitted 48 kHz stereo
+  before canonicalization and 353,547 finite mono samples / 22,096.6875 ms,
+  RMS 0.04089649624609977, SHA-256
+  `2bdff31f6394e76166e479aa01de909395e86d6798f30cd50de0563a736ef87e`.
+  Mediabunny direct decode exposed 44.1 kHz stereo and a -47.891 ms AAC
+  priming timestamp; after clipping and the existing conversion it emitted
+  353,664 samples / 22,104 ms, RMS 0.040875939083432226, SHA-256
+  `ec362d6b05b581ad1b699f243246ddf0e9421c8c064bd52abf6ba5c4b0fbcd4c`.
+  The retained browser-equivalent FFmpeg-WASM PCM emitted 353,663 samples /
+  22,103.9375 ms, RMS 0.0578258358229181, SHA-256
+  `9c7b3eb1fb3929165bf9a597a0f3a3b87c8075199f95fe34d0a03409af9990b3`.
+- A final Chrome replay through the modified production
+  `prepareRecognitionAudio()` boundary selected `path:"native"` /
+  `reason:"native-safe"` for the coded 44.1 kHz track and reproduced the same
+  finite 353,547-sample native PCM and SHA-256 without initializing FFmpeg.
+  That exact PCM is the native recognition/alignment result reported below.
+- Each PCM independently made one current continuity-seeded identification
+  call, activated a global 74:1-6 anchor, used the bounded local continuation
+  lane, accepted 74:1-9 with 100% VAD-qualified coverage and three agreeing
+  windows, and completed forced alignment through 74:9. Web Audio measured
+  65.8 ms and Mediabunny 40.5 ms for decode plus canonicalization in the local
+  diagnostic run. FFmpeg-WASM timing was not fabricated: the current local
+  headless runtime retained its documented initialization incompatibility, so
+  the previously captured browser PCM was replayed through the current model.
+- The fixture search found no other ignored/private real media in this
+  workspace. Focused tests now prove that 44.1/22.05 kHz alone does not select
+  FFmpeg, real capability failure still does, unusable PCM cannot reach
+  recognition, worker transfer ownership remains safe, and `/create` →
+  `/videos` still holds one authoritative PCM and one identification call.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id`,
+`npm test` (444 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`,
+`npm run build`, and `git diff --check` pass. `npm run regression:quran`
+passes all production invariant probes and exits non-zero only at the known
+optional external quran-align/EveryAyah artifact; its generated failure-only
+report was not retained. The build retains the pre-existing VAD/ONNX dynamic
+dependency warnings and optional TikTok configuration reminder.
+
 ## Current milestone: Add Quran continuity-seeded recognition
 
 Complete:

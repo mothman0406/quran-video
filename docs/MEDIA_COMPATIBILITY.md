@@ -18,13 +18,19 @@ only an explicit Retry may repeat preparation.
 
 Media compatibility owns decoder selection. Quran identification and timing
 receive one authoritative PCM and never compare decoder-derived Quran
-passages. Ordinary native-safe sources retain the efficient Web Audio path. A
-source that needs audio fallback, whose native decoder fails, or whose source
-rate requires fractional 16 kHz conversion (including 44.1 kHz) uses the
-existing FFmpeg audio-only extraction before recognition begins. This is based
-on media facts, never Quran confidence or a proposed surah. Wrong Quran text
-remains worse than abstention, so the Quran-wide FastConformer evidence gate is
-unchanged.
+passages. A source whose inspected audio track is browser-decodable first uses
+Web Audio, followed by explicit deterministic downmix/resampling to 16 kHz
+mono. Sample rate alone, including 44.1 kHz and other fractional conversions,
+does not initialize FFmpeg. Empty, malformed, or non-finite native PCM is
+rejected before recognition and uses the same compatibility fallback as a
+native decode failure.
+
+FFmpeg audio-only extraction is selected only when the inspected audio track
+is not browser-decodable, Web Audio actually fails, or Web Audio produces
+unusable PCM. These are media facts; Quran confidence, a proposed surah, CTC
+scores, coverage, and passage acceptance never participate. Exactly one
+selected canonical PCM enters one top-level Quran identification call, and
+the recognizer is decoder-agnostic after that preparation boundary.
 
 Quran AutoCaption accepts media through the standard accessible browser file input and drag/drop. This is the path used by iPhone and iPad Photo Library, macOS Photos/Finder, Android pickers, and desktop file pickers; it does not require the File System Access API.
 
@@ -32,7 +38,7 @@ The picker accepts `video/*`, `audio/*`, and common explicit extensions includin
 
 ## Native first
 
-On selection, the app reads local container metadata with Mediabunny before changing the current editor source. It checks that media is readable, whether an audio track is present, the basic codecs and duration when available, browser playback viability, and recognition-audio decoder support. Native-safe H.264/AAC media continues efficiently through Web Audio; the canonical-PCM rule above determines any recognition-only extraction.
+On selection, the app reads local container metadata with Mediabunny before changing the current editor source. It checks that media is readable, whether an audio track is present, the basic codecs and duration when available, browser playback viability, and recognition-audio decoder support. Supported media continues efficiently through Web Audio regardless of coded sample rate; decode failure or invalid canonical PCM triggers the compatibility rule above. Mediabunny remains the inspector and capability probe, not a third production audio decoder.
 
 If the original video can play but Web Audio cannot decode its recognition track, Quran AutoCaption keeps that original video as the preview and export source. It lazily loads a single-thread FFmpeg-WASM runtime, first opens and decodes a one-second **audio-only** probe, then maps only the first audio stream (`-map 0:a:0 -vn`) to mono 16 kHz float PCM for the local recognition worker. `-vn` makes the no-video-decode requirement explicit: a browser-playable HEVC/H.264 video stream cannot block AAC audio extraction. The PCM has the source media timeline; it is not percentage-rebased or used to alter caption timing.
 
