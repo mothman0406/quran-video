@@ -61,7 +61,7 @@ export type MediaInspection = {
   audioChannels?: number;
 };
 
-export type MediaCompatibilityRoute = "native" | "audio-fallback" | "full-normalization";
+export type MediaCompatibilityRoute = "native" | "audio-fallback" | "exact-transmux" | "full-normalization";
 
 export function recognitionPcmBytes(durationMs?: number): number {
   return Math.max(0, Math.round(durationMs ?? 0)) * 16_000 * Float32Array.BYTES_PER_ELEMENT / 1_000;

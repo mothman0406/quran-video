@@ -59,7 +59,8 @@ test("ready cards offer Watch, Edit, Download, Delete and TikTok-coming-soon wit
 });
 
 test("cloud persistence saves source, thumbnail, and project state but never a rendered final MP4", () => {
-  assert.match(jobs, /uploadPrivateProjectObject\(sourcePath, runtime\.file/);
+  assert.match(jobs, /uploadPrivateProjectObject\(sourcePath, runtime\.originalSource/);
+  assert.match(jobs, /createProjectThumbnail\(runtime\.editorMedia/);
   assert.match(jobs, /uploadPrivateProjectObject\(thumbnailPath, poster/);
   assert.match(jobs, /completeCloudProjectSave\(job\.project/);
   assert.doesNotMatch(jobs, /renderVideo|rendered.*upload|finished.*mp4/i);

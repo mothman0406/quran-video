@@ -1,5 +1,180 @@
 # Status
 
+## Current milestone: Fast local MOV transmux
+
+Complete:
+
+- Production media routing is now explicit: browser-playable sources retain the
+  original, conservatively eligible AVC/AAC MOV/ISOBMFF video uses bounded-memory
+  exact local packet copy, and every other source retains the existing
+  FFmpeg-WASM compatibility/full-normalization route.
+- Runtime ownership distinguishes the immutable original source from its editor
+  playback representation. Recognition, retry, cloud source persistence, and
+  export remain bound to the original; preview and thumbnail work may use the
+  temporary editor MP4.
+- Quick Create and the editor prepare the one canonical recognition PCM from
+  the original concurrently with editor media. The existing single top-level
+  Quran identification and all FastConformer, passage-decision, VAD, CTC, and
+  alignment behavior remain unchanged.
+- Exact eligibility fails closed on uncertain parsing, track, codec, forced-copy,
+  metadata, timing, browser playback, OPFS, service-worker, quota, or cleanup
+  evidence. The initial safety gate is 500 MiB plus reported free space of at
+  least `max(1.25 × source bytes, source bytes + 256 MiB)`.
+- Production output uses ranged `BlobSource` reads, forced AVC/AAC copy,
+  `fastStart:false`, chunked `StreamTarget`, and asynchronous OPFS writes. It
+  validates codecs, track metadata, source timestamps, independent edit lists,
+  duration, and browser metadata before the editor may use the output.
+- The versioned range service worker exposes only exact app-owned opaque UUID
+  names, supports GET/HEAD and 200/206/416 semantics, and never exposes raw OPFS
+  paths. Abort, write failure, replacement, deletion, abandonment, and explicit
+  disposal remove owned output; stale sweeping preserves recent and unrelated
+  OPFS entries.
+- Headed Chrome 152 exercised the normal `/create?debugMedia=1` preparation path
+  with the ignored 154,990,091-byte ReplayKit MOV. It selected `exact-transmux`,
+  wrote 154,986,044 bytes in 440 ms, exposed 33.033333 seconds, reached
+  readyState 4, played, and sought to 1/10/20/30 seconds. FFmpeg-WASM did not
+  initialize, recognition preparation used the original MOV, Generate reached
+  `/videos` with a live caption job, and abandonment removed the current
+  temporary output.
+- Verification passed: FFmpeg assets, Quran ID schema (8 logical fixtures),
+  463/463 tests, strict TypeScript, quiet lint, production build, whitespace
+  checks, and recognition freeze diffs. The optional full Quran runner passed
+  its production invariant probes and reported only the known unavailable
+  external quran-align/EveryAyah timing artifact.
+
+## Current milestone: Validate bounded-memory MOV transmux
+
+Complete:
+
+- Traced the prior roughly 546 MB browser heap increase to the output path,
+  not the source `File`: `fastStart:"in-memory"` retained about 155 MB of
+  packets, `BufferTarget` grew to 256 MiB, and finalization created a second
+  154,986,036-byte buffer. Blob/object-URL creation added no measurable heap
+  step.
+- Proved a bounded path for the exact 154,990,091-byte ReplayKit MOV:
+  `BlobSource` ranged reads -> forced AVC/AAC copy -> non-fragmented
+  `fastStart:false` -> chunked `StreamTarget` -> ephemeral OPFS. A local
+  service-worker range URL supplies file-backed Blob slices for editor
+  playback without materializing the output in JavaScript.
+- The final headed Chrome 152 run converted in 238 ms, loaded metadata in
+  13.1 ms, wrote 154,986,044 bytes, exposed 33.033333 seconds at 2376x1334,
+  reached readyState 4, played, paused, sought/decoded around 1/10/20/30
+  seconds, and ended correctly. Sampled used-JS-heap growth was about 98.8 MB,
+  down from about 545.9 MB. The Node control completed in 182.3 ms with about
+  112.7 MB peak RSS growth.
+- Full packet scans prove identical H.264 and AAC packet counts, payload
+  hashes, timeline hashes, and decoder descriptions. Separate 0.950000-second
+  video and 0.038354167-second audio edit-list media times remain intact; no
+  decode/re-encode, FFmpeg-WASM, WebCodecs, or global timestamp shift occurred.
+- Rejected fragmented MP4. Mediabunny emits its initialization `moov` while
+  fragmented sample tables still have zero presentation span, producing zero
+  movie/track/edit durations. Chrome therefore exposes the 33.983333-second
+  raw video span, and the fragmented video packet-timeline hash also differs.
+- Also proved reserved-front-`moov` OPFS output, but selected end-`moov` plus
+  ranges because it is smaller and needs no packet-count sizing pass. Added
+  cancellation, source-replacement cleanup, app-owned filename checks, crash
+  orphan sweeping, and bounded 200/206 range responses.
+- Current browser policy is Chromium-only until Safari and Firefox pass the
+  same real-file suite. Recommend a conservative 500 MB experimental cap with
+  a dynamic free-quota gate; do not advertise 2 GB or 10 GB yet.
+- Production media routing, storage semantics, cloud integrations, and Quran
+  recognition remain unchanged. Manual perceptual sync was not rechecked and
+  remains the final human test.
+- Final verification passed: FFmpeg asset pinning, Quran ID schema (8 logical
+  fixtures), 453/453 tests, strict TypeScript, quiet lint, production build,
+  and whitespace checks. The optional full Quran runner passed its production
+  invariant probes but could not run the external quran-align/EveryAyah timing
+  artifact; no recognition behavior was changed.
+
+Detailed evidence: `docs/MEDIABUNNY_BOUNDED_TRANSMUX.md`.
+
+## Current milestone: Validate Mediabunny MOV transmux
+
+Complete:
+
+- Upgraded only Mediabunny from 1.55.3 to 1.57.0. Version 1.56.0 introduced
+  the required forced-copy controls and negative-timestamp ISOBMFF edit lists;
+  1.57.0 retains the existing production APIs and improves transformation
+  metadata pass-through.
+- Proved exact H.264 and AAC packet copy for the audited 154,990,091-byte MOV.
+  Packet counts, payload bytes/hashes, packet timeline hashes, and codec
+  descriptions are identical. Separate video/audio edit lists preserve the
+  source presentation timeline and eliminate the old 0.911646-second audio
+  delay without a fixture-specific correction.
+- The correct non-fragmented fast-start output is 154,986,036 bytes and
+  33.033333 seconds. It completed in 0.1125 seconds in headed Chrome and 0.3074
+  seconds in the Node control. A fresh native FFmpeg packet-copy control was
+  155,004,343 bytes and 33.017 seconds, completing in 0.54 seconds cold and
+  0.16 seconds warm.
+- Real headed Chrome 152 reports MP4 support as `probably`, loads 2376×1334 at
+  33.033333 seconds, plays and ends, and seeks/decodes at 1/10/20/30 seconds.
+  Rotation 0, square pixels, identity transform, variable 60 fps lattice,
+  limited-range BT.709, H.264 Main, and AAC-LC 48 kHz stereo are preserved.
+- Added a development-only `/debug/transmux` page, a repeatable Node packet and
+  edit-list harness, and a Chrome DevTools driver. No FFmpeg-WASM is imported or
+  initialized by either benchmark.
+- Rejected the lower-memory OPFS fragmented output because Chrome exposes
+  33.983333 seconds. The correct in-memory path increased headed Chrome used JS
+  heap by about 546 MB and Node RSS by about 632 MB for the 155 MB input. It is
+  therefore not yet safe for the 500 MB / 2 GB / 10 GB source limits.
+- Production media routing and Quran recognition remain unchanged. Perceptual
+  A/V sync is left as an explicit manual headed-browser listen/watch check.
+
+Recommendation: **do not wire the route into production yet**. Packet/timeline
+correctness is proven for the non-fragmented output, but bounded streaming and
+manual perceptual sync sign-off remain required. Full evidence and reproduction
+steps are in `docs/MEDIABUNNY_TRANSMUX_BENCHMARK.md`.
+
+Verification: `npm run check:ffmpeg-assets`, `npm run regression:quran-id` (8
+logical fixtures), `npm test` (446 passing), `npx tsc --noEmit`, `npm run lint
+-- --quiet`, 86 focused export/media/transmux tests, `npm run build`, and `git
+diff --check` pass. `npm run regression:quran` passes its production invariant
+probes and exits non-zero only at the known optional external
+quran-align/EveryAyah artifact; its generated failure-only report was not
+retained. The recognition freeze diff is empty, and the built production app
+returns HTTP 404 for `/debug/transmux`. The build retains the pre-existing
+VAD/ONNX warnings and optional TikTok configuration reminder.
+
+## Current milestone: Audit fast media ingest paths
+
+Complete:
+
+- Traced the selected-file path through Mediabunny inspection, FFmpeg-WASM
+  normalization, canonical recognition audio, `/create` → `/videos`, editor
+  playback, Supabase saving, and local export. Documented the exact coupling:
+  `browserPlayback:false` unconditionally selects full normalization before
+  recognition despite independently usable native audio.
+- Located and inspected the 154,990,091-byte ReplayKit screen recording
+  without modifying it. It is a non-fragmented QuickTime MOV containing
+  MP4-compatible H.264 Main (`avc1.4d0033`) 2376×1334 variable-rate BT.709
+  video and AAC-LC 48 kHz stereo audio, with no rotation.
+- Proved native packet copy to fast-start MP4 in 0.23 s. Installed Mediabunny
+  1.55.3 supports MOV→MP4 packet copy in general, but this file's negative raw
+  edited timestamps make its stock Conversion choose transcoding; forcing its
+  copy path changed the timeline and was rejected. Current online Conversion
+  copy controls are not present in the installed package.
+- Measured a same-Mac VideoToolbox H.264 control at 8.46 s, 46,862,683 output
+  bytes, 32.98 s, and about 341 MB maximum RSS while copying AAC. A headless
+  Chrome WebCodecs run did not yield a reliable completion, so browser hardware
+  timing remains an explicit follow-up rather than a fabricated result. The
+  supplied existing FFmpeg-WASM observation remains about five minutes and was
+  not rerun.
+- Recommended direct → exact transmux → local WebCodecs proxy → AWS
+  S3/MediaConvert cloud fallback → explicit offline FFmpeg-WASM, with original,
+  recognition PCM, editor media, and export source represented independently.
+  Defined proxy, upload/resume, concurrency, 24-hour retention, security,
+  cleanup, cost, entitlement, and minimal staged implementation guidance in
+  `docs/FAST_MEDIA_INGEST_AUDIT.md`.
+- No production code, infrastructure, billing, or recognition behavior changed.
+
+Verification: baseline `npm run check:ffmpeg-assets`, `npm run
+regression:quran-id` (8 logical fixtures), `npm test` (444 passing), `npx tsc
+--noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff --check`
+pass. The first standalone TypeScript invocation raced a concurrent Next build
+over generated `.next/types`; the required sequential rerun passed. The build
+retains the pre-existing VAD/ONNX warnings and optional TikTok configuration
+reminder.
+
 ## Current milestone: Refine canonical audio selection
 
 Complete:

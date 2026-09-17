@@ -76,8 +76,9 @@ test("editor and route-persistent generation pass one authoritative PCM into one
   assert.match(generation, /authoritativePcm: DecodedAudioChannels/);
   assert.equal((generation.match(/input\.worker\.identify\(input\.jobId/g) ?? []).length, 1);
   assert.doesNotMatch(generation, /extractRecognitionPcm|pcm-recovery|recoverySelection/);
-  assert.match(quickCreate, /prepareRecognitionAudio\(result\.file, abort\.signal/);
-  assert.match(jobs, /prepareRecognitionAudio\(runtime\.file, runtime\.abort\.signal\)/);
+  assert.match(quickCreate, /prepareRecognitionAudio\(next, abort\.signal/);
+  assert.match(jobs, /prepareRecognitionAudio\(runtime\.originalSource, runtime\.abort\.signal\)/);
+  assert.match(jobs, /file: runtime\.originalSource/);
 });
 
 test("the caller-owned authoritative PCM remains reusable after worker transfer and retry", () => {

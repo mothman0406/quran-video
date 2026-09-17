@@ -31,7 +31,7 @@ export type MediaSource = ({
   sourceUrl?: string;
   displayName?: string;
   /** Local-only compatibility representation; original source metadata remains user-facing. */
-  compatibility?: "native" | "audio-fallback" | "full-normalization";
+  compatibility?: "native" | "audio-fallback" | "exact-transmux" | "full-normalization";
   originalFileName?: string;
   originalMimeType?: string;
 };

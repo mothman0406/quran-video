@@ -8,9 +8,12 @@ offered to the preview at once. An unplayable source uses a neutral,
 orientation-aware surface until the one required normalization produces its
 working media. Presentation settings remain independent of conversion state.
 
-Quick Create prepares one authoritative 16 kHz mono PCM before enabling
-Generate and hands it to the root generation job. The native working `File`, or
-the normalized H.264/AAC working `File`, remains the preview/export source.
+Quick Create starts two independent branches after selection: recognition
+audio preparation from the immutable original, and editor media preparation.
+It joins them only before enabling Generate. The one authoritative 16 kHz mono
+PCM goes to the root generation job. The original remains the recognition,
+save, retry, and export source; a separate editor representation drives
+preview and thumbnails.
 `/videos`, Watch, `/editor`, and export reuse that same job and project state;
 only an explicit Retry may repeat preparation.
 
@@ -42,7 +45,45 @@ On selection, the app reads local container metadata with Mediabunny before chan
 
 If the original video can play but Web Audio cannot decode its recognition track, Quran AutoCaption keeps that original video as the preview and export source. It lazily loads a single-thread FFmpeg-WASM runtime, first opens and decodes a one-second **audio-only** probe, then maps only the first audio stream (`-map 0:a:0 -vn`) to mono 16 kHz float PCM for the local recognition worker. `-vn` makes the no-video-decode requirement explicit: a browser-playable HEVC/H.264 video stream cannot block AAC audio extraction. The PCM has the source media timeline; it is not percentage-rebased or used to alter caption timing.
 
-If playback itself is unavailable, the same local runtime first runs a short audio/video decode probe. Only a successful probe permits a full local normalization to fast-start MP4 with H.264/yuv420p video and AAC audio (or an AAC M4A for audio-only input). The normalized file becomes the local editor source while original filename/type metadata remain available to the project. Audio-only sources never receive a manufactured video.
+If playback itself is unavailable, production first evaluates exact local
+transmux. It requires a parseable MOV/ISOBMFF source with primary AVC/H.264 and
+AAC tracks, MP4-compatible codec descriptions, finite representable geometry,
+aspect, transformation and color metadata, a forced-copy Mediabunny plan that
+uses both required tracks and discards none, independent zero-presentation
+edit lists, Chromium-validated MP4/range playback, asynchronous OPFS writing,
+an installed abort/cleanup owner, source size no greater than 500 MiB, and
+reported free quota of at least `max(1.25 × source size, source size + 256
+MiB)`. Missing or uncertain evidence makes the route ineligible.
+
+Eligible input uses `BlobSource` ranged reads, non-fragmented
+`Mp4OutputFormat({fastStart:false})`, forced AVC/AAC packet copy, and chunked
+`StreamTarget` writes into OPFS. Production reopens the output, verifies codec,
+duration, geometry, aspect, transformation, color, raw per-track timestamps,
+and each track's independent edit list, then loads metadata through the range
+service worker before accepting it. Any plan, write, quota, validation, or
+playback failure deletes the partial output and falls through.
+
+The final fallback is unchanged: FFmpeg-WASM first runs its short local probe,
+then performs full normalization to fast-start H.264/yuv420p/AAC MP4 (or AAC
+M4A for audio-only input). Audio-only sources never receive manufactured
+video. HEVC, ProRes, unusual audio, broken files, low-quota devices, and
+unvalidated browsers therefore keep their prior compatibility behavior.
+
+## Temporary playback and ownership
+
+Exact-copy MP4 files have opaque `quran-video-transmux-<uuid>.mp4` identifiers
+and are temporary per job. The production service worker recognizes only the
+exact app-owned identifier grammar under `/_quran-video/opfs-media/`, rejects
+path separators, supports GET/HEAD plus valid 200/206/416 responses, supplies
+correct MP4, length, range, and no-store headers, and streams file-backed Blob
+slices without materializing the full file. Source replacement, cancellation,
+retry supersession, project deletion, and explicit disposal remove the owned
+file. A 24-hour stale sweep ignores recent files and all unrelated OPFS data.
+
+This 500 MiB gate is an initial engineering safety boundary, not a product
+storage limit. Safari and Firefox continue through the existing fallback until
+their exact large-file conversion, range seek, timing, and cleanup paths are
+validated separately.
 
 ## Apple recordings
 

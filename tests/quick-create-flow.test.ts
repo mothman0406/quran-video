@@ -11,16 +11,19 @@ const videosBoundary = readFileSync(new URL("../src/components/videos-dashboard-
 const jobProvider = readFileSync(new URL("../src/components/video-job-provider.tsx", import.meta.url), "utf8");
 const editor = readFileSync(new URL("../src/components/editor-client.tsx", import.meta.url), "utf8");
 
-test("quick create begins the existing preparation pipeline on selection and never exposes a timeline", () => {
+test("quick create starts editor preparation and original-source recognition concurrently without exposing a timeline", () => {
   assert.match(quickCreate, /void prepare\(event\.currentTarget\.files\?\.\[0\]\)/);
-  assert.match(quickCreate, /await prepareLocalMedia\(next, abort\.signal/);
-  assert.match(quickCreate, /prepareRecognitionAudio\(result\.file, abort\.signal/);
+  assert.match(quickCreate, /const editorPromise = prepareLocalMedia\(next, abort\.signal/);
+  assert.match(quickCreate, /const recognitionPromise = prepareRecognitionAudio\(next, abort\.signal/);
+  assert.match(quickCreate, /Promise\.allSettled\(\[editorPromise, recognitionPromise\]\)/);
   assert.match(quickCreate, /onDrop=\{drop\}/);
   assert.doesNotMatch(quickCreate, /CaptionTimeline|timelineRef|splitCaption|mergeCaption|word timing/i);
 });
 
-test("native and normalized output share one prepared File contract with truthful local progress", () => {
-  assert.match(quickCreate, /file: result\.file/);
+test("original and editor representations remain explicit with truthful local progress", () => {
+  assert.match(quickCreate, /originalSource: next/);
+  assert.match(quickCreate, /editorMedia: result\.editorMedia/);
+  assert.match(quickCreate, /editorPlaybackUrl: result\.editorPlaybackUrl/);
   assert.match(quickCreate, /compatibility: result\.route/);
   assert.match(quickCreate, /event\.inspection/);
   assert.match(quickCreate, /Converting recording…/);
@@ -40,7 +43,7 @@ test("pre-generation controls remain enabled during preparation and persist into
 });
 
 test("Generate creates one app-level job from prepared media and navigates immediately", () => {
-  assert.match(quickCreate, /videoJobManager\.start\(\{ project, file: prepared\.file, preparedAudio: prepared\.preparedAudio/);
+  assert.match(quickCreate, /videoJobManager\.start\(\{ project, originalSource: prepared\.originalSource, editorMedia: prepared\.editorMedia/);
   assert.match(quickCreate, /router\.push\("\/videos"\)/);
   assert.equal((quickCreate.match(/videoJobManager\.start\(/g) ?? []).length, 1);
   assert.doesNotMatch(generation, /prepareLocalMedia|extractRecognitionPcm|full-normalization|normalize/i);

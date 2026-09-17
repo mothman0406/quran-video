@@ -13,6 +13,10 @@ separate approved milestone intentionally changes the display contract.
 - FastConformer Quran-wide identification is the primary passage authority;
   Whisper is a secondary fallback and does not veto an accepted FastConformer
   passage. Whisper matching remains independent of timestamp quality.
+- Recognition audio is always prepared from the immutable original source,
+  never from an editor compatibility representation. Direct playback, exact
+  local transmux, and full-normalization routing must not create a second PCM
+  or a second top-level Quran-identification call.
 - VAD stays enabled and constrains acoustic timing work.
 - Timeline and preview use the same editable `CaptionSegment` interval.
 - There is exactly one authoritative automatic `CaptionSegment` timing array.
