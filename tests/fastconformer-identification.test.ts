@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   advanceQuranContinuationState,
+  bestCoherentPathCandidate,
   buildQuranWideLexicalIndex,
   comparePassageIdentification,
   ctcForwardScore,
@@ -201,16 +202,19 @@ test("whole-recording hypotheses keep an Al-Ma'arij opening over a locally stron
   const maArijShared = withEvidence(candidate(709, 716, 70, 4, 5, -0.35), { lexicalUniqueness: 0.06 });
   const maArij3 = withEvidence(candidate(714, 721, 70, 5, 6, -0.24), { lexicalUniqueness: 0.55 });
   const sajdahShared = withEvidence(candidate(320, 326, 32, 5, 5, -0.08), { lexicalUniqueness: 0.04 });
-  const solution = solveQuranContinuity([
+  const windows = [
     window(0, [maArij0]),
     window(1, [maArij1]),
     window(2, [sajdahShared, maArijShared]),
     window(3, [maArij3]),
-  ]);
+  ];
+  const solution = solveQuranContinuity(windows);
+  const summary = summarizeFastConformerIdentification(windows, 1);
   assert.equal(solution.selectedSurah, 70);
   assert.equal(solution.hypotheses[0]?.surah, 70);
   assert.equal(solution.path[2]?.candidate?.start.surah, 70, "the common phrase stays on the coherent Al-Ma'arij path");
   assert.ok(solution.hypotheses.some((hypothesis) => hypothesis.surah === 32), "the competing 32:5 hypothesis remains visible to the final decision");
+  assert.equal(summary.normalizedCtcScore, -0.22, "the independently stronger -0.08 window winner is outside the coherent path and cannot become best-window evidence");
 });
 
 test("a genuine coherent 32:5 sequence remains selectable", () => {
@@ -230,6 +234,16 @@ test("voiced coverage counts one coherent path, not unrelated per-window candida
   ], 1);
   assert.equal(summary.confidence.voicedAudioExplained, 0.5);
   assert.notEqual(summary.confidence.voicedAudioExplained, 1);
+});
+
+test("best-window CTC is the maximum finite candidate on the coherent path, never an independent local winner", () => {
+  const firstCoherent = candidate(700, 706, 70, 1, 2, -1.65);
+  const laterCoherent = candidate(704, 711, 70, 2, 4, -0.17);
+  const best = bestCoherentPathCandidate([
+    { candidate: firstCoherent },
+    { candidate: laterCoherent },
+  ], 70);
+  assert.equal(best?.normalizedCtcScore, -0.17);
 });
 
 test("short targets lose to similarly acoustic spans that explain the CTC lexical capacity", () => {

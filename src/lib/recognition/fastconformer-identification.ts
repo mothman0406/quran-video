@@ -204,6 +204,20 @@ export type PassageIdentificationCompare = {
   agreement: { sameSurah: boolean | null; overlappingAyat: boolean | null; exactSpan: boolean | null };
 };
 
+export function bestCoherentPathCandidate(
+  path: readonly { candidate: QuranPassageCandidate | null }[],
+  selectedSurah: number | null,
+) {
+  return path.reduce<QuranPassageCandidate | null>((currentBest, entry) => {
+    const candidate = entry.candidate;
+    if (!candidate || candidate.start.surah !== selectedSurah || candidate.end.surah !== selectedSurah) return currentBest;
+    const score = candidate.normalizedCtcScore;
+    if (score === null || !Number.isFinite(score)) return currentBest;
+    const currentScore = currentBest?.normalizedCtcScore;
+    return currentScore === null || currentScore === undefined || score > currentScore ? candidate : currentBest;
+  }, null);
+}
+
 export function comparePassageIdentification(
   currentProduction: PassageIdentificationCompare["currentProduction"],
   fastConformer: FastConformerIdentificationResult,
@@ -847,7 +861,7 @@ export function summarizeFastConformerIdentification(windows: readonly Identific
   const solution = solveQuranContinuity(windows);
   const selected = solution.path.flatMap((entry) => entry.candidate ? [entry.candidate] : []);
   const selectedInsideSurah = selected.filter((candidate) => candidate.start.surah === solution.selectedSurah && candidate.end.surah === solution.selectedSurah);
-  const best = selectedInsideSurah[0] ?? null;
+  const best = bestCoherentPathCandidate(solution.path, solution.selectedSurah);
   const optionalPrelude = selectedInsideSurah.find((candidate) => candidate.optionalPrelude.selected === "present")?.optionalPrelude
     ?? selectedInsideSurah.find((candidate) => candidate.optionalPrelude.available)?.optionalPrelude
     ?? null;

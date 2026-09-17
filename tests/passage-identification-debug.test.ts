@@ -78,7 +78,7 @@ test("final passage diagnostics expose coherent-path gate mode and failed rules 
   assert.deepEqual(facts.failedAcceptanceRules, ["coherent-path-ctc"]);
 });
 
-test("CTC gate diagnostics distinguish the first coherent candidate from the actual best window", () => {
+test("CTC gate diagnostics report the maximum coherent-path candidate as the best window", () => {
   const identification = identificationWithWindows(5, -0.46);
   const first = { ...identification.windowResults[0]!.selectedCandidate!, normalizedCtcScore: -1.65, ctcScore: -165 };
   const actualBest = { ...identification.windowResults[1]!.selectedCandidate!, normalizedCtcScore: -0.17, ctcScore: -17 };
@@ -88,16 +88,16 @@ test("CTC gate diagnostics distinguish the first coherent candidate from the act
   }));
   const audited: FastConformerIdentificationResult = {
     ...identification,
-    normalizedCtcScore: -1.65,
-    confidence: { ...identification.confidence, normalizedBestCtcScore: -1.65 },
+    normalizedCtcScore: -0.17,
+    confidence: { ...identification.confidence, normalizedBestCtcScore: -0.17 },
     globalHypotheses: [{ ...identification.globalHypotheses[0]!, path }],
   };
   const decision = decideFastConformerPassage(audited, canonicalSpanFromFastConformerIdentification(audited.canonicalSpan));
   const facts = createCtcGateDebugFacts(audited, decision);
-  assert.equal(facts.final.reportedBestWindowCtc, -1.65);
-  assert.equal(facts.final.reportedBestWindowCtcSource, "first-coherent-path-candidate");
+  assert.equal(facts.final.reportedBestWindowCtc, -0.17);
+  assert.equal(facts.final.reportedBestWindowCtcSource, "maximum-finite-coherent-path-candidate");
   assert.equal(facts.final.actualBestCoherentPathCtc, -0.17);
-  assert.equal(facts.windows[0]?.usedByReportedBestWindowGate, true);
-  assert.equal(facts.windows[1]?.usedByReportedBestWindowGate, false);
+  assert.equal(facts.windows[0]?.usedByReportedBestWindowGate, false);
+  assert.equal(facts.windows[1]?.usedByReportedBestWindowGate, true);
   assert.equal(facts.windows.every((window) => window.usedByCoherentPathMeanGate), true);
 });

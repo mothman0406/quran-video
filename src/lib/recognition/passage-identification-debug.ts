@@ -1,4 +1,4 @@
-import type { FastConformerIdentificationResult, QuranPassageCandidate } from "./fastconformer-identification.ts";
+import { bestCoherentPathCandidate, type FastConformerIdentificationResult, type QuranPassageCandidate } from "./fastconformer-identification.ts";
 import { FASTCONFORMER_LONG_TIMELINE_MINIMUM_WINDOW_COUNT, FASTCONFORMER_PASSAGE_EVIDENCE_THRESHOLDS, type FastConformerPassageDecision } from "./passage-decision.ts";
 import type { VadSpeechRegion } from "./speech-regions.ts";
 import { mediaDebug, type MediaDebugFacts } from "./media-debug.ts";
@@ -191,9 +191,8 @@ function ctcGateCandidate(candidate: QuranPassageCandidate | null) {
 }
 
 /** Debug-only audit of the exact values entering the production CTC gates.
- * It intentionally exposes the current first-path-candidate implementation
- * separately from the mathematical maximum so a mislabeled gate cannot hide
- * behind the independent per-window winner log. */
+ * It keeps the first-path value visible beside the coherent-path maximum and
+ * independent per-window winners so future regressions cannot conflate them. */
 export function createCtcGateDebugFacts(
   identification: FastConformerIdentificationResult | null,
   decision: FastConformerPassageDecision,
@@ -201,7 +200,8 @@ export function createCtcGateDebugFacts(
   const windows = identification?.windowResults ?? [];
   const coherentPath = new Map((identification?.globalHypotheses[0]?.path ?? []).map((entry) => [entry.windowIndex, entry.candidate]));
   const coherentCandidates = (identification?.globalHypotheses[0]?.path ?? []).flatMap((entry) => entry.candidate ? [entry.candidate] : []);
-  const coherentScores = coherentCandidates.flatMap((candidate) => candidate.normalizedCtcScore === null ? [] : [candidate.normalizedCtcScore]);
+  const coherentScores = coherentCandidates.flatMap((candidate) => candidate.normalizedCtcScore !== null && Number.isFinite(candidate.normalizedCtcScore) ? [candidate.normalizedCtcScore] : []);
+  const coherentBestCandidate = bestCoherentPathCandidate(identification?.globalHypotheses[0]?.path ?? [], identification?.selectedSurah ?? null);
   const firstCoherentPathCtc = coherentScores[0] ?? null;
   const actualBestCoherentPathCtc = coherentScores.length ? Math.max(...coherentScores) : null;
   const recomputedCoherentPathMeanCtc = coherentScores.length
@@ -224,7 +224,7 @@ export function createCtcGateDebugFacts(
         ctcFrameCount: window.ctcFrameCount ?? null,
         independentWindowWinner: ctcGateCandidate(window.selectedCandidate),
         coherentPathCandidate: ctcGateCandidate(coherentCandidate),
-        usedByReportedBestWindowGate: coherentCandidate !== null && coherentCandidate === coherentCandidates[0],
+        usedByReportedBestWindowGate: coherentCandidate !== null && coherentCandidate === coherentBestCandidate,
         usedByCoherentPathMeanGate: coherentCandidate !== null,
       };
     }),
@@ -232,7 +232,7 @@ export function createCtcGateDebugFacts(
       gateMode: fastConformerCtcGateMode(decision),
       ctcThreshold,
       reportedBestWindowCtc: decision.evidence.normalizedBestCtcScore,
-      reportedBestWindowCtcSource: "first-coherent-path-candidate",
+      reportedBestWindowCtcSource: "maximum-finite-coherent-path-candidate",
       firstCoherentPathCtc,
       actualBestCoherentPathCtc,
       reportedCoherentPathMeanCtc: decision.evidence.normalizedCoherentCtcScore,

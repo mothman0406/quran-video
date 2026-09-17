@@ -1,5 +1,38 @@
 # Status
 
+## Current milestone: Design and validate recognition acceptance fix
+
+Complete:
+
+- Corrected `bestWindowCtc` to use the maximum finite CTC score among the
+  winning coherent path's same-surah candidates. A regression fixes the
+  first `-1.65`, later `-0.17` case and proves an independently stronger local
+  winner outside that path has no authority.
+- Retained privacy-safe logical shapes for 2:258–259, the known 6:74–77
+  positive control, and observational 20:100–104, including score chronology,
+  nulls, approximate anchor activation, and supplied non-acoustic gates. No
+  media, transcript, or invented lexical/weight measurement is retained.
+- Added deterministic evaluation for arithmetic, voiced/target-weighted,
+  median, trimmed, winsorized, upper-quantile, top-K, anchor-aware,
+  post-anchor, best-plus-support, and strongest-half path statistics across 13
+  protected negative shapes. Pre-anchor degradation explains Surah 2 but not
+  Surah 6; its later low outlier keeps post-anchor mean below threshold.
+- Did not change the production long-path mean or `-0.60` threshold. Real
+  per-window negative calibration data is absent, best-plus-support newly
+  accepts the modeled isolated-strong boundary, and upper-tail rules remain
+  vulnerable to a few isolated phrases. Surah 2 and FastConformer Surah 6
+  therefore still abstain at the long-path mean; Whisper continues rescuing
+  Surah 6, and unverified Surah 20 remains observational.
+
+Verification: the retained private Muddaththir replay accepted 74:1–9 with one
+top-level identification call, best-window CTC `-0.349854`, three coherent
+windows, complete forced alignment, and complete timing. `npm run
+check:ffmpeg-assets`, `npm run regression:quran-id`, `npm test` (468 passing),
+`npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`, and `git diff
+--check` pass. Diffs from `main` under `src/lib/media`, `src/app/create`, and
+`public` are empty. The build retains the existing VAD/ONNX warnings and TikTok
+configuration reminder.
+
 ## Current milestone: Audit Quran recognition abstentions
 
 Complete:
