@@ -135,3 +135,72 @@ The local-only diagnostic is `tools/regression/diagnose-real-quran-id.ts`; it
 accepts derived 16 kHz float PCM and pinned public Tilawa assets, emitting only
 candidate and gate evidence. It is suitable for future bisects without adding
 customer media to the repository.
+
+## 2026-09-17 CTC-gate metric audit
+
+The per-window `normalizedCtcScore` is the exact forward CTC log likelihood of
+that candidate's word-level canonical BPE target (or the better optional-
+prelude-plus-canonical target) over every acoustic frame in its 12-second,
+6-second-hop identification window, divided by the number of acoustic frames.
+VAD qualifies a window but does not trim silence or breaths from it. The
+forward sum includes every valid blank/repeat path; only the separate greedy
+capacity calculation collapses repeats and removes blank tokens.
+
+The final `coherentPathMeanCtc` is the unweighted arithmetic mean of those
+per-frame-normalized scores for every non-null candidate on the winning
+surah's Viterbi path. It is not a single whole-passage CTC recomputation. The
+identity gate never expands its target to complete ayat: retrieval and local
+continuation retain exact mid-ayah word boundaries. Complete-ayah expansion
+occurs only after identity acceptance, when the separate forced-alignment run
+scores the known display passage with a max-path Viterbi score per frame.
+
+The field named `bestWindowCtc` is currently mislabeled and behaviorally
+incorrect. `summarizeFastConformerIdentification` takes
+`selectedInsideSurah[0]`, the first non-null candidate in chronological path
+order, rather than the maximum normalized score. The production gate consumes
+that value. Meanwhile `fastconformer-window-result` logs the independently
+reranked winner for each window, which can differ from the candidate selected
+by the global Viterbi path. Thus the two logs intentionally describe different
+candidates, but selecting the first path candidate as "best" is not
+intentional best-window semantics. No target is recomputed and no full-ayah
+span is scored at this gate.
+
+Debug-media output now emits one `ctc-gate-input` record per window and one
+`final-ctc-gate-components` record. They expose the independent winner, exact
+coherent-path candidate, audio/sample interval, target word coordinates, token
+count, raw and normalized score, frame denominator, first-path value, actual
+coherent-path maximum, and recomputed mean without changing acceptance.
+
+The five-window long-timeline rule came from `c69a018`: a recovery could
+otherwise assemble a plausible span from one strong local phrase plus weak,
+mixed, or skipped windows. Commit `756b052` scoped the mean gate to five or
+more generated windows after the real three-window Muddaththir recovery showed
+that a noisy supporting edge (`-1.676116`) could pull the two-candidate mean to
+`-1.012985` even though the correct opening scored `-0.349854`. Long clips
+therefore still require both the reported best-window value and coherent-path
+mean to reach `-0.60`, plus 60% coherent-window support, no unsupported run of
+three, at least 50% VAD-qualified voiced coverage, two agreeing windows, a
+0.05 global margin, same-surah structure, and lexical uniqueness of at least
+0.08.
+
+The supplied 2:258-259 and 6:74-77 recordings were not present in the local
+workspace, attachments, or retained private fixture directory, so their raw
+path arrays and Whisper transcripts could not be replayed. The reported Surah
+2 margin (`38.5135`), 18/19 path support, 0.95 voiced-window coverage, monotonic
+same-surah span, and one-window maximum gap nevertheless establish overwhelming
+dominance over the runner-up under the current global solver. Whisper's
+abstention is independent text-match weakness, not contradictory acoustic
+evidence: the fallback neither consumes nor vetoes FastConformer evidence.
+
+Frame normalization removes raw duration accumulation but does not make target
+choice length-neutral. Added unrecited tokens must be emitted and worsen fit;
+very short targets can explain remaining frames as blank. The solver's
+`targetCoverage` short-target penalty exists for that latter bias, but the
+reported CTC metric itself remains only log likelihood per acoustic frame.
+Partial-ayah start/end handling does not cause the reported Surah 2 gate
+failure because identity candidates are word-bounded; full-ayah forced
+alignment happens only after acceptance. A future fix should first make
+best-window mean the maximum candidate score on the winning coherent path,
+then use retained real reports to design an edge/partial-window-aware long-path
+statistic while preserving the isolated-phrase, repeated-language, coverage,
+gap, margin, and wrong-surah protections.

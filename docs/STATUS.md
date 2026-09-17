@@ -1,5 +1,40 @@
 # Status
 
+## Current milestone: Audit Quran recognition abstentions
+
+Complete:
+
+- Traced every identification CTC metric from the VAD-qualified 12-second
+  window, word-level candidate and forward CTC sum through the global path and
+  final gate. Confirmed that identity CTC is never recomputed over the expanded
+  full-ayah display passage; the later known-passage forced alignment is a
+  separate max-path score and has no identity authority.
+- Proved that final `bestWindowCtc` currently uses the first non-null winning-
+  path candidate, not the best candidate. Per-window logs separately report
+  each window's independent rerank winner, so differing values can name
+  different candidates, but the first-as-best gate value is an implementation
+  defect. No threshold or production decision was changed in this milestone.
+- Added debug-only `ctc-gate-input` and `final-ctc-gate-components` events with
+  privacy-safe audio/sample intervals, word coordinates, token/frame counts,
+  raw/normalized values, score roles, the current reported value, actual path
+  maximum, and recomputed path mean. Added a deterministic regression for the
+  first-versus-best distinction.
+- Audited `c69a018` and `756b052`: long-timeline mean/support/gap/uniqueness
+  gates protect against isolated or repeated local phrases constructing a
+  plausible wrong span; the mean gate was later scoped away from short noisy
+  passages. The exact supplied Surah 2 and Surah 6 recordings are not retained
+  locally, so no private-media replay or unsupported Whisper diagnosis is
+  claimed.
+
+Verification: the retained private Muddaththir FFmpeg PCM replay accepted
+74:1-9 with one top-level identification call and completed forced alignment.
+`npm run check:ffmpeg-assets`, `npm run regression:quran-id`, `npm test`
+(464 passing), `npx tsc --noEmit`, `npm run lint -- --quiet`, `npm run build`,
+and `git diff --check` pass. Media, create-route, and public-asset diffs against
+`main` are empty. Thresholds, VAD, normalization, candidate selection, Whisper,
+and forced-alignment behavior remain unchanged. The build retains the existing
+VAD/ONNX dynamic-dependency warnings and TikTok configuration reminder.
+
 ## Current milestone: Fast local MOV transmux
 
 Complete:

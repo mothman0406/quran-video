@@ -107,6 +107,9 @@ export type IdentificationWindowResult = {
   startMs: number;
   endMs: number;
   voicedMs: number;
+  /** Acoustic-frame denominator used by every candidate's normalized CTC
+   * score. Retained for diagnostics; it has no scoring authority. */
+  ctcFrameCount?: number;
   greedy: GreedyCtcDecode;
   candidates: QuranPassageCandidate[];
   selectedCandidate: QuranPassageCandidate | null;
@@ -626,7 +629,7 @@ export function identifyQuranWindow(index: QuranWideLexicalIndex, input: Identif
       : best.confidence < 0.25 ? "weak-candidate"
         : "strong-candidate";
   return {
-    index: input.index, startMs: input.startMs, endMs: input.endMs, voicedMs: input.voicedMs, greedy, candidates, selectedCandidate: best, state,
+    index: input.index, startMs: input.startMs, endMs: input.endMs, voicedMs: input.voicedMs, ctcFrameCount: input.logits.frames, greedy, candidates, selectedCandidate: best, state,
     elapsedMs: Math.round(performance.now() - startedAt),
     performance: { retrievalMs, rerankingMs, candidatesReranked: Math.min(rerankInput.length, FASTCONFORMER_IDENTIFICATION_DEFAULTS.rerankCandidateLimit) },
     crossSurahCandidatesRejected: retrieval.crossSurahCandidatesRejected,
