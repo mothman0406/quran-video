@@ -1,5 +1,46 @@
 # Status
 
+## Current milestone: Offline multi-signal long-path rule design
+
+Complete:
+
+- Added one normalized offline feature representation for all 27 retained
+  fixtures: five known long positives, two short controls, five real negatives,
+  thirteen logical negatives, one observational case, and the separately
+  labeled Husary recognition failure. Missing evidence stays explicit.
+- Evaluated seven simple rule families over coarse, documented thresholds.
+  Anchor progression did not stand alone; repeated/backward captures can emit
+  advance events without coherent support, and two legacy positives lack
+  retained advance counts.
+- Selected an offline staged candidate that preserves every current non-CTC
+  safety gate, applies only at five or more windows, and requires margin `>= 8`,
+  best coherent CTC `>= -0.60`, and coherent fraction at `>= -0.60` of at
+  least `.25`. It has zero errors across the five long positives, five real
+  negatives, and thirteen logical negatives.
+- Deterministic leave-one-positive-out passes all five folds and
+  leave-one-real-negative-out rejects all five held-out negatives. Margin
+  `7–9`, best CTC `-.7–-.4`, and fraction `.2–.3` retain zero errors; margin
+  `10` and fraction `.4` expose the nearest positive boundaries.
+- Husary remains a range-recognition failure and is rejected on fraction
+  (`.157895`). Current forced alignment consumes the selected complete target
+  and has no evidenced 75:1–16 to 75:1–15 trimming behavior.
+- Documented six known CTC-gate fallbacks, including five known positives and
+  Husary. The candidate could avoid four correct long-path fallbacks, but
+  repeated 6:77 remains a Whisper false positive and needs a separate Whisper
+  calibration milestone.
+- No production recognition, threshold, media, create-route, or public-asset
+  behavior changed. The candidate is for prospective validation and a future
+  separately approved implementation only.
+
+Verification passed: FFmpeg assets, Quran ID regression schema, 474/474 tests,
+strict TypeScript, quiet lint, production build, prior CTC evaluation, new
+multi-signal evaluation, and whitespace checks. Diffs from `main` under
+`src/lib/recognition`, `src/lib/media`, `src/app/create`, and `public` are
+empty. The build retains only the existing ONNX/VAD warnings and optional
+TikTok configuration reminder.
+
+Detailed evidence: `docs/MULTISIGNAL_LONG_PATH_CALIBRATION.md`.
+
 ## Current milestone: Expand Quran CTC positive corpus
 
 ### Foundation calibration milestone
