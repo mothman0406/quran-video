@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "id": "positive-hani-3-33-35",
+  "expected": {
+    "outcome": "positive",
+    "intent": "Continuous Hani Rifai 3:33–35 is an independently verified known-positive passage.",
+    "surah": 3,
+    "startAyah": 33,
+    "endAyah": 35
+  },
+  "totalGeneratedWindows": 6,
+  "usableWindows": 6,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 11520,
+      "coherentPathCtc": -2.052879,
+      "targetCoverage": 1,
+      "targetTokenCount": 31,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 1,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.733451,
+      "targetCoverage": 1,
+      "targetTokenCount": 23,
+      "anchorActive": true,
+      "anchorEvent": "anchor-activated",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 2,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.423793,
+      "targetCoverage": 1,
+      "targetTokenCount": 23,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 3,
+      "voicedMs": 12000,
+      "coherentPathCtc": -2.040255,
+      "targetCoverage": 0.45098,
+      "targetTokenCount": 23,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local"
+      ]
+    },
+    {
+      "index": 4,
+      "voicedMs": 11232,
+      "coherentPathCtc": -2.117559,
+      "targetCoverage": 0.475,
+      "targetTokenCount": 19,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 5,
+      "voicedMs": 7056,
+      "coherentPathCtc": -0.206648,
+      "targetCoverage": 1,
+      "targetTokenCount": 13,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    }
+  ],
+  "agreeingWindowCount": 6,
+  "coherentRatio": 1,
+  "coverage": 1,
+  "longestUnsupportedRun": 0,
+  "margin": 9.1706,
+  "lexicalUniqueness": 0.232772,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -0.206648,
+  "coherentPathMeanCtc": -1.262431,
+  "fastConformerProposedRange": {
+    "surah": 3,
+    "startAyah": 33,
+    "endAyah": 35
+  },
+  "fastConformerOutcome": "abstained",
+  "finalProposedRange": {
+    "surah": 2,
+    "startAyah": 127,
+    "endAyah": 127
+  },
+  "finalOutcome": "abstained",
+  "finalAuthority": "whisper-fallback",
+  "failedAcceptanceRules": [
+    "coherent-path-ctc"
+  ]
+}

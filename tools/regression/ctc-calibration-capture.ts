@@ -100,7 +100,9 @@ export function createCtcCalibrationCapture(
 ): CtcCalibrationCapture {
   if (!/^[a-z0-9][a-z0-9-]{1,79}$/u.test(metadata.id)) throw new Error("Calibration id must be a lowercase, hyphenated identifier.");
   if (!metadata.expected.intent.trim()) throw new Error("Calibration intent is required.");
-  const events = parseMediaDebugEvents(input);
+  const parsedEvents = parseMediaDebugEvents(input);
+  const lastBuildMarker = parsedEvents.findLastIndex((entry) => entry.event === "build-marker");
+  const events = parsedEvents.slice(Math.max(0, lastBuildMarker));
   const vad = lastEvent(events, "vad-window-summary");
   const final = lastEvent(events, "final-passage-decision");
   if (!vad || !final) throw new Error("The log must contain vad-window-summary and final-passage-decision debug events.");

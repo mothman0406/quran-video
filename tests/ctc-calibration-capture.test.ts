@@ -40,10 +40,22 @@ test("debug parser tolerates DevTools prefixes and ignores malformed copied rows
   assert.deepEqual(events, [{ event: "one", facts: { ok: true } }]);
 });
 
+test("capture uses only the latest browser run when DevTools replays an earlier session", () => {
+  const run = (score: number) => [
+    line("build-marker", { buildCommit: "local-development" }),
+    line("vad-window-summary", { totalGeneratedIdentificationWindows: 1, windows: [{ index: 0, voicedMs: 5000 }] }),
+    line("fastconformer-window-result", { index: 0, continuation: { anchorActive: false, event: "none" } }),
+    line("ctc-gate-input", { windowIndex: 0, voicedMs: 5000, coherentPathCandidate: { normalizedCtcScore: score, targetCoverage: 1, targetTokenCount: 8, origins: ["global"] } }),
+    line("final-passage-decision", { usableWindowCount: 1, agreeingWindowCount: 1, coherentRatio: 1, coverage: 1, longestUnsupportedRun: 0, margin: 1, lexicalUniqueness: 0.5, structuralValidity: true, surahConsistency: true, bestWindowCtc: score, coherentPathMeanCtc: score, decision: "accepted", proposedSurah: 94, startAyah: 1, endAyah: 8, failedAcceptanceRules: [] }),
+  ];
+  const capture = createCtcCalibrationCapture([...run(-2), ...run(-0.3)].join("\n"), { id: "latest-session", expected: { outcome: "positive", intent: "Latest run only.", surah: 94, startAyah: 1, endAyah: 8 } });
+  assert.deepEqual(capture.windows.map((window) => window.coherentPathCtc), [-0.3]);
+});
+
 test("retained acoustic captures are privacy-safe and include real positive and negative distributions", async () => {
   const directory = join(process.cwd(), "tools/regression/fixtures/ctc-calibration");
   const captures = await Promise.all((await readdir(directory)).sort().map(async (name) => JSON.parse(await readFile(join(directory, name), "utf8"))));
-  assert.deepEqual(captures.map((capture) => capture.id), ["backward-6-77-to-74", "isolated-muddaththir-excerpt", "mixed-noncontiguous-quran", "muddaththir-74-1-9", "positive-alafasy-93-1-11", "repeated-6-77", "repeated-93-1"]);
+  assert.deepEqual(captures.map((capture) => capture.id), ["backward-6-77-to-74", "isolated-muddaththir-excerpt", "mixed-noncontiguous-quran", "muddaththir-74-1-9", "positive-alafasy-93-1-11", "positive-alafasy-94-1-8", "positive-hani-3-33-35", "positive-hani-69-19-22", "positive-husary-75-1-15", "repeated-6-77", "repeated-93-1"]);
   assert.equal(captures.filter((capture) => capture.expected.outcome === "negative").length, 5);
   const alafasy = captures.find((capture) => capture.id === "positive-alafasy-93-1-11");
   assert.deepEqual(alafasy?.expected, { outcome: "positive", intent: "Independent-reader continuous 93:1–11 must be accepted as the verified canonical passage.", surah: 93, startAyah: 1, endAyah: 11 });
@@ -52,6 +64,8 @@ test("retained acoustic captures are privacy-safe and include real positive and 
   assert.equal(alafasy?.finalOutcome, "accepted");
   assert.equal(alafasy?.finalAuthority, "whisper-fallback");
   assert.equal(captures.find((capture) => capture.id === "repeated-6-77")?.finalOutcome, "accepted", "retain the discovered Whisper fallback false positive");
+  assert.deepEqual(captures.find((capture) => capture.id === "positive-alafasy-94-1-8")?.fastConformerProposedRange, { surah: 94, startAyah: 1, endAyah: 8 });
+  assert.deepEqual(captures.find((capture) => capture.id === "positive-husary-75-1-15")?.fastConformerProposedRange, { surah: 75, startAyah: 1, endAyah: 16 }, "retain the recognizer mismatch without changing the expected range");
   const serialized = JSON.stringify(captures);
   for (const forbidden of ["source audio", "transcript", "filename", "fileName", "absolutePath", "pcm", "hash", "lexicalText", "ctcTokenSequence"]) {
     assert.equal(serialized.includes(forbidden), false, `capture unexpectedly contains ${forbidden}`);

@@ -1,6 +1,8 @@
 # Status
 
-## Current milestone: Collect real Quran CTC calibration data
+## Current milestone: Expand Quran CTC positive corpus
+
+### Foundation calibration milestone
 
 Complete:
 
@@ -48,6 +50,47 @@ empty. The build retains the existing VAD/ONNX warnings and TikTok
 configuration reminder.
 
 Detailed evidence: `docs/CTC_CALIBRATION_CORPUS.md`.
+
+### Expanded positive corpus milestone
+
+Complete:
+
+- Verified every cached ayah for Alafasy 94:1–8, Hani Rifai 3:33–35 and
+  69:19–22, and Husary Muallim 75:1–15. Constructed ignored continuous MP3s by
+  packet copy with no inserted silence, source modification, or committed
+  media.
+- Ran each recording through the unchanged browser production flow: one
+  canonical PCM, one top-level FastConformer identification, normal passage
+  decision, Whisper only after abstention, and forced alignment only after an
+  accepted identity. Added privacy-safe schema-v1 captures for all four runs.
+- Retained Alafasy 94:1–8 and Hani 3:33–35 as LONG correct-range positives and
+  Hani 69:19–22 as a SHORT control. Husary remains labeled with its verified
+  75:1–15 truth but is excluded from positive separation as a recognition
+  failure: FastConformer proposed 75:1–16 and Whisper accepted 75:1–13.
+- The corpus now has two SHORT positives and five LONG correct-range positives
+  across three reciter/source groups. No scalar statistic has raw separation.
+  Four have gate-conditioned separation; strongest-half is widest at
+  `0.212139`, while best-plus-support is only `0.042472`.
+- Added offline feature-distribution reporting for coherence, coverage,
+  agreement, margin, uniqueness, unsupported runs, anchor behavior, CTC
+  support fractions, and pre/post-anchor score summaries. Finite global margin
+  separates these five long positives from five real negatives, while most
+  individual features overlap; a composite-rule design experiment is justified
+  next, but production is not ready to change.
+- Preserved the repeated-6:77 negative unchanged: FastConformer abstains and
+  Whisper falsely accepts 6:77–78. Whisper does not alter FastConformer labels.
+  No recognition, media, create-route, public asset, threshold, VAD, Whisper,
+  alignment, ingest, FFmpeg, transmux, OPFS, or service-worker behavior changed.
+
+Detailed evidence: `docs/CTC_CALIBRATION_CORPUS.md`.
+
+Verification passed: FFmpeg assets, Quran ID regression, 473/473 tests (up
+from the 468-test baseline), strict TypeScript, quiet lint, production build,
+calibration evaluation, privacy scan, and whitespace checks. Diffs under
+`src/lib/recognition`, `src/lib/media`, `src/app/create`, and `public` are
+empty. All source and generated media remain ignored and untracked. The build
+retains only the pre-existing ONNX/VAD warnings and optional TikTok
+configuration reminder.
 
 ## Current milestone: Design and validate recognition acceptance fix
 

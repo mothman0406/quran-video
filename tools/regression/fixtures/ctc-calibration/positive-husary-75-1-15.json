@@ -1,0 +1,315 @@
+{
+  "schemaVersion": 1,
+  "id": "positive-husary-75-1-15",
+  "expected": {
+    "outcome": "positive",
+    "intent": "Continuous Husary Muallim 75:1–15 is independently verified; mismatched recognition remains a failure candidate.",
+    "surah": 75,
+    "startAyah": 1,
+    "endAyah": 15
+  },
+  "totalGeneratedWindows": 23,
+  "usableWindows": 23,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 7968,
+      "coherentPathCtc": -2.011824,
+      "targetCoverage": 0.296296,
+      "targetTokenCount": 8,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 1,
+      "voicedMs": 6912,
+      "coherentPathCtc": -2.755617,
+      "targetCoverage": 0.454545,
+      "targetTokenCount": 10,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 2,
+      "voicedMs": 8544,
+      "coherentPathCtc": -0.846615,
+      "targetCoverage": 0.55,
+      "targetTokenCount": 11,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 3,
+      "voicedMs": 7872,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 4,
+      "voicedMs": 7584,
+      "coherentPathCtc": -1.411468,
+      "targetCoverage": 0.615385,
+      "targetTokenCount": 16,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 5,
+      "voicedMs": 8352,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 6,
+      "voicedMs": 7968,
+      "coherentPathCtc": -1.996437,
+      "targetCoverage": 0.571429,
+      "targetTokenCount": 16,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 7,
+      "voicedMs": 7008,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 8,
+      "voicedMs": 8256,
+      "coherentPathCtc": -1.748381,
+      "targetCoverage": 0.424242,
+      "targetTokenCount": 14,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 9,
+      "voicedMs": 6960,
+      "coherentPathCtc": -2.270577,
+      "targetCoverage": 0.5,
+      "targetTokenCount": 14,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 10,
+      "voicedMs": 5280,
+      "coherentPathCtc": -1.705656,
+      "targetCoverage": 0.5,
+      "targetTokenCount": 10,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 11,
+      "voicedMs": 6816,
+      "coherentPathCtc": -0.430692,
+      "targetCoverage": 0.47619,
+      "targetTokenCount": 10,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 12,
+      "voicedMs": 6336,
+      "coherentPathCtc": -0.589769,
+      "targetCoverage": 0.47619,
+      "targetTokenCount": 10,
+      "anchorActive": true,
+      "anchorEvent": "anchor-activated",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 13,
+      "voicedMs": 8544,
+      "coherentPathCtc": -0.633843,
+      "targetCoverage": 0.5,
+      "targetTokenCount": 10,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 14,
+      "voicedMs": 6624,
+      "coherentPathCtc": -2.62898,
+      "targetCoverage": 0.454545,
+      "targetTokenCount": 10,
+      "anchorActive": true,
+      "anchorEvent": "local-miss",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 15,
+      "voicedMs": 3504,
+      "coherentPathCtc": -1.011341,
+      "targetCoverage": 0.888889,
+      "targetTokenCount": 8,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 16,
+      "voicedMs": 8544,
+      "coherentPathCtc": -0.432366,
+      "targetCoverage": 0.866667,
+      "targetTokenCount": 13,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 17,
+      "voicedMs": 8592,
+      "coherentPathCtc": -2.930921,
+      "targetCoverage": 0.4375,
+      "targetTokenCount": 14,
+      "anchorActive": true,
+      "anchorEvent": "local-miss",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 18,
+      "voicedMs": 8928,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": []
+    },
+    {
+      "index": 19,
+      "voicedMs": 8832,
+      "coherentPathCtc": -1.947832,
+      "targetCoverage": 0.413793,
+      "targetTokenCount": 12,
+      "anchorActive": true,
+      "anchorEvent": "local-miss",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 20,
+      "voicedMs": 7104,
+      "coherentPathCtc": -2.313839,
+      "targetCoverage": 0.636364,
+      "targetTokenCount": 14,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 21,
+      "voicedMs": 8064,
+      "coherentPathCtc": -1.0358,
+      "targetCoverage": 0.857143,
+      "targetTokenCount": 18,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 22,
+      "voicedMs": 4320,
+      "coherentPathCtc": -2.318493,
+      "targetCoverage": 0.733333,
+      "targetTokenCount": 11,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    }
+  ],
+  "agreeingWindowCount": 19,
+  "coherentRatio": 0.8261,
+  "coverage": 0.8096,
+  "longestUnsupportedRun": 1,
+  "margin": 29.858,
+  "lexicalUniqueness": 0.374293,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -0.430692,
+  "coherentPathMeanCtc": -1.632655,
+  "fastConformerProposedRange": {
+    "surah": 75,
+    "startAyah": 1,
+    "endAyah": 16
+  },
+  "fastConformerOutcome": "abstained",
+  "finalProposedRange": {
+    "surah": 75,
+    "startAyah": 1,
+    "endAyah": 13
+  },
+  "finalOutcome": "accepted",
+  "finalAuthority": "whisper-fallback",
+  "failedAcceptanceRules": [
+    "coherent-path-ctc"
+  ]
+}
