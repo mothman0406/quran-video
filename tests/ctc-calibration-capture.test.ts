@@ -43,8 +43,14 @@ test("debug parser tolerates DevTools prefixes and ignores malformed copied rows
 test("retained acoustic captures are privacy-safe and include real positive and negative distributions", async () => {
   const directory = join(process.cwd(), "tools/regression/fixtures/ctc-calibration");
   const captures = await Promise.all((await readdir(directory)).sort().map(async (name) => JSON.parse(await readFile(join(directory, name), "utf8"))));
-  assert.deepEqual(captures.map((capture) => capture.id), ["backward-6-77-to-74", "isolated-muddaththir-excerpt", "mixed-noncontiguous-quran", "muddaththir-74-1-9", "repeated-6-77", "repeated-93-1"]);
+  assert.deepEqual(captures.map((capture) => capture.id), ["backward-6-77-to-74", "isolated-muddaththir-excerpt", "mixed-noncontiguous-quran", "muddaththir-74-1-9", "positive-alafasy-93-1-11", "repeated-6-77", "repeated-93-1"]);
   assert.equal(captures.filter((capture) => capture.expected.outcome === "negative").length, 5);
+  const alafasy = captures.find((capture) => capture.id === "positive-alafasy-93-1-11");
+  assert.deepEqual(alafasy?.expected, { outcome: "positive", intent: "Independent-reader continuous 93:1–11 must be accepted as the verified canonical passage.", surah: 93, startAyah: 1, endAyah: 11 });
+  assert.equal(alafasy?.totalGeneratedWindows, 9);
+  assert.equal(alafasy?.fastConformerOutcome, "abstained");
+  assert.equal(alafasy?.finalOutcome, "accepted");
+  assert.equal(alafasy?.finalAuthority, "whisper-fallback");
   assert.equal(captures.find((capture) => capture.id === "repeated-6-77")?.finalOutcome, "accepted", "retain the discovered Whisper fallback false positive");
   const serialized = JSON.stringify(captures);
   for (const forbidden of ["source audio", "transcript", "filename", "fileName", "absolutePath", "pcm", "hash", "lexicalText", "ctcTokenSequence"]) {

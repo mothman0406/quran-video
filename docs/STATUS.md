@@ -4,8 +4,24 @@
 
 Complete:
 
+- Added the missing independent-reader long positive `positive-alafasy-93-1-11`.
+  The ignored source was built from the verified ordered Alafasy 93:1–11 cache
+  entries by MP3 packet copy with no Surah 94 input, inserted silence, or
+  re-encoding; it is 54.96 seconds by container duration and 54.91 seconds
+  decoded.
+- Exercised the single continuous source through the unchanged Quick Create
+  production path. It produced nine usable/coherent windows. FastConformer
+  proposed exactly 93:1–11 with full structural, surah, coverage, and support
+  evidence, but abstained only because the coherent-path mean was `-0.959090`.
+  Whisper fallback accepted exactly 93:1–11 and forced alignment completed
+  exactly 93:1–11.
+- Retained only the privacy-safe whitelist capture. Re-evaluation now includes
+  four known positives, observational 20:100–104, five real negatives, and all
+  13 logical negatives. The new positive scores `-0.496600` at the 75th
+  percentile and `-0.464426` on strongest-half, but the best separation remains
+  the prior narrow gate-conditioned `0.052458`; production should not change.
 - Added a privacy-safe, whitelist-only converter for existing
-  `?debugMedia=1` logs plus six retained JSON captures: one real positive and
+  `?debugMedia=1` logs plus seven retained JSON captures: two real positives and
   five locally derived negatives. Media, transcripts, filenames, paths, PCM,
   hashes, Quran text, and personal metadata are excluded.
 - Exercised isolated, weak and strong repeated, mixed/non-contiguous, and
@@ -23,7 +39,7 @@ Complete:
   service worker, and public assets remain unchanged. No production gate
   change is recommended.
 
-Verification: all six browser captures used the normal production preparation
+Verification: all seven browser captures used the normal production preparation
 and identification flow. `npm run check:ffmpeg-assets`, `npm run
 regression:quran-id`, `npm test` (471 passing), `npx tsc --noEmit`, `npm run
 lint -- --quiet`, `npm run build`, and `git diff --check` pass. Diffs under
