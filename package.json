@@ -19,6 +19,8 @@
     "regression:production-transmux:chrome": "node --experimental-strip-types scripts/validate-production-transmux-chrome.ts",
     "regression:quran": "node --experimental-strip-types tools/regression/run-quran.ts",
     "regression:quran-id": "node --experimental-strip-types tools/regression/run-quran-id.ts",
+    "calibration:ctc": "node --experimental-strip-types tools/regression/capture-ctc-calibration.ts",
+    "calibration:ctc:evaluate": "node --experimental-strip-types tools/regression/evaluate-ctc-calibration.ts",
     "analyze:netlify-server": "node scripts/analyze-netlify-server.mjs",
     "check:translation:live": "LIVE_TRANSLATION_CHECK=1 node --experimental-strip-types scripts/check-translation.ts",
     "start": "next start",
