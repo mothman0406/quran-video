@@ -21,6 +21,7 @@
     "regression:quran-id": "node --experimental-strip-types tools/regression/run-quran-id.ts",
     "calibration:ctc": "node --experimental-strip-types tools/regression/capture-ctc-calibration.ts",
     "calibration:ctc:evaluate": "node --experimental-strip-types tools/regression/evaluate-ctc-calibration.ts",
+    "calibration:multisignal:evaluate": "node --experimental-strip-types tools/regression/evaluate-multisignal-long-path.ts",
     "analyze:netlify-server": "node scripts/analyze-netlify-server.mjs",
     "check:translation:live": "LIVE_TRANSLATION_CHECK=1 node --experimental-strip-types scripts/check-translation.ts",
     "start": "next start",
