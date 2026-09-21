@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "id": "validation-positive-reader-a-1-1-7",
+  "expected": {
+    "outcome": "positive",
+    "intent": "Independent labeled continuous recitation under different acoustic conditions.",
+    "surah": 1,
+    "startAyah": 1,
+    "endAyah": 7
+  },
+  "totalGeneratedWindows": 7,
+  "usableWindows": 7,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 10656,
+      "coherentPathCtc": -0.31766,
+      "targetCoverage": 0.416667,
+      "targetTokenCount": 5,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 1,
+      "voicedMs": 11328,
+      "coherentPathCtc": -0.257126,
+      "targetCoverage": 0.666667,
+      "targetTokenCount": 12,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 2,
+      "voicedMs": 11712,
+      "coherentPathCtc": -1.109361,
+      "targetCoverage": 0.463415,
+      "targetTokenCount": 19,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 3,
+      "voicedMs": 11424,
+      "coherentPathCtc": -0.583968,
+      "targetCoverage": 0.666667,
+      "targetTokenCount": 22,
+      "anchorActive": true,
+      "anchorEvent": "anchor-activated",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 4,
+      "voicedMs": 11424,
+      "coherentPathCtc": -0.336781,
+      "targetCoverage": 0.676471,
+      "targetTokenCount": 23,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 5,
+      "voicedMs": 11568,
+      "coherentPathCtc": -2.563577,
+      "targetCoverage": 0.515152,
+      "targetTokenCount": 17,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 6,
+      "voicedMs": 5568,
+      "coherentPathCtc": -0.987205,
+      "targetCoverage": 0.454545,
+      "targetTokenCount": 5,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    }
+  ],
+  "agreeingWindowCount": 7,
+  "coherentRatio": 1,
+  "coverage": 1,
+  "longestUnsupportedRun": 0,
+  "margin": 10.8931,
+  "lexicalUniqueness": 0.273628,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -0.257126,
+  "coherentPathMeanCtc": -0.879383,
+  "fastConformerProposedRange": {
+    "surah": 1,
+    "startAyah": 1,
+    "endAyah": 7
+  },
+  "fastConformerOutcome": "abstained",
+  "finalProposedRange": {
+    "surah": 1,
+    "startAyah": 1,
+    "endAyah": 7
+  },
+  "finalOutcome": "accepted",
+  "finalAuthority": "whisper-fallback",
+  "failedAcceptanceRules": [
+    "coherent-path-ctc"
+  ],
+  "corpusRole": "external-validation",
+  "provenanceClass": "independently-labeled-continuous-recording",
+  "readerGroup": "private-reader-group-a",
+  "negativeType": null,
+  "architectureEvidence": {
+    "singleSource": true,
+    "canonicalPcmPreparations": 1,
+    "topLevelIdentifyCalls": 1
+  },
+  "forcedAlignment": {
+    "status": "complete",
+    "resultingStartAyah": 1,
+    "resultingEndAyah": 7
+  }
+}

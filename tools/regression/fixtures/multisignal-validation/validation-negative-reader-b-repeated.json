@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 1,
+  "id": "validation-negative-reader-b-repeated",
+  "expected": {
+    "outcome": "negative",
+    "intent": "Repeating a complete strong passage must not masquerade as forward progression.",
+    "surah": 50,
+    "startAyah": 16,
+    "endAyah": 18
+  },
+  "totalGeneratedWindows": 18,
+  "usableWindows": 18,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 11136,
+      "coherentPathCtc": -0.251398,
+      "targetCoverage": 1,
+      "targetTokenCount": 12,
+      "anchorActive": true,
+      "anchorEvent": "anchor-activated",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 1,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.590147,
+      "targetCoverage": 0.823529,
+      "targetTokenCount": 14,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local"
+      ]
+    },
+    {
+      "index": 2,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.403871,
+      "targetCoverage": 0.9375,
+      "targetTokenCount": 15,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 3,
+      "voicedMs": 9984,
+      "coherentPathCtc": -0.41568,
+      "targetCoverage": 0.882353,
+      "targetTokenCount": 15,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 4,
+      "voicedMs": 9504,
+      "coherentPathCtc": -0.25863,
+      "targetCoverage": 0.8,
+      "targetTokenCount": 16,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 5,
+      "voicedMs": 10944,
+      "coherentPathCtc": -0.305536,
+      "targetCoverage": 0.695652,
+      "targetTokenCount": 16,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 6,
+      "voicedMs": 11424,
+      "coherentPathCtc": -0.178823,
+      "targetCoverage": 1,
+      "targetTokenCount": 15,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 7,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.478377,
+      "targetCoverage": 0.736842,
+      "targetTokenCount": 14,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 8,
+      "voicedMs": 9888,
+      "coherentPathCtc": -0.759896,
+      "targetCoverage": 0.5,
+      "targetTokenCount": 11,
+      "anchorActive": true,
+      "anchorEvent": "local-miss",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 9,
+      "voicedMs": 9888,
+      "coherentPathCtc": -0.258121,
+      "targetCoverage": 0.909091,
+      "targetTokenCount": 10,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 10,
+      "voicedMs": 12000,
+      "coherentPathCtc": -1.798541,
+      "targetCoverage": 0.3125,
+      "targetTokenCount": 10,
+      "anchorActive": true,
+      "anchorEvent": "local-miss",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 11,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.725216,
+      "targetCoverage": 1,
+      "targetTokenCount": 22,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 12,
+      "voicedMs": 9984,
+      "coherentPathCtc": -0.53619,
+      "targetCoverage": 0.578947,
+      "targetTokenCount": 11,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local"
+      ]
+    },
+    {
+      "index": 13,
+      "voicedMs": 9504,
+      "coherentPathCtc": -0.20744,
+      "targetCoverage": 1,
+      "targetTokenCount": 13,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 14,
+      "voicedMs": 11520,
+      "coherentPathCtc": -0.066125,
+      "targetCoverage": 0.9375,
+      "targetTokenCount": 15,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 15,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.148626,
+      "targetCoverage": 0.7,
+      "targetTokenCount": 14,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    },
+    {
+      "index": 16,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.236728,
+      "targetCoverage": 0.833333,
+      "targetTokenCount": 15,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 17,
+      "voicedMs": 7920,
+      "coherentPathCtc": -1.588391,
+      "targetCoverage": 0.470588,
+      "targetTokenCount": 8,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local",
+        "global"
+      ]
+    }
+  ],
+  "agreeingWindowCount": 18,
+  "coherentRatio": 1,
+  "coverage": 1,
+  "longestUnsupportedRun": 0,
+  "margin": 29.9753,
+  "lexicalUniqueness": 0.363653,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -0.066125,
+  "coherentPathMeanCtc": -0.511541,
+  "fastConformerProposedRange": {
+    "surah": 50,
+    "startAyah": 16,
+    "endAyah": 19
+  },
+  "fastConformerOutcome": "accepted",
+  "finalProposedRange": {
+    "surah": 50,
+    "startAyah": 16,
+    "endAyah": 19
+  },
+  "finalOutcome": "accepted",
+  "finalAuthority": "fastconformer-primary",
+  "failedAcceptanceRules": [],
+  "corpusRole": "external-validation",
+  "provenanceClass": "derived-from-unused-validation-source",
+  "readerGroup": "published-reader-group-b",
+  "negativeType": "repeated-complete-passage",
+  "architectureEvidence": {
+    "singleSource": true,
+    "canonicalPcmPreparations": 1,
+    "topLevelIdentifyCalls": 1
+  },
+  "forcedAlignment": {
+    "status": "complete",
+    "resultingStartAyah": 16,
+    "resultingEndAyah": 19
+  }
+}

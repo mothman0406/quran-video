@@ -1,5 +1,33 @@
 # Status
 
+## Current milestone: Frozen long-path rule external validation
+
+Complete:
+
+- Froze the prospective offline rule before private-media inventory at five
+  windows, margin `8`, best coherent-path CTC `-0.60`, and coherent fraction
+  at `-0.60` of `.25`, while retaining every existing non-CTC production
+  safety gate. Exact immutable-boundary tests prevent fixture-driven tuning.
+- Ran three new continuous positives across two reader groups and three new
+  adversarial negatives through the unchanged production browser architecture.
+  Retained fixtures are privacy-safe and explicitly separated with
+  `corpusRole: external-validation`; all media remains ignored.
+- External validation failed. Correct 66:1–7 is a false negative because its
+  coherent fraction is `.076923`. Repeating a strong 50:16–18 passage is a
+  false positive: the frozen rule passes it at `.777778`, and current
+  FastConformer accepts 50:16–19. Forced alignment retains the extra edge ayah.
+- The cross-surah jump rejects under the frozen rule on existing coherent-window
+  support, but current Whisper fallback incorrectly accepts its 50:16–18 tail.
+  The backward-order case rejects on coherent-window support and Whisper
+  abstains. No failure was patched and no threshold was retuned.
+- The original design corpus remains unchanged at 5/5 long positives passing,
+  5/5 real negatives rejecting, and 13/13 logical negatives rejecting. No
+  production recognition, media, create-route, public-asset, Whisper, VAD,
+  candidate, continuation, or alignment behavior changed.
+
+Conclusion: **EXTERNAL VALIDATION FAILED**. Production implementation is not
+justified. Detailed evidence: `docs/MULTISIGNAL_LONG_PATH_VALIDATION.md`.
+
 ## Current milestone: Offline multi-signal long-path rule design
 
 Complete:
