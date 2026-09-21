@@ -179,6 +179,10 @@ export function buildNormalizedLongPathCorpus(captures: readonly CtcCalibrationC
   return fixtures.map((fixture) => normalizeFixture(fixture, captureById.get(fixture.id)));
 }
 
+export function normalizeCapturedLongPathFeature(capture: CtcCalibrationCapture) {
+  return normalizeFixture(calibrationCaptureToPathFixture(capture), capture);
+}
+
 export function evaluateStagedLongPathRule(feature: NormalizedLongPathFeature, thresholds: StagedRuleThresholds = RECOMMENDED_OFFLINE_THRESHOLDS) {
   const conditions = {
     fixedSafetyGates: feature.fixedSafetyGatesPass,
