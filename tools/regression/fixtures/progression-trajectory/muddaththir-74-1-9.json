@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "id": "muddaththir-74-1-9",
+  "expected": {
+    "outcome": "positive",
+    "intent": "Retained positive must identify the documented Muddaththir passage.",
+    "surah": 74,
+    "startAyah": 1,
+    "endAyah": 9
+  },
+  "totalGeneratedWindows": 3,
+  "usableWindows": 3,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 10848,
+      "coherentPathCtc": -0.32682,
+      "targetCoverage": 0.972973,
+      "targetTokenCount": 36,
+      "anchorActive": true,
+      "anchorEvent": "anchor-activated",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 1,
+      "voicedMs": 12000,
+      "coherentPathCtc": -2.86682,
+      "targetCoverage": 0.421053,
+      "targetTokenCount": 32,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local"
+      ]
+    },
+    {
+      "index": 2,
+      "voicedMs": 10080,
+      "coherentPathCtc": -0.938646,
+      "targetCoverage": 0.740741,
+      "targetTokenCount": 20,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local"
+      ]
+    }
+  ],
+  "agreeingWindowCount": 3,
+  "coherentRatio": 1,
+  "coverage": 1,
+  "longestUnsupportedRun": 0,
+  "margin": 5.1445,
+  "lexicalUniqueness": 0.4765,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -0.32682,
+  "coherentPathMeanCtc": -1.377429,
+  "fastConformerProposedRange": {
+    "surah": 74,
+    "startAyah": 1,
+    "endAyah": 9
+  },
+  "fastConformerOutcome": "accepted",
+  "finalProposedRange": {
+    "surah": 74,
+    "startAyah": 1,
+    "endAyah": 9
+  },
+  "finalOutcome": "accepted",
+  "finalAuthority": "fastconformer-primary",
+  "failedAcceptanceRules": [],
+  "provenance": "design",
+  "readerGroup": "muddaththir-source",
+  "negativeType": null,
+  "trajectory": {
+    "coordinateOrigin": "minimum-coherent-start",
+    "windows": [
+      {
+        "index": 0,
+        "coherent": {
+          "surah": 74,
+          "startAyah": 1,
+          "endAyah": 6,
+          "start": 0,
+          "end": 11,
+          "ctc": -0.32682,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 74,
+          "startAyah": 1,
+          "endAyah": 6,
+          "sameSurah": true,
+          "start": 0,
+          "end": 11,
+          "ctc": -0.32682
+        },
+        "anchorEvent": "anchor-activated"
+      },
+      {
+        "index": 1,
+        "coherent": {
+          "surah": 74,
+          "startAyah": 4,
+          "endAyah": 8,
+          "start": 6,
+          "end": 17,
+          "ctc": -2.86682,
+          "origins": [
+            "local"
+          ]
+        },
+        "localWinner": {
+          "surah": 74,
+          "startAyah": 4,
+          "endAyah": 8,
+          "sameSurah": true,
+          "start": 6,
+          "end": 17,
+          "ctc": -2.86682
+        },
+        "anchorEvent": "anchor-advanced"
+      },
+      {
+        "index": 2,
+        "coherent": {
+          "surah": 74,
+          "startAyah": 6,
+          "endAyah": 9,
+          "start": 12,
+          "end": 19,
+          "ctc": -0.938646,
+          "origins": [
+            "local"
+          ]
+        },
+        "localWinner": {
+          "surah": 74,
+          "startAyah": 6,
+          "endAyah": 8,
+          "sameSurah": true,
+          "start": 12,
+          "end": 18,
+          "ctc": -0.702784
+        },
+        "anchorEvent": "anchor-advanced"
+      }
+    ]
+  }
+}

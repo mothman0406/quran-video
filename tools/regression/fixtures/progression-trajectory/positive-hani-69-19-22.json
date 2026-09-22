@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "id": "positive-hani-69-19-22",
+  "expected": {
+    "outcome": "positive",
+    "intent": "Continuous Hani Rifai 69:19–22 is an independently verified known-positive passage.",
+    "surah": 69,
+    "startAyah": 19,
+    "endAyah": 22
+  },
+  "totalGeneratedWindows": 4,
+  "usableWindows": 4,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 11808,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 1,
+      "voicedMs": 12000,
+      "coherentPathCtc": -1.318535,
+      "targetCoverage": 0.625,
+      "targetTokenCount": 30,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 2,
+      "voicedMs": 11520,
+      "coherentPathCtc": -2.51863,
+      "targetCoverage": 0.591837,
+      "targetTokenCount": 29,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 3,
+      "voicedMs": 6864,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    }
+  ],
+  "agreeingWindowCount": 2,
+  "coherentRatio": 0.5,
+  "coverage": 0.5575,
+  "longestUnsupportedRun": 1,
+  "margin": 1.743,
+  "lexicalUniqueness": 0.366826,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -1.318535,
+  "coherentPathMeanCtc": -1.918582,
+  "fastConformerProposedRange": {
+    "surah": 69,
+    "startAyah": 19,
+    "endAyah": 22
+  },
+  "fastConformerOutcome": "abstained",
+  "finalProposedRange": {
+    "surah": 69,
+    "startAyah": 19,
+    "endAyah": 22
+  },
+  "finalOutcome": "accepted",
+  "finalAuthority": "whisper-fallback",
+  "failedAcceptanceRules": [
+    "best-window-ctc"
+  ],
+  "provenance": "design",
+  "readerGroup": "hani-rifai",
+  "negativeType": null,
+  "trajectory": {
+    "coordinateOrigin": "minimum-coherent-start",
+    "windows": [
+      {
+        "index": 0,
+        "coherent": null,
+        "localWinner": {
+          "surah": 69,
+          "startAyah": 19,
+          "endAyah": 19,
+          "sameSurah": true,
+          "start": -3,
+          "end": 2,
+          "ctc": -5.020018
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 1,
+        "coherent": {
+          "surah": 69,
+          "startAyah": 19,
+          "endAyah": 20,
+          "start": 0,
+          "end": 8,
+          "ctc": -1.318535,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 69,
+          "startAyah": 19,
+          "endAyah": 20,
+          "sameSurah": true,
+          "start": 0,
+          "end": 8,
+          "ctc": -1.318535
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 2,
+        "coherent": {
+          "surah": 69,
+          "startAyah": 20,
+          "endAyah": 22,
+          "start": 4,
+          "end": 14,
+          "ctc": -2.51863,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 69,
+          "startAyah": 20,
+          "endAyah": 22,
+          "sameSurah": true,
+          "start": 4,
+          "end": 14,
+          "ctc": -2.51863
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 3,
+        "coherent": null,
+        "localWinner": {
+          "surah": 69,
+          "startAyah": 21,
+          "endAyah": 22,
+          "sameSurah": true,
+          "start": 10,
+          "end": 14,
+          "ctc": -3.692245
+        },
+        "anchorEvent": "none"
+      }
+    ]
+  }
+}
