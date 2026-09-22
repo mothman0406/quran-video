@@ -1,6 +1,37 @@
 # Status
 
-## Current milestone: Frozen long-path rule external validation
+## Current milestone: Offline passage-progression signals
+
+Complete:
+
+- Derived privacy-safe canonical trajectories (relative word coordinates only)
+  of the winning coherent path and independent window winners from existing
+  `ctc-gate-input` debug events; no production change. 17 retained logs
+  reproduce their committed captures exactly; 2:258–259 and 6:74–77 remain
+  trajectory-missing.
+- Genuine long recordings show ~50% adjacent candidate overlap, zero resets or
+  backward transitions, and at most one (terminal tail) no-progress window.
+  Repeated 50:16–18 visibly resets (27→0 words) and plateaus for 8 windows; the
+  solver follows the repeat back rather than forcing it forward. Its extra
+  50:19 comes from one boundary window's forward-extension bonus.
+- Froze, before any held-out conversion, a staged candidate: existing
+  safety + ≥5 windows + retained best CTC `-0.60`, margin `>=8`, resets `0`,
+  longest no-progress run `<=2`. All leave-one-positive-out and
+  leave-one-repetition-out folds recalibrate to it; repeated 50 held out
+  rejects at progression. The failed CTC-fraction rule stays documented as
+  failed.
+- Held-out: 5/5 new repetition adversaries reject (2 gate-passing ones by
+  progression, 3 null-coded ones only by existing coherent-window support);
+  the one held-out long positive passes; two held-out 66:1–7 takes fail existing
+  support with a FastConformer 66:1–6 edge. Husary would be accepted with the
+  wrong 75:1–16 edge. Whisper incorrectly accepted 93:2–11, 94:1–8, 3:33–35,
+  and 66:1–3 on new held-out cases; Whisper was not changed.
+
+Conclusion: a progression-aware candidate is justified for **another frozen
+external-validation milestone only**, not production. Detailed evidence:
+`docs/PROGRESSION_AWARE_LONG_PATH_CALIBRATION.md`.
+
+## Previous milestone: Frozen long-path rule external validation
 
 Complete:
 

@@ -1,0 +1,543 @@
+{
+  "schemaVersion": 1,
+  "id": "progression-heldout-positive-reader-a-66-1-7-take-b",
+  "expected": {
+    "outcome": "positive",
+    "intent": "Unused independently labeled continuous 66:1-7 take.",
+    "surah": 66,
+    "startAyah": 1,
+    "endAyah": 7
+  },
+  "totalGeneratedWindows": 16,
+  "usableWindows": 16,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 10272,
+      "coherentPathCtc": -0.854758,
+      "targetCoverage": 0.6,
+      "targetTokenCount": 30,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 1,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.793452,
+      "targetCoverage": 0.875,
+      "targetTokenCount": 42,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 2,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 3,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 4,
+      "voicedMs": 12000,
+      "coherentPathCtc": -1.692907,
+      "targetCoverage": 0.672414,
+      "targetTokenCount": 39,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 5,
+      "voicedMs": 12000,
+      "coherentPathCtc": -1.910434,
+      "targetCoverage": 0.540984,
+      "targetTokenCount": 33,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 6,
+      "voicedMs": 12000,
+      "coherentPathCtc": -2.853868,
+      "targetCoverage": 0.573333,
+      "targetTokenCount": 43,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 7,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.731851,
+      "targetCoverage": 1,
+      "targetTokenCount": 34,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 8,
+      "voicedMs": 12000,
+      "coherentPathCtc": -2.886721,
+      "targetCoverage": 0.605634,
+      "targetTokenCount": 43,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 9,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 10,
+      "voicedMs": 12000,
+      "coherentPathCtc": -1.517682,
+      "targetCoverage": 0.574074,
+      "targetTokenCount": 31,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 11,
+      "voicedMs": 12000,
+      "coherentPathCtc": -2.296552,
+      "targetCoverage": 0.557377,
+      "targetTokenCount": 34,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 12,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 13,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 14,
+      "voicedMs": 9792,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 15,
+      "voicedMs": 3792,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    }
+  ],
+  "agreeingWindowCount": 9,
+  "coherentRatio": 0.5625,
+  "coverage": 0.5909,
+  "longestUnsupportedRun": 4,
+  "margin": 12.4481,
+  "lexicalUniqueness": 0.296387,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -0.731851,
+  "coherentPathMeanCtc": -1.726469,
+  "fastConformerProposedRange": {
+    "surah": 66,
+    "startAyah": 1,
+    "endAyah": 6
+  },
+  "fastConformerOutcome": "abstained",
+  "finalProposedRange": {
+    "surah": 66,
+    "startAyah": 1,
+    "endAyah": 3
+  },
+  "finalOutcome": "accepted",
+  "finalAuthority": "whisper-fallback",
+  "failedAcceptanceRules": [
+    "best-window-ctc",
+    "coherent-path-ctc",
+    "coherent-window-support"
+  ],
+  "provenance": "progression-held-out",
+  "readerGroup": "reader-a",
+  "negativeType": null,
+  "trajectory": {
+    "coordinateOrigin": "minimum-coherent-start",
+    "windows": [
+      {
+        "index": 0,
+        "coherent": {
+          "surah": 66,
+          "startAyah": 1,
+          "endAyah": 1,
+          "start": 0,
+          "end": 13,
+          "ctc": -0.854758,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 1,
+          "endAyah": 2,
+          "sameSurah": true,
+          "start": 0,
+          "end": 16,
+          "ctc": -0.751305
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 1,
+        "coherent": {
+          "surah": 66,
+          "startAyah": 1,
+          "endAyah": 2,
+          "start": 7,
+          "end": 24,
+          "ctc": -0.793452,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 1,
+          "endAyah": 2,
+          "sameSurah": true,
+          "start": 7,
+          "end": 24,
+          "ctc": -0.793452
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 2,
+        "coherent": null,
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 2,
+          "endAyah": 3,
+          "sameSurah": true,
+          "start": 18,
+          "end": 28,
+          "ctc": -3.557271
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 3,
+        "coherent": null,
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 3,
+          "endAyah": 3,
+          "sameSurah": true,
+          "start": 26,
+          "end": 37,
+          "ctc": -3.770854
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 4,
+        "coherent": {
+          "surah": 66,
+          "startAyah": 3,
+          "endAyah": 3,
+          "start": 35,
+          "end": 53,
+          "ctc": -1.692907,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 3,
+          "endAyah": 3,
+          "sameSurah": true,
+          "start": 38,
+          "end": 53,
+          "ctc": -1.690295
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 5,
+        "coherent": {
+          "surah": 66,
+          "startAyah": 3,
+          "endAyah": 4,
+          "start": 46,
+          "end": 60,
+          "ctc": -1.910434,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 3,
+          "endAyah": 4,
+          "sameSurah": true,
+          "start": 46,
+          "end": 60,
+          "ctc": -1.910434
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 6,
+        "coherent": {
+          "surah": 66,
+          "startAyah": 4,
+          "endAyah": 4,
+          "start": 54,
+          "end": 71,
+          "ctc": -2.853868,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 4,
+          "endAyah": 4,
+          "sameSurah": true,
+          "start": 54,
+          "end": 71,
+          "ctc": -2.853868
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 7,
+        "coherent": {
+          "surah": 66,
+          "startAyah": 4,
+          "endAyah": 5,
+          "start": 64,
+          "end": 77,
+          "ctc": -0.731851,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 4,
+          "endAyah": 4,
+          "sameSurah": true,
+          "start": 64,
+          "end": 72,
+          "ctc": -0.570332
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 8,
+        "coherent": {
+          "surah": 66,
+          "startAyah": 4,
+          "endAyah": 5,
+          "start": 71,
+          "end": 85,
+          "ctc": -2.886721,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 4,
+          "endAyah": 5,
+          "sameSurah": true,
+          "start": 74,
+          "end": 85,
+          "ctc": -2.817456
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 9,
+        "coherent": null,
+        "localWinner": {
+          "surah": 2,
+          "startAyah": 4,
+          "endAyah": 4,
+          "sameSurah": false,
+          "start": null,
+          "end": null,
+          "ctc": -1.684246
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 10,
+        "coherent": {
+          "surah": 66,
+          "startAyah": 5,
+          "endAyah": 6,
+          "start": 86,
+          "end": 95,
+          "ctc": -1.517682,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 5,
+          "endAyah": 6,
+          "sameSurah": true,
+          "start": 86,
+          "end": 95,
+          "ctc": -1.517682
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 11,
+        "coherent": {
+          "surah": 66,
+          "startAyah": 5,
+          "endAyah": 6,
+          "start": 90,
+          "end": 100,
+          "ctc": -2.296552,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 5,
+          "endAyah": 6,
+          "sameSurah": true,
+          "start": 90,
+          "end": 100,
+          "ctc": -2.296552
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 12,
+        "coherent": null,
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 6,
+          "endAyah": 6,
+          "sameSurah": true,
+          "start": 96,
+          "end": 108,
+          "ctc": -3.019629
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 13,
+        "coherent": null,
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 6,
+          "endAyah": 7,
+          "sameSurah": true,
+          "start": 102,
+          "end": 119,
+          "ctc": -3.772891
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 14,
+        "coherent": null,
+        "localWinner": {
+          "surah": 66,
+          "startAyah": 6,
+          "endAyah": 7,
+          "sameSurah": true,
+          "start": 113,
+          "end": 124,
+          "ctc": -3.180432
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 15,
+        "coherent": null,
+        "localWinner": {
+          "surah": 52,
+          "startAyah": 16,
+          "endAyah": 16,
+          "sameSurah": false,
+          "start": null,
+          "end": null,
+          "ctc": -3.498331
+        },
+        "anchorEvent": "none"
+      }
+    ]
+  }
+}

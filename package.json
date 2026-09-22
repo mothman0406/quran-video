@@ -24,6 +24,8 @@
     "calibration:multisignal:evaluate": "node --experimental-strip-types tools/regression/evaluate-multisignal-long-path.ts",
     "calibration:validation:capture": "node --experimental-strip-types tools/regression/capture-production-recognition-chrome.ts",
     "calibration:validation:evaluate": "node --experimental-strip-types tools/regression/evaluate-multisignal-long-path-validation.ts",
+    "calibration:progression:capture": "node --experimental-strip-types tools/regression/capture-progression-trajectory.ts",
+    "calibration:progression:evaluate": "node --experimental-strip-types tools/regression/evaluate-progression-long-path.ts",
     "analyze:netlify-server": "node scripts/analyze-netlify-server.mjs",
     "check:translation:live": "LIVE_TRANSLATION_CHECK=1 node --experimental-strip-types scripts/check-translation.ts",
     "start": "next start",
