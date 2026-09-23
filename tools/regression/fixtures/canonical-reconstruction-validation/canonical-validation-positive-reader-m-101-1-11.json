@@ -1,0 +1,184 @@
+{
+  "schemaVersion": 1,
+  "id": "canonical-validation-positive-reader-m-101-1-11",
+  "expected": {
+    "outcome": "positive",
+    "intent": "Continuous canonical recitation of 101:1-11 must reconstruct exactly.",
+    "surah": 101,
+    "startAyah": 1,
+    "endAyah": 11
+  },
+  "totalGeneratedWindows": 5,
+  "usableWindows": 5,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 11808,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 1,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 2,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 3,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 4,
+      "voicedMs": 9312,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    }
+  ],
+  "agreeingWindowCount": 0,
+  "coherentRatio": 0,
+  "coverage": 0,
+  "longestUnsupportedRun": 5,
+  "margin": 0,
+  "lexicalUniqueness": 0,
+  "structuralValidity": false,
+  "surahConsistency": false,
+  "bestWindowCtc": null,
+  "coherentPathMeanCtc": null,
+  "fastConformerProposedRange": null,
+  "fastConformerOutcome": "abstained",
+  "finalProposedRange": {
+    "surah": 101,
+    "startAyah": 1,
+    "endAyah": 11
+  },
+  "finalOutcome": "accepted",
+  "finalAuthority": "whisper-fallback",
+  "failedAcceptanceRules": [
+    "structural-validity",
+    "surah-consistency",
+    "best-window-ctc",
+    "coherent-path-ctc",
+    "margin",
+    "coverage",
+    "window-agreement",
+    "coherent-window-support",
+    "lexical-uniqueness"
+  ],
+  "provenance": "canonical-reconstruction-external-validation",
+  "readerGroup": "reader-m",
+  "negativeType": null,
+  "trajectory": {
+    "coordinateOrigin": "minimum-coherent-start",
+    "windows": [
+      {
+        "index": 0,
+        "coherent": null,
+        "localWinner": {
+          "surah": 101,
+          "startAyah": 2,
+          "endAyah": 4,
+          "sameSurah": false,
+          "start": null,
+          "end": null,
+          "ctc": -4.269619
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 1,
+        "coherent": null,
+        "localWinner": {
+          "surah": 101,
+          "startAyah": 4,
+          "endAyah": 6,
+          "sameSurah": false,
+          "start": null,
+          "end": null,
+          "ctc": -5.193213
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 2,
+        "coherent": null,
+        "localWinner": {
+          "surah": 101,
+          "startAyah": 5,
+          "endAyah": 7,
+          "sameSurah": false,
+          "start": null,
+          "end": null,
+          "ctc": -5.132092
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 3,
+        "coherent": null,
+        "localWinner": {
+          "surah": 101,
+          "startAyah": 7,
+          "endAyah": 9,
+          "sameSurah": false,
+          "start": null,
+          "end": null,
+          "ctc": -4.591128
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 4,
+        "coherent": null,
+        "localWinner": {
+          "surah": 101,
+          "startAyah": 9,
+          "endAyah": 11,
+          "sameSurah": false,
+          "start": null,
+          "end": null,
+          "ctc": -4.44816
+        },
+        "anchorEvent": "none"
+      }
+    ]
+  },
+  "validationRole": "positive-b",
+  "architectureEvidence": {
+    "canonicalPcmPreparations": 1,
+    "topLevelFastConformerDecisions": 1,
+    "whisperEntered": true
+  },
+  "forcedAlignment": {
+    "status": "complete",
+    "resultingStartAyah": 1,
+    "resultingEndAyah": 11
+  }
+}

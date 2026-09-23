@@ -1,5 +1,36 @@
 # Status
 
+## Current milestone: Frozen external validation of canonical passage reconstruction
+
+Complete (offline validation only; production unchanged):
+
+- Froze and tested the exact reconstruction rule at starting revision
+  `40e27ef8`: 3 windows, `.75` dominant-surah support, `.75` continuous-run
+  support, 2-word backward tolerance, 6-word maximum skip, and one tolerated
+  consecutive no-progress window. Exactly four cases were designated before
+  source fetch or recognition.
+- Captured two positives from new public reader groups and two same-surah
+  reset/revisit adversaries once each through the unchanged browser production
+  architecture. Ground truth came from public per-ayah verse keys. Retained
+  fixtures are provenance-separated and privacy-safe.
+- Positive A (Abdullah Basfar `100:1-11`, 10 windows) reconstructs exactly and
+  expands to all 11 canonical ayat once each. Positive B (Maher Al-Muaiqly
+  `101:1-11`, 5 windows) is a false negative: local winners imply `101:2-11`,
+  every coherent candidate is null, and reconstruction rejects for no
+  dominant continuous run.
+- Negative A (`100:1-11, 100:1-5`, 13 windows) is a false positive: the frozen
+  candidate accepts `100:1-11` because its first run owns `10/13 = .769231`,
+  despite one reset, four revisit windows, and a four-window no-progress run.
+  Negative B (`101:6-11, 101:1-5, 101:6-8`) rejects.
+- Historical fixtures are byte-for-byte unchanged: genuine exact remains
+  20/20, adversarial rejection 23/23, H remains `91:1-15`, and K remains
+  `92:1-14`. Production recognition, media, create routes, caption generation,
+  and public assets were untouched.
+
+Conclusion: **EXTERNAL VALIDATION FAILED**. Production implementation is not
+justified. The candidate was not retuned or patched. Details:
+`docs/CANONICAL_PASSAGE_RECONSTRUCTION_VALIDATION.md`.
+
 ## Current milestone: Canonical passage reconstruction investigation
 
 Complete (offline analysis only; production unchanged):
