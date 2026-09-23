@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 1,
+  "id": "short-gate-design-positive-reader-i-89-1-14",
+  "expected": {
+    "outcome": "positive",
+    "intent": "Continuous canonical recitation of 89:1-14 must be identified.",
+    "surah": 89,
+    "startAyah": 1,
+    "endAyah": 14
+  },
+  "totalGeneratedWindows": 6,
+  "usableWindows": 6,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 11904,
+      "coherentPathCtc": -0.366088,
+      "targetCoverage": 0.886364,
+      "targetTokenCount": 39,
+      "anchorActive": true,
+      "anchorEvent": "anchor-activated",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 1,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.322664,
+      "targetCoverage": 0.973684,
+      "targetTokenCount": 37,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 2,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.636309,
+      "targetCoverage": 0.745455,
+      "targetTokenCount": 41,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 3,
+      "voicedMs": 12000,
+      "coherentPathCtc": -3.268967,
+      "targetCoverage": 0.506849,
+      "targetTokenCount": 37,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 4,
+      "voicedMs": 12000,
+      "coherentPathCtc": -3.077227,
+      "targetCoverage": 0.5,
+      "targetTokenCount": 27,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local"
+      ]
+    },
+    {
+      "index": 5,
+      "voicedMs": 7728,
+      "coherentPathCtc": -3.285176,
+      "targetCoverage": 0.538462,
+      "targetTokenCount": 21,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "global"
+      ]
+    }
+  ],
+  "agreeingWindowCount": 6,
+  "coherentRatio": 1,
+  "coverage": 1,
+  "longestUnsupportedRun": 0,
+  "margin": 9.0108,
+  "lexicalUniqueness": 0.39015,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -0.322664,
+  "coherentPathMeanCtc": -1.826072,
+  "fastConformerProposedRange": {
+    "surah": 89,
+    "startAyah": 1,
+    "endAyah": 14
+  },
+  "fastConformerOutcome": "abstained",
+  "finalProposedRange": {
+    "surah": 89,
+    "startAyah": 13,
+    "endAyah": 14
+  },
+  "finalOutcome": "abstained",
+  "finalAuthority": "whisper-fallback",
+  "failedAcceptanceRules": [
+    "coherent-path-ctc"
+  ],
+  "provenance": "short-gate-design-support",
+  "readerGroup": "reader-i",
+  "negativeType": null,
+  "trajectory": {
+    "coordinateOrigin": "minimum-coherent-start",
+    "windows": [
+      {
+        "index": 0,
+        "coherent": {
+          "surah": 89,
+          "startAyah": 1,
+          "endAyah": 6,
+          "start": 0,
+          "end": 19,
+          "ctc": -0.366088,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 1,
+          "endAyah": 6,
+          "sameSurah": true,
+          "start": 0,
+          "end": 19,
+          "ctc": -0.366088
+        },
+        "anchorEvent": "anchor-activated"
+      },
+      {
+        "index": 1,
+        "coherent": {
+          "surah": 89,
+          "startAyah": 5,
+          "endAyah": 8,
+          "start": 10,
+          "end": 28,
+          "ctc": -0.322664,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 5,
+          "endAyah": 8,
+          "sameSurah": true,
+          "start": 10,
+          "end": 28,
+          "ctc": -0.322664
+        },
+        "anchorEvent": "anchor-advanced"
+      },
+      {
+        "index": 2,
+        "coherent": {
+          "surah": 89,
+          "startAyah": 7,
+          "endAyah": 10,
+          "start": 20,
+          "end": 36,
+          "ctc": -0.636309,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 7,
+          "endAyah": 10,
+          "sameSurah": true,
+          "start": 20,
+          "end": 36,
+          "ctc": -0.636309
+        },
+        "anchorEvent": "anchor-advanced"
+      },
+      {
+        "index": 3,
+        "coherent": {
+          "surah": 89,
+          "startAyah": 9,
+          "endAyah": 12,
+          "start": 29,
+          "end": 43,
+          "ctc": -3.268967,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 9,
+          "endAyah": 12,
+          "sameSurah": true,
+          "start": 29,
+          "end": 43,
+          "ctc": -3.268967
+        },
+        "anchorEvent": "anchor-advanced"
+      },
+      {
+        "index": 4,
+        "coherent": {
+          "surah": 89,
+          "startAyah": 11,
+          "endAyah": 13,
+          "start": 37,
+          "end": 48,
+          "ctc": -3.077227,
+          "origins": [
+            "local"
+          ]
+        },
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 11,
+          "endAyah": 13,
+          "sameSurah": true,
+          "start": 37,
+          "end": 48,
+          "ctc": -3.077227
+        },
+        "anchorEvent": "anchor-advanced"
+      },
+      {
+        "index": 5,
+        "coherent": {
+          "surah": 89,
+          "startAyah": 13,
+          "endAyah": 14,
+          "start": 44,
+          "end": 51,
+          "ctc": -3.285176,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 13,
+          "endAyah": 14,
+          "sameSurah": true,
+          "start": 44,
+          "end": 51,
+          "ctc": -3.285176
+        },
+        "anchorEvent": "anchor-advanced"
+      }
+    ]
+  },
+  "corpusRole": "design-support",
+  "architectureEvidence": {
+    "canonicalPcmPreparations": 1,
+    "topLevelFastConformerDecisions": 1,
+    "whisperEntered": true
+  },
+  "forcedAlignment": {
+    "status": "not-run",
+    "resultingStartAyah": null,
+    "resultingEndAyah": null
+  }
+}
