@@ -44,7 +44,9 @@ export type ProgressionProvenance =
   | "design"
   | "external-validation"
   | "progression-design-support"
-  | "progression-held-out";
+  | "progression-held-out"
+  /** Frozen external validation of the progression candidate; never used for calibration. */
+  | "progression-external-validation";
 
 export type ProgressionTrajectoryFixture = CtcCalibrationCapture & {
   provenance: ProgressionProvenance;

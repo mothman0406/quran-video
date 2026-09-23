@@ -1,6 +1,32 @@
 # Status
 
-## Current milestone: Offline passage-progression signals
+## Current milestone: Frozen external validation of the progression candidate
+
+Complete (offline validation only; production unchanged):
+
+- Froze and tested the exact candidate (safety + windows `>=5` + best CTC
+  `>=-0.60` + margin `>=8` + resets `0` + run `<=2`) at 2026-09-22 19:25 PDT,
+  before any new media was fetched. Eleven cases were designated before
+  recognition, using public per-ayah audio from five readers never used before
+  (verse keys as ground truth).
+- Positives: 55:1–25, 77:1–28, 78:1–16 and 54:15–22 accept, with resets 0 and
+  run 0. That includes three refrain surahs and two FastConformer abstentions
+  recovered with exact ranges. **91:1–15 (7 windows) is a false negative at the
+  existing coherent-window support gate** (CTC −0.99, margin 5.90).
+- Hard negatives: five independent adversaries (plus one duplicate
+  construction). All pass existing non-CTC safety and all reject at
+  progression. Production FastConformer currently accepts 78 ×2 (78:1–17) and
+  55 refrain-out-of-order (55:4–25), and the latter is rejected only by
+  `resetCount == 0`.
+- The genuine refrain positive 54:15–22 has local-behind-frontier 1, so the
+  prior zero pattern breaks; that feature stays observational.
+- Whisper truncated 77:1–28 → 77:1–15 and 91:1–15 → 91:2–15, and false-accepted
+  two 77 adversaries.
+
+Conclusion: **EXTERNAL VALIDATION FAILED**. Production implementation is not
+justified. Details: `docs/PROGRESSION_AWARE_LONG_PATH_VALIDATION.md`.
+
+## Previous milestone: Offline passage-progression signals
 
 Complete:
 
