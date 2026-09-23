@@ -1,0 +1,242 @@
+{
+  "schemaVersion": 1,
+  "id": "short-gate-design-negative-reader-i-89-backward",
+  "expected": {
+    "outcome": "negative",
+    "intent": "Manipulated recitation (backward-halves) built from 89:8-14, 89:1-7 must reject.",
+    "surah": 89,
+    "startAyah": 1,
+    "endAyah": 14
+  },
+  "totalGeneratedWindows": 6,
+  "usableWindows": 6,
+  "windows": [
+    {
+      "index": 0,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 1,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 2,
+      "voicedMs": 12000,
+      "coherentPathCtc": null,
+      "targetCoverage": null,
+      "targetTokenCount": null,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": []
+    },
+    {
+      "index": 3,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.987135,
+      "targetCoverage": 0.513514,
+      "targetTokenCount": 19,
+      "anchorActive": false,
+      "anchorEvent": "none",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 4,
+      "voicedMs": 12000,
+      "coherentPathCtc": -0.344534,
+      "targetCoverage": 0.9,
+      "targetTokenCount": 36,
+      "anchorActive": true,
+      "anchorEvent": "anchor-activated",
+      "candidateOrigins": [
+        "global"
+      ]
+    },
+    {
+      "index": 5,
+      "voicedMs": 7728,
+      "coherentPathCtc": -1.203199,
+      "targetCoverage": 0.609756,
+      "targetTokenCount": 25,
+      "anchorActive": true,
+      "anchorEvent": "anchor-advanced",
+      "candidateOrigins": [
+        "local"
+      ]
+    }
+  ],
+  "agreeingWindowCount": 3,
+  "coherentRatio": 0.5,
+  "coverage": 0.4685,
+  "longestUnsupportedRun": 3,
+  "margin": 6.08,
+  "lexicalUniqueness": 0.442333,
+  "structuralValidity": true,
+  "surahConsistency": true,
+  "bestWindowCtc": -0.344534,
+  "coherentPathMeanCtc": -0.844956,
+  "fastConformerProposedRange": {
+    "surah": 89,
+    "startAyah": 1,
+    "endAyah": 7
+  },
+  "fastConformerOutcome": "abstained",
+  "finalProposedRange": {
+    "surah": 89,
+    "startAyah": 9,
+    "endAyah": 15
+  },
+  "finalOutcome": "abstained",
+  "finalAuthority": "whisper-fallback",
+  "failedAcceptanceRules": [
+    "coherent-path-ctc",
+    "coverage",
+    "coherent-window-support"
+  ],
+  "provenance": "short-gate-design-support",
+  "readerGroup": "reader-i",
+  "negativeType": "backward-halves",
+  "trajectory": {
+    "coordinateOrigin": "minimum-coherent-start",
+    "windows": [
+      {
+        "index": 0,
+        "coherent": null,
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 8,
+          "endAyah": 11,
+          "sameSurah": true,
+          "start": 23,
+          "end": 40,
+          "ctc": -6.724717
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 1,
+        "coherent": null,
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 9,
+          "endAyah": 13,
+          "sameSurah": true,
+          "start": 31,
+          "end": 46,
+          "ctc": -2.224947
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 2,
+        "coherent": null,
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 12,
+          "endAyah": 14,
+          "sameSurah": true,
+          "start": 42,
+          "end": 51,
+          "ctc": -4.596092
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 3,
+        "coherent": {
+          "surah": 89,
+          "startAyah": 1,
+          "endAyah": 4,
+          "start": 0,
+          "end": 7,
+          "ctc": -0.987135,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 1,
+          "endAyah": 4,
+          "sameSurah": true,
+          "start": 0,
+          "end": 7,
+          "ctc": -0.987135
+        },
+        "anchorEvent": "none"
+      },
+      {
+        "index": 4,
+        "coherent": {
+          "surah": 89,
+          "startAyah": 2,
+          "endAyah": 6,
+          "start": 1,
+          "end": 19,
+          "ctc": -0.344534,
+          "origins": [
+            "global"
+          ]
+        },
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 2,
+          "endAyah": 6,
+          "sameSurah": true,
+          "start": 1,
+          "end": 19,
+          "ctc": -0.344534
+        },
+        "anchorEvent": "anchor-activated"
+      },
+      {
+        "index": 5,
+        "coherent": {
+          "surah": 89,
+          "startAyah": 5,
+          "endAyah": 7,
+          "start": 11,
+          "end": 22,
+          "ctc": -1.203199,
+          "origins": [
+            "local"
+          ]
+        },
+        "localWinner": {
+          "surah": 89,
+          "startAyah": 5,
+          "endAyah": 7,
+          "sameSurah": true,
+          "start": 11,
+          "end": 22,
+          "ctc": -1.203199
+        },
+        "anchorEvent": "anchor-advanced"
+      }
+    ]
+  },
+  "corpusRole": "design-support",
+  "architectureEvidence": {
+    "canonicalPcmPreparations": 1,
+    "topLevelFastConformerDecisions": 1,
+    "whisperEntered": true
+  },
+  "forcedAlignment": {
+    "status": "not-run",
+    "resultingStartAyah": null,
+    "resultingEndAyah": null
+  }
+}

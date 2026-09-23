@@ -45,6 +45,8 @@ export type ProgressionProvenance =
   | "external-validation"
   | "progression-design-support"
   | "progression-held-out"
+  | "short-gate-design-support"
+  | "short-gate-held-out"
   /** Frozen external validation of the progression candidate; never used for calibration. */
   | "progression-external-validation";
 

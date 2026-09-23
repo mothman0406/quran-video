@@ -130,17 +130,22 @@ try {
   if (status !== "Ready to generate") throw new Error(status);
   await evaluate(client, `(() => { const button = document.querySelector('.quick-create-generate'); if (!(button instanceof HTMLButtonElement) || button.disabled) throw new Error('Generate button unavailable'); button.click(); return true; })()`, true);
   await waitFor(() => evaluate<string>(client, `location.pathname`), (value) => value === "/videos", 30_000);
-  await waitFor(
-    async () => logs,
-    (lines) => {
-      const final = lines.find((line) => line.includes(" final-identity-decision "));
-      if (!final) return false;
-      if (final.includes('"decision":"abstained"')) return true;
-      return lines.some((line) => line.includes(" forced-alignment-succeeded ") || line.includes(" forced-alignment-failed "));
-    },
-    900_000,
-  );
-  await writeFile(outputPath, `${logs.join("\n")}\n`, "utf8");
+  try {
+    await waitFor(
+      async () => logs,
+      (lines) => {
+        const final = lines.find((line) => line.includes(" final-identity-decision "));
+        if (!final) return false;
+        if (final.includes('"decision":"abstained"')) return true;
+        return lines.some((line) => line.includes(" forced-alignment-succeeded ") || line.includes(" forced-alignment-failed "));
+      },
+      900_000,
+    );
+  } finally {
+    // Preserve terminal-or-timeout evidence so an expensive browser-local run
+    // never has to be repeated merely because alignment did not terminate.
+    await writeFile(outputPath, `${logs.join("\n")}\n`, "utf8");
+  }
   const events = logs.map((line) => line.slice(DEBUG_PREFIX.length).trim().split(" ", 1)[0]);
   process.stdout.write(`${JSON.stringify({ capturedEvents: events.length, finalIdentity: events.includes("final-identity-decision"), forcedAlignmentTerminal: events.includes("forced-alignment-succeeded") || events.includes("forced-alignment-failed") })}\n`);
 } finally {

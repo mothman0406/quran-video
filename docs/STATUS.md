@@ -1,6 +1,34 @@
 # Status
 
-## Current milestone: Frozen external validation of the progression candidate
+## Current milestone: Short genuine gate failure root-cause analysis
+
+Complete (offline analysis only; production unchanged):
+
+- Reader H's missing `91:1–7` is first lost in coherent-path/Viterbi selection:
+  windows 0–2 locally win correct Surah-91 regions but lose to the explicit
+  null state because CTC is `-4.98`, `-4.04`, and `-4.77`. Retrieval and local
+  ranking did not lose the start. No continuation anchor ever qualifies.
+- H's best coherent CTC `-0.99144` is genuinely the best selected acoustic
+  evidence; 99% VAD coverage rules out silence. Its margin `5.8973` is against
+  an all-null runner-up (score `-15.75`), not another plausible passage.
+- Added a pre-designated, privacy-safe short corpus: three public per-ayah
+  positives across new reader groups and three adversaries, split into design
+  support and held-out validation before recognition. Current FastConformer
+  accepts one exact positive, abstains on one exact design positive and one
+  edge-wrong held-out positive, and rejects every adversary.
+- Quantified the 5–8-window disadvantage: three bad windows are 43–60% of the
+  sample, the fixed three-null-run gate rejects at every length, and the
+  mean-CTC gate turns on abruptly at five windows.
+- Ordered all-window local evidence is promising but insufficient to replace
+  acoustic safety. Margin 8 does not recover H; margin 5 would be H-tuned.
+  Absolute support admits repetition, late-lock cannot apply without an anchor,
+  and removing best CTC is not independently protected.
+
+Conclusion: **NO CANDIDATE**. Collect more pre-designated weak-CTC positives
+with exact edges and difficult short same-surah negatives before reconsidering
+an offline rule. Details: `docs/SHORT_GENUINE_GATE_FAILURE_ANALYSIS.md`.
+
+## Previous milestone: Frozen external validation of the progression candidate
 
 Complete (offline validation only; production unchanged):
 

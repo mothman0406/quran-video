@@ -6,7 +6,7 @@
  * consumes a previously decoded 16 kHz mono float PCM file and emits only
  * model/decision evidence suitable for audit reports or a compact fixture.
  */
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { canonicalCtcWords } from "../../src/lib/recognition/ctc-forced-alignment.ts";
 import { hafsVerses } from "../../src/lib/recognition/core.ts";
@@ -27,7 +27,11 @@ const FASTCONFORMER_QURAN_BYTES = 3_186_385;
 const defaults = { windowMs: 12_000, hopMs: 6_000, coarseCandidateLimit: 48, rerankCandidateLimit: 24 } as const;
 const pcmPath = process.argv[2];
 const assetDirectory = process.argv[3];
-if (!pcmPath || !assetDirectory) throw new Error("Usage: diagnose-real-quran-id.ts <mono-16k-f32le.pcm> <tilawa-assets-directory>");
+const outputPath = process.argv[4];
+const expectedSurah = Number(process.argv[5] ?? 74);
+const expectedStartAyah = Number(process.argv[6] ?? 1);
+const expectedEndAyah = Number(process.argv[7] ?? 9);
+if (!pcmPath || !assetDirectory) throw new Error("Usage: diagnose-real-quran-id.ts <mono-16k-f32le.pcm> <tilawa-assets-directory> [ignored-output.json] [expected-surah] [expected-start-ayah] [expected-end-ayah]");
 
 const assetSizes: Record<string, number> = {
   [FASTCONFORMER_MODEL_ARTIFACT]: FASTCONFORMER_MODEL_BYTES,
@@ -93,10 +97,16 @@ for (let startMs = 0, windowIndex = 0; startMs < durationMs; startMs += defaults
   continuation = advanceQuranContinuationState(continuation, probe);
   const rawRetrieval = retrieveQuranCandidates(index, probe.greedy.lexicalTokens, defaults.coarseCandidateLimit);
   const rawRerank = rerankQuranCandidates(index, rawRetrieval, logits, BLANK_TOKEN_ID, defaults.rerankCandidateLimit);
-  const rank = (candidates: typeof rawRetrieval) => candidates.findIndex((candidate) => candidate.start.surah === 74 && candidate.start.ayah <= 1 && candidate.end.ayah >= 9) + 1;
+  const rank = (candidates: typeof rawRetrieval) => candidates.findIndex((candidate) => candidate.start.surah === expectedSurah && candidate.start.ayah <= expectedStartAyah && candidate.end.ayah >= expectedEndAyah) + 1;
   details.push({ index: windowIndex, startMs, endMs, greedy: probe.greedy, continuation: probe.continuation, selected: probe.selectedCandidate, expectedRetrievalRank: rank(rawRetrieval), expectedRerankRank: rank(rawRerank), retrievalCount: rawRetrieval.length, rerankedCount: rawRerank.length, topRetrieval: rawRetrieval.slice(0, 10), topReranked: rawRerank.slice(0, 10) });
   windows.push(probe);
   if (endMs === durationMs) break;
 }
 const summary = summarizeFastConformerIdentification(windows, 0);
-console.log(JSON.stringify({ pcm: { sampleRate: SAMPLE_RATE, samples: audio.length, durationMs }, windows: details, summary }, null, 2));
+const report = JSON.stringify({ pcm: { sampleRate: SAMPLE_RATE, samples: audio.length, durationMs }, windows: details, summary }, null, 2);
+if (outputPath) {
+  await writeFile(outputPath, `${report}\n`, "utf8");
+  process.stdout.write(`${outputPath}\n`);
+} else {
+  console.log(report);
+}
