@@ -2861,3 +2861,29 @@ Complete:
 - Recognition, canonical Quran text, word timing, segment boundaries, and timeline geometry were not changed.
 
 Verification: focused highlighting/style/storage/export regressions and `npx tsc --noEmit` pass. Browser media validation requires a local Quran video fixture and was not available in this environment.
+## Current milestone: Quran whole-recording integrity and bounded edge completion investigation
+
+Complete (offline only, **NO CANDIDATE**):
+
+- Added a deterministic whole-recording audit around the unchanged canonical
+  core. It ignores null/weak evidence and vetoes absolute consecutive runs of
+  positive reset/revisit, repeated-covered, incompatible-forward, or same
+  cross-surah Quran evidence.
+- Design-visible results remain 18/18 genuine exact and 23/23 adversarial
+  rejected; historical totals remain 20/20 and 23/23. Internal holdouts H and K
+  remain exactly `91:1-15` and `92:1-14`.
+- After freezing, external Negative A rejects on its three-window reset and
+  repeated-covered tail. External Positive B remains unrecovered because the
+  unchanged core is none and retained evidence lacks boundary candidate versus
+  no-extension CTC likelihoods. Forced-alignment completion alone is not used
+  to invent ayah 1.
+- Defined and tested a one-ayah-per-edge, known-text CTC competition contract
+  that requires complete token coverage, a direct no-extension win, correct
+  temporal ordering, and no core-audio theft. Optional basmalah remains a
+  non-canonical prelude.
+- Added offline evaluator/privacy commands and documentation. No media was
+  captured and no production recognition, media, create-route, or public asset
+  code changed.
+
+Verification: focused tests and `npx tsc --noEmit` pass. Full final checks are
+recorded at milestone handoff.
