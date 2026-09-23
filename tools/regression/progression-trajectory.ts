@@ -48,7 +48,9 @@ export type ProgressionProvenance =
   | "short-gate-design-support"
   | "short-gate-held-out"
   /** Frozen external validation of the progression candidate; never used for calibration. */
-  | "progression-external-validation";
+  | "progression-external-validation"
+  /** Frozen external validation of canonical passage reconstruction. */
+  | "canonical-reconstruction-external-validation";
 
 export type ProgressionTrajectoryFixture = CtcCalibrationCapture & {
   provenance: ProgressionProvenance;
