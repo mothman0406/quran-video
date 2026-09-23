@@ -31,6 +31,7 @@
     "calibration:short-gate:capture": "node --experimental-strip-types tools/regression/capture-short-gate.ts",
     "calibration:short-gate:evaluate": "node --experimental-strip-types tools/regression/evaluate-short-gate-analysis.ts",
     "calibration:short-gate:privacy": "node --experimental-strip-types tools/regression/validate-short-gate-privacy.ts",
+    "calibration:canonical-reconstruction:evaluate": "node --experimental-strip-types tools/regression/evaluate-canonical-passage-reconstruction.ts",
     "analyze:netlify-server": "node scripts/analyze-netlify-server.mjs",
     "check:translation:live": "LIVE_TRANSLATION_CHECK=1 node --experimental-strip-types scripts/check-translation.ts",
     "start": "next start",

@@ -1,5 +1,42 @@
 # Status
 
+## Current milestone: Canonical passage reconstruction investigation
+
+Complete (offline analysis only; production unchanged):
+
+- Added a deterministic browser-feasible reconstruction experiment over the
+  already-retained independent local FastConformer winners. It selects a
+  dominant surah, finds one overwhelmingly supported forward canonical run,
+  and infers only evidence-backed start/end ayat; acoustic CTC is retained as
+  evidence but never deletes a structurally valid window.
+- Froze simple sequence conditions before held-out H/K evaluation: at least 3
+  supporting windows, 75% dominant-surah and continuous-run support, 2-word
+  backward tolerance, at most a 6-word canonical skip, and at most one
+  consecutive no-progress window. No reader/surah exception exists.
+- All 18 design/historical genuine fixtures reconstruct exactly and all 23
+  retained adversaries reject, including repeated 50, 78 x2, 54 x3, both 77
+  resets, 55 refrain out-of-order, backward, cross-surah, and mixed
+  non-contiguous cases. Refrain-heavy genuine 54/55/77 passages remain valid
+  because canonical coordinates progress forward.
+- H was excluded from design and then reconstructs `91:1-15` from 7/7 local
+  windows (current coherent path: `91:8-15`). K reconstructs `92:1-14`, not
+  the current coherent extension through ayah 15. Across all retained genuine
+  cases, exact range and surah correctness are both 20/20; adversarial false
+  continuous passage count is 0/23.
+- No new media capture or production instrumentation was used. Committed
+  top-N evidence remains unavailable. Quran Caption reinforced the identity ->
+  known-text-alignment separation, but its Python/PyTorch/Tauri/Cython/MFA
+  implementation is not directly reusable in this browser architecture.
+
+Conclusion: **CANDIDATE JUSTIFIED FOR ONE FROZEN EXTERNAL VALIDATION**. Do not
+integrate production yet. Details: `docs/CANONICAL_PASSAGE_RECONSTRUCTION.md`.
+
+Verification passed: FFmpeg assets, Quran-ID schema, 509/509 tests, strict
+TypeScript, quiet lint, production build, all required prior evaluators, both
+retained external evaluators, the new reconstruction evaluator, and whitespace
+checks. Diffs from `main` under production recognition, media, create routes,
+and public assets are empty.
+
 ## Current milestone: Short genuine gate failure root-cause analysis
 
 Complete (offline analysis only; production unchanged):
