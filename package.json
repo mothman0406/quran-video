@@ -40,6 +40,8 @@
     "calibration:local-core-edge:capture": "node --experimental-strip-types tools/regression/capture-quran-boundary-evidence.ts",
     "calibration:local-core-edge:evaluate": "node --experimental-strip-types tools/regression/evaluate-quran-local-core-edge.ts",
     "calibration:local-core-edge:privacy": "node --experimental-strip-types tools/regression/validate-quran-local-core-edge-privacy.ts",
+    "calibration:core-boundary:evaluate": "node --experimental-strip-types tools/regression/evaluate-quran-core-boundary-localization.ts",
+    "calibration:core-boundary:privacy": "node --experimental-strip-types tools/regression/validate-quran-core-boundary-privacy.ts",
     "analyze:netlify-server": "node scripts/analyze-netlify-server.mjs",
     "check:translation:live": "LIVE_TRANSLATION_CHECK=1 node --experimental-strip-types scripts/check-translation.ts",
     "start": "next start",

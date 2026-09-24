@@ -1,5 +1,29 @@
 # Status
 
+## Current milestone: Candidate-independent Quran core-boundary localization
+
+Complete (focused offline architecture investigation; production unchanged):
+
+- Added a deterministic coarse-to-fine core-edge locator over reused
+  FastConformer logits. It excludes audio outside each proposed cut, compares
+  equal 12-second windows with normalized forward CTC, requires a complete
+  three-ayah boundary target, and requires complete whole-core alignment.
+- H's test core `91:2-15` moves from the prior 176 ms onset to 1,816 ms,
+  leaving 1,720 ms voiced. Ayah 1 beats blank by +2.782290/frame with 8/8
+  coverage, recovering exact `91:1-15`.
+- J's core end leaves only 264 ms/200 ms voiced; 90:13 aligns 0/6 and is not
+  added. The exact-stop result remains `90:1-12`.
+- After freezing on H/J, held-out Positive B moves from provisional
+  `101:2-11` to exact `101:1-11`: 1,112 ms boundary, 920 ms voiced, 4/4
+  coverage, and +2.387883/frame over no extension. No post-holdout tuning was
+  performed.
+- Negative A retains both integrity vetoes, H/K remain exact, historical
+  genuine cases remain 20/20, all 23 adversaries reject, canonical
+  completeness and privacy pass, and exactly four capture runs were used.
+
+Conclusion: **CANDIDATE JUSTIFIED FOR ONE FINAL FROZEN VALIDATION**, not
+production integration. Details: `docs/QURAN_CORE_BOUNDARY_LOCALIZATION.md`.
+
 ## Current milestone: Quran local-only core and boundary evidence
 
 Complete (offline investigation only; production unchanged):
