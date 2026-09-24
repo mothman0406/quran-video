@@ -93,3 +93,26 @@ test("worker failures reject the active request without leaving it pending", asy
   worker.respond({ type: "error", jobId: 9, message: "fixture failure" });
   await assert.rejects(pending, /fixture failure/);
 });
+
+test("complete-range resolution is one retained-worker request after identification", async () => {
+  const worker = new FakeWorker();
+  const client = new LocalRecognitionWorkerClient(() => worker);
+  const pending = client.completeRange(4, "analysis-4");
+  assert.deepEqual(worker.calls[0]?.message, { type: "complete-range", jobId: 4, analysisRunId: "analysis-4" });
+  worker.respond({
+    type: "complete-range",
+    jobId: 4,
+    result: {
+      status: "rejected",
+      reason: "no-canonical-or-provisional-core",
+      coreDecision: { core: null, source: null, integrity: null, accepted: false, whisperFallbackEligible: true, reason: "no-canonical-or-provisional-core", evidence: [] },
+      exactRange: null,
+      canonicalSpan: null,
+      boundaryLocalization: null,
+      edgeVerification: null,
+      alignment: null,
+      reuse: { pcmReused: true, vadReused: true, modelSessionReused: true, fullRecordingLogitsReused: false, globalQuranSearches: 1, edgeInferenceCount: 0 },
+    },
+  });
+  assert.equal((await pending).status, "rejected");
+});

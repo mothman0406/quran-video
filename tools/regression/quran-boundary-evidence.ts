@@ -1,16 +1,14 @@
-import type { CtcFrameLogits } from "../../src/lib/recognition/ctc-forced-alignment.ts";
-import type { VadSpeechRegion } from "../../src/lib/recognition/speech-regions.ts";
 import type { EdgeAcousticEvidence } from "./quran-edge-completion.ts";
+import {
+  boundedBoundaryRegion,
+  FROZEN_BOUNDARY_EVIDENCE_RULE,
+  normalizedBlankCtcLogLikelihood,
+  voicedDurationInRegion,
+} from "../../src/lib/recognition/quran-boundary-acoustics.ts";
+
+export { boundedBoundaryRegion, FROZEN_BOUNDARY_EVIDENCE_RULE, normalizedBlankCtcLogLikelihood, voicedDurationInRegion };
 
 export const BOUNDARY_EVIDENCE_SCHEMA_VERSION = 1 as const;
-export const FROZEN_BOUNDARY_EVIDENCE_RULE = Object.freeze({
-  maximumBoundaryDurationMs: 12_000,
-  minimumVoicedDurationMs: 320,
-  requireStrictCandidateWin: true,
-  requireCompleteTargetCoverage: true,
-  maximumExpansionPerEdge: 1,
-});
-
 export type BoundaryCaptureRole = "design-edge-positive" | "design-edge-negative" | "held-out-positive-b";
 
 export type PrivacySafeBoundaryFixture = {
@@ -71,40 +69,6 @@ export const BOUNDARY_CAPTURE_DESIGNATIONS = Object.freeze([
   }),
 ] as const);
 
-function frameLogProbability(logits: CtcFrameLogits, frame: number, tokenId: number) {
-  const offset = frame * logits.vocabularySize;
-  let maximum = Number.NEGATIVE_INFINITY;
-  for (let id = 0; id < logits.vocabularySize; id += 1) maximum = Math.max(maximum, logits.values[offset + id] ?? Number.NEGATIVE_INFINITY);
-  let sum = 0;
-  for (let id = 0; id < logits.vocabularySize; id += 1) sum += Math.exp((logits.values[offset + id] ?? Number.NEGATIVE_INFINITY) - maximum);
-  return (logits.values[offset + tokenId] ?? Number.NEGATIVE_INFINITY) - maximum - Math.log(sum);
-}
-
-/** Real no-extension hypothesis: every bounded-region frame emits CTC blank. */
-export function normalizedBlankCtcLogLikelihood(logits: CtcFrameLogits, blankTokenId: number) {
-  if (!logits.frames || blankTokenId < 0 || blankTokenId >= logits.vocabularySize) return null;
-  let score = 0;
-  for (let frame = 0; frame < logits.frames; frame += 1) score += frameLogProbability(logits, frame, blankTokenId);
-  return Number((score / logits.frames).toFixed(6));
-}
-
-export function voicedDurationInRegion(regions: readonly VadSpeechRegion[], startMs: number, endMs: number) {
-  return Math.round(regions.reduce((total, region) => total
-    + Math.max(0, Math.min(endMs, region.endMs) - Math.max(startMs, region.startMs)), 0));
-}
-
-export function boundedBoundaryRegion(input: {
-  edge: "start" | "end";
-  coreStartMs: number;
-  coreEndMs: number;
-  audioDurationMs: number;
-}) {
-  const maximum = FROZEN_BOUNDARY_EVIDENCE_RULE.maximumBoundaryDurationMs;
-  return input.edge === "start"
-    ? { startMs: Math.max(0, input.coreStartMs - maximum), endMs: input.coreStartMs }
-    : { startMs: input.coreEndMs, endMs: Math.min(input.audioDurationMs, input.coreEndMs + maximum) };
-}
-
 export function boundaryEvidenceReasons(evidence: EdgeAcousticEvidence) {
   return [
     ...(!(evidence.voicedDurationMs >= FROZEN_BOUNDARY_EVIDENCE_RULE.minimumVoicedDurationMs) ? ["insufficient-voiced-boundary-audio"] : []),
@@ -118,4 +82,3 @@ export function boundaryEvidenceReasons(evidence: EdgeAcousticEvidence) {
     ...(evidence.optionalBasmalahOnly ? ["optional-basmalah-is-not-canonical-edge-evidence"] : []),
   ];
 }
-

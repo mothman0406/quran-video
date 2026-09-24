@@ -1494,11 +1494,16 @@ export default function Home() {
       if (job !== generation.current) return;
       const fastConformerSpan = canonicalSpanFromFastConformerIdentification(fastConformerIdentification?.canonicalSpan ?? null);
       const fastConformerDecision = decideFastConformerPassage(fastConformerIdentification, fastConformerSpan);
+      const completeRange = await worker.completeRange(job, prepared.run.analysisRunId, reportFastConformerProgress);
+      if (job !== generation.current) return;
+      const completeRangeSpan = completeRange.status === "complete" ? completeRange.canonicalSpan : null;
+      const useFastConformer = completeRangeSpan !== null && completeRange.alignment?.status === "complete";
+      const allowWhisperFallback = completeRange.coreDecision.whisperFallbackEligible;
       quranRecognitionDebug(fastConformerIdentification, fastConformerDecision, { speechRegions: prepared.speechRegions, durationMs: prepared.durationMs });
       // Development comparison keeps both engines observable. Production does
       // not pay Whisper's model/inference cost after accepted FC evidence.
       const runWhisperComparison = process.env.NODE_ENV !== "production";
-      const shouldExecuteWhisper = !fastConformerDecision.accepted || runWhisperComparison;
+      const shouldExecuteWhisper = (allowWhisperFallback && !useFastConformer) || runWhisperComparison;
       quranFallbackDebug(fastConformerDecision, shouldExecuteWhisper);
       const result = shouldExecuteWhisper
         ? await (async () => {
@@ -1517,9 +1522,8 @@ export default function Home() {
         audioAnalysis: result.audioAnalysis,
         speechRegions: result.speechRegions,
       });
-      const useFastConformer = fastConformerDecision.accepted && fastConformerSpan !== null;
-      const selectedCanonicalSpan = useFastConformer ? fastConformerSpan : whisperAnalysis.passage.canonicalSpan;
-      const acceptedIdentity = useFastConformer || whisperAnalysis.passage.state === "confident-unique";
+      const selectedCanonicalSpan = useFastConformer ? completeRangeSpan : allowWhisperFallback ? whisperAnalysis.passage.canonicalSpan : null;
+      const acceptedIdentity = useFastConformer || (allowWhisperFallback && whisperAnalysis.passage.state === "confident-unique");
       quranFinalIdentityDebug({
         decision: acceptedIdentity && selectedCanonicalSpan ? "accepted" : "abstained",
         accepted: Boolean(acceptedIdentity && selectedCanonicalSpan),
@@ -1528,7 +1532,7 @@ export default function Home() {
         startAyah: selectedCanonicalSpan ? Number(selectedCanonicalSpan.firstVerseKey.split(":")[1]) : null,
         endAyah: selectedCanonicalSpan ? Number(selectedCanonicalSpan.lastVerseKey.split(":")[1]) : null,
         reasons: [useFastConformer
-          ? fastConformerDecision.reason
+          ? `Complete-range ${completeRange.coreDecision.source ?? "canonical"} core accepted.`
           : acceptedIdentity && selectedCanonicalSpan ? "Whisper fallback produced a confident unique Quran passage." : `Whisper fallback state was ${whisperAnalysis.passage.state}.`],
       });
       if (acceptedIdentity && selectedCanonicalSpan) {
@@ -1555,18 +1559,20 @@ export default function Home() {
       const alignmentMatches = selectedCanonicalSpan?.coveredVerseKeys.map((verseKey) => ({ verseKey, startMs: speechStartMs, endMs: speechEndMs })) ?? [];
       reportProgress("aligning-words");
       recognitionJobs.current.update(job, "aligning");
-      let fastConformerAlignment: Awaited<ReturnType<LocalRecognitionWorkerClient["align"]>> | null = null;
+      let fastConformerAlignment: Awaited<ReturnType<LocalRecognitionWorkerClient["align"]>> | null = useFastConformer ? completeRange.alignment : null;
       if (alignmentMatches.length) {
         quranForcedAlignmentDebug("started", {
           identityAuthority: useFastConformer ? "fastconformer-primary" : "whisper-fallback",
           startAyah: Number(selectedCanonicalSpan!.firstVerseKey.split(":")[1]),
           endAyah: Number(selectedCanonicalSpan!.lastVerseKey.split(":")[1]),
         });
-        try {
-          fastConformerAlignment = await worker.align(job, hafsVerses.filter((verse) => selectedCanonicalSpan!.coveredVerseKeys.includes(verse.verseKey)), alignmentMatches, prepared.run.analysisRunId, reportFastConformerProgress);
-        } catch (error) {
-          quranForcedAlignmentDebug("failed", { reason: error instanceof Error ? error.name : "UnknownError", resultingStartAyah: null, resultingEndAyah: null });
-          throw error;
+        if (!fastConformerAlignment) {
+          try {
+            fastConformerAlignment = await worker.align(job, hafsVerses.filter((verse) => selectedCanonicalSpan!.coveredVerseKeys.includes(verse.verseKey)), alignmentMatches, prepared.run.analysisRunId, reportFastConformerProgress);
+          } catch (error) {
+            quranForcedAlignmentDebug("failed", { reason: error instanceof Error ? error.name : "UnknownError", resultingStartAyah: null, resultingEndAyah: null });
+            throw error;
+          }
         }
         const firstAlignedKey = fastConformerAlignment.ayahTimings[0]?.verseKey ?? null;
         const lastAlignedKey = fastConformerAlignment.ayahTimings.at(-1)?.verseKey ?? null;
@@ -1578,7 +1584,7 @@ export default function Home() {
         });
       }
       const analysis = useFastConformer
-        ? analyzeTranscript(primaryTranscript, { audioAnalysis: result.audioAnalysis, speechRegions: result.speechRegions, fastConformerResult: fastConformerAlignment, passageOverride: { canonicalSpan: fastConformerSpan!, passageSource: "fastconformer-quran" } })
+        ? analyzeTranscript(primaryTranscript, { audioAnalysis: result.audioAnalysis, speechRegions: result.speechRegions, fastConformerResult: fastConformerAlignment, passageOverride: { canonicalSpan: completeRangeSpan!, passageSource: "fastconformer-quran" } })
         : selectedCanonicalSpan
           ? analyzeTranscript(primaryTranscript, { audioAnalysis: result.audioAnalysis, speechRegions: result.speechRegions, fastConformerResult: fastConformerAlignment, passageOverride: { canonicalSpan: selectedCanonicalSpan, passageSource: "whisper-fallback" } })
           : whisperAnalysis;

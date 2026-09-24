@@ -114,9 +114,14 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
   assertNotAborted(input.signal);
   const fastConformerSpan = canonicalSpanFromFastConformerIdentification(identification?.canonicalSpan ?? null);
   const decision = decideFastConformerPassage(identification, fastConformerSpan);
+  const completeRange = await input.worker.completeRange(input.jobId, run.analysisRunId, reportFastConformer);
+  assertNotAborted(input.signal);
+  const completeRangeSpan = completeRange.status === "complete" ? completeRange.canonicalSpan : null;
+  const useFastConformer = completeRangeSpan !== null && completeRange.alignment?.status === "complete";
+  const allowWhisperFallback = completeRange.coreDecision.whisperFallbackEligible;
   quranRecognitionDebug(identification, decision, { speechRegions: prepared.speechRegions, durationMs: prepared.durationMs });
   const runWhisperComparison = process.env.NODE_ENV !== "production";
-  const shouldExecuteWhisper = !decision.accepted || runWhisperComparison;
+  const shouldExecuteWhisper = (allowWhisperFallback && !useFastConformer) || runWhisperComparison;
   quranFallbackDebug(decision, shouldExecuteWhisper);
   const transcriptResult = shouldExecuteWhisper
     ? await (async () => {
@@ -130,9 +135,8 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
     audioAnalysis: transcriptResult.audioAnalysis,
     speechRegions: transcriptResult.speechRegions,
   });
-  const useFastConformer = decision.accepted && fastConformerSpan !== null;
-  const selectedSpan = useFastConformer ? fastConformerSpan : whisperAnalysis.passage.canonicalSpan;
-  const identityAccepted = Boolean(selectedSpan && (useFastConformer || whisperAnalysis.passage.state === "confident-unique"));
+  const selectedSpan = useFastConformer ? completeRangeSpan : allowWhisperFallback ? whisperAnalysis.passage.canonicalSpan : null;
+  const identityAccepted = Boolean(selectedSpan && (useFastConformer || (allowWhisperFallback && whisperAnalysis.passage.state === "confident-unique")));
   quranFinalIdentityDebug({
     decision: identityAccepted ? "accepted" : "abstained",
     accepted: identityAccepted,
@@ -141,7 +145,7 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
     startAyah: selectedSpan ? Number(selectedSpan.firstVerseKey.split(":")[1]) : null,
     endAyah: selectedSpan ? Number(selectedSpan.lastVerseKey.split(":")[1]) : null,
     reasons: [useFastConformer
-      ? decision.reason
+      ? `Complete-range ${completeRange.coreDecision.source ?? "canonical"} core accepted.`
       : identityAccepted ? "Whisper fallback produced a confident unique Quran passage." : `Whisper fallback state was ${whisperAnalysis.passage.state}.`],
   });
   if (selectedSpan) {
@@ -181,13 +185,15 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
   });
   let aligned: Awaited<ReturnType<LocalRecognitionWorkerClient["align"]>>;
   try {
-    aligned = await input.worker.align(
-      input.jobId,
-      hafsVerses.filter((verse) => selectedSpan.coveredVerseKeys.includes(verse.verseKey)),
-      matches,
-      run.analysisRunId,
-      reportFastConformer,
-    );
+    aligned = useFastConformer && completeRange.alignment
+      ? completeRange.alignment
+      : await input.worker.align(
+        input.jobId,
+        hafsVerses.filter((verse) => selectedSpan.coveredVerseKeys.includes(verse.verseKey)),
+        matches,
+        run.analysisRunId,
+        reportFastConformer,
+      );
   } catch (error) {
     quranForcedAlignmentDebug("failed", { reason: error instanceof Error ? error.name : "UnknownError", resultingStartAyah: null, resultingEndAyah: null });
     throw error;

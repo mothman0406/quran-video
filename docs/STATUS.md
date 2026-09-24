@@ -1,5 +1,40 @@
 # Status
 
+## Current milestone: Quran complete-range production implementation
+
+Complete in code and automated validation; manual browser QA remains:
+
+- Promoted the frozen canonical reconstruction, provisional core, integrity,
+  core-boundary, edge-verification, and boundary-acoustic decisions into
+  production recognition modules. Offline evaluators directly re-export the
+  same functions, and a test asserts production/offline function identity.
+- Added one retained-worker `complete-range` operation used by both `/create`
+  generation and the editor. It reuses canonical PCM, VAD, the loaded model,
+  canonical assets, and one full-recording logits tensor for localization,
+  whole-core proof, and final forced alignment.
+- Preserved one global FastConformer Quran search. Candidate-independent
+  boundary searches and at most two adjacent-ayah checks are bounded known
+  hypotheses. The old diagnostic Tilawa whole-Quran oracle no longer runs
+  during alignment.
+- Canonical reconstruction remains preferred. A provisional local core must
+  still pass whole-recording integrity, localized whole-core completeness,
+  bounded edge verification, complete inclusive canonical expansion, and
+  final forced alignment. Integrity/boundary failures safely abstain and
+  cannot be overridden by Whisper.
+- Forced alignment over the complete canonical target remains the sole
+  automatic `CaptionSegment` timing authority. Existing explicit basmalah,
+  manual-edit, media preparation, and Whisper fallback contracts remain.
+- Frozen acceptance remains H `91:1-15`, K `92:1-14`, Positive B
+  `101:1-11`, Negative A rejected, final cases `81:8-22`, `86:1-12`, reject,
+  reject, historical genuine 20/20, and historical adversarial 23/23.
+- Final verification passes 553/553 tests, strict TypeScript, quiet lint,
+  production build, every retained evaluator/privacy validator, and whitespace
+  checks. The build has only the pre-existing ONNX/Transformers warnings.
+
+Exact next action: run one manual browser-local `/create` smoke test with an
+already-available known recording. Details:
+`docs/QURAN_COMPLETE_RANGE_PRODUCTION_IMPLEMENTATION.md`.
+
 ## Current milestone: Complete Quran range final frozen validation
 
 Complete (external validation only; production unchanged):
