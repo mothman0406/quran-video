@@ -145,6 +145,7 @@ test("frozen conditions are immutable and keep expansion to one ayah per edge", 
   });
   assert.deepEqual(FROZEN_BOUNDED_EDGE_RULE, {
     maximumAyahExpansionPerEdge: 1,
+    minimumVoicedDurationMs: 320,
     requireCompleteTargetCoverage: true,
     requireDirectNoExtensionWin: true,
   });

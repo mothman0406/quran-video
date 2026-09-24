@@ -2,6 +2,7 @@ import { expandCanonicalAyahRange, type CanonicalRange } from "./canonical-passa
 
 export const FROZEN_BOUNDED_EDGE_RULE = Object.freeze({
   maximumAyahExpansionPerEdge: 1,
+  minimumVoicedDurationMs: 320,
   requireCompleteTargetCoverage: true,
   requireDirectNoExtensionWin: true,
 });
@@ -51,7 +52,7 @@ function verifyEdge(
     ...(!evidence ? ["missing-comparative-acoustic-evidence"] : []),
     ...(evidence && evidence.edge !== edge ? ["wrong-edge-evidence"] : []),
     ...(evidence && evidence.candidateAyah !== candidateAyah ? ["unbounded-candidate"] : []),
-    ...(evidence && !(evidence.voicedDurationMs > 0) ? ["no-usable-voiced-audio"] : []),
+    ...(evidence && evidence.voicedDurationMs < FROZEN_BOUNDED_EDGE_RULE.minimumVoicedDurationMs ? ["no-usable-voiced-audio"] : []),
     ...(evidence && !evidence.alignmentComplete ? ["incomplete-candidate-alignment"] : []),
     ...(evidence && !coverageComplete ? ["incomplete-target-coverage"] : []),
     ...(evidence && !directWin ? ["no-extension-hypothesis-wins"] : []),

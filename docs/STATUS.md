@@ -1,5 +1,33 @@
 # Status
 
+## Current milestone: Quran local-only core and boundary evidence
+
+Complete (offline investigation only; production unchanged):
+
+- Added a frozen, reader-agnostic provisional local core over chronological
+  independent winners. It closes the all-null coherent-origin gap and exposes
+  Positive B as `101:2-11`, but cannot itself become a final range.
+- Historical combined behavior remains 20/20 genuine exact and 23/23
+  adversaries rejected. H remains `91:1-15`, K remains `92:1-14`, Negative A
+  retains both integrity vetoes, and canonical completeness passes.
+- Built a browser-local privacy-safe boundary harness using canonical PCM,
+  Silero VAD, pinned FastConformer, exact adjacent-ayah forward CTC, a real
+  blank/no-extension likelihood, and forced target coverage. No audio or PCM
+  is committed.
+- The predesignated design positive and negative both abstain. Core-only
+  alignment leaves only 176 ms/80 ms voiced before H's core and 64 ms/0 ms
+  voiced after J's exact stop, so neither adjacent target completes. The
+  positive cannot be distinguished from the negative without stealing core
+  audio.
+- Three media recognition runs were used (one completed H result was lost to
+  a post-inference fixture-directory error, then retained H and J captures).
+  The failed design distinction made held-out Positive B ineligible; it was
+  not recaptured or used for tuning.
+
+Conclusion: **NO CANDIDATE**. The next action is a separate predesignated
+investigation of a candidate-independent core-onset locator before any further
+Positive B run. Details: `docs/QURAN_LOCAL_CORE_EDGE_EVIDENCE.md`.
+
 ## Current milestone: Frozen external validation of canonical passage reconstruction
 
 Complete (offline validation only; production unchanged):

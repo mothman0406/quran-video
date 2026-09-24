@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "local-core-edge-design-positive-reader-h-91-start",
+  "role": "design-edge-positive",
+  "expectedEdgePresent": true,
+  "edge": "start",
+  "core": {
+    "surah": 91,
+    "startAyah": 2,
+    "endAyah": 15
+  },
+  "candidateAyah": 1,
+  "relativeBoundaryStartMs": -176,
+  "relativeBoundaryEndMs": 0,
+  "boundaryDurationMs": 176,
+  "voicedDurationMs": 80,
+  "candidateTokenCount": 8,
+  "alignedTokenCount": 0,
+  "targetCoverage": 0,
+  "candidateLogLikelihoodPerFrame": null,
+  "noExtensionLogLikelihoodPerFrame": -1.855249,
+  "likelihoodDifference": null,
+  "alignmentComplete": false,
+  "orderingValid": true,
+  "coreOverlap": false,
+  "stealsCoreAudio": false,
+  "optionalBasmalahOnly": false,
+  "decision": false,
+  "decisionReasons": [
+    "incomplete-candidate-alignment",
+    "incomplete-target-coverage",
+    "no-extension-hypothesis-wins"
+  ],
+  "runtimeMs": 148789
+}
