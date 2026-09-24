@@ -84,6 +84,9 @@ test("advanced editor restores the generated local project/runtime and preserves
   assert.match(editor, /const routeProjectId = new URLSearchParams\(window\.location\.search\)\.get\("project"\)/);
   assert.match(editor, /videoJobManager\.getRuntime\(project\.id\)/);
   assert.match(editor, /restoredCompletedRecognition: project\.captionSegments\.length > 0/);
+  assert.match(editor, /openingProject: project/);
+  assert.match(editor, /const opening = options\?\.openingProject \?\? pendingOpenProject/);
+  assert.match(editor, /setMediaTrim\(opening\?\.mediaTrim \?\?/);
   assert.match(editor, /requestExportSettings\(\)/);
   assert.match(editor, /exportAuthIntent\(Boolean\(session\)\)/);
 });
