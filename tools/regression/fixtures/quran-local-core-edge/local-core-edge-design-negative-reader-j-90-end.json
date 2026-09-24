@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "id": "local-core-edge-design-negative-reader-j-90-end",
+  "role": "design-edge-negative",
+  "expectedEdgePresent": false,
+  "edge": "end",
+  "core": {
+    "surah": 90,
+    "startAyah": 1,
+    "endAyah": 12
+  },
+  "candidateAyah": 13,
+  "relativeBoundaryStartMs": 0,
+  "relativeBoundaryEndMs": 64,
+  "boundaryDurationMs": 64,
+  "voicedDurationMs": 0,
+  "candidateTokenCount": 6,
+  "alignedTokenCount": 0,
+  "targetCoverage": 0,
+  "candidateLogLikelihoodPerFrame": null,
+  "noExtensionLogLikelihoodPerFrame": -0.020661,
+  "likelihoodDifference": null,
+  "alignmentComplete": false,
+  "orderingValid": true,
+  "coreOverlap": false,
+  "stealsCoreAudio": false,
+  "optionalBasmalahOnly": false,
+  "decision": false,
+  "decisionReasons": [
+    "no-usable-voiced-audio",
+    "incomplete-candidate-alignment",
+    "incomplete-target-coverage",
+    "no-extension-hypothesis-wins"
+  ],
+  "runtimeMs": 114757
+}
