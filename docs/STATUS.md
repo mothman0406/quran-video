@@ -1,5 +1,36 @@
 # Status
 
+## Current milestone: Complete Quran range final frozen validation
+
+Complete (external validation only; production unchanged):
+
+- Froze the complete candidate and four roles at starting revision `10a5983`
+  before source acquisition or recognition. Exactly four runs were completed:
+  two new genuine passages and two all-Quran same-surah adversaries.
+- Minshawy `81:8-22` and Muhammad Jibreel `86:1-12` both finish at their exact
+  inclusive ranges. Adjacent 81:7, 81:23, and 86:13 are not invented; forced
+  alignment completes all 15 and 12 canonical ayah timings respectively.
+- Hudhaify `82:1-19, 82:1-6` rejects with reset/revisit and repeated-covered
+  vetoes. Ghamadi `84:16-25, 84:1-8, 84:9-15` rejects before core selection
+  for lacking a dominant continuous/forward run. Boundary logic cannot hide
+  either contradiction.
+- New results are 2/2 genuine exact and 2/2 adversarial rejected, with zero
+  false positives or false negatives. H remains `91:1-15`, K remains
+  `92:1-14`, Positive B remains `101:1-11`, Negative A rejects, historical
+  genuine remains 20/20, historical adversarial remains 23/23, and canonical
+  completeness passes.
+- Four privacy-safe fixtures retain aggregate evidence only. Across the runs,
+  74 FastConformer passes and 148 boundary evaluations took about 12m40s; PCM,
+  the loaded session, and accepted-case whole-recording logits were reused.
+- Baseline verification was 541/541 tests; final verification is 545/545.
+  FFmpeg assets, Quran-ID schema, strict TypeScript, quiet lint, production
+  build, every retained evaluator, every corresponding privacy validator, and
+  whitespace checks pass. Production-scope diffs from `main` are empty.
+
+Conclusion: **FINAL FROZEN VALIDATION PASSED** and **PRODUCTION IMPLEMENTATION
+JUSTIFIED: YES**. Production remains unchanged in this milestone. Details:
+`docs/QURAN_COMPLETE_RANGE_FINAL_VALIDATION.md`.
+
 ## Current milestone: Candidate-independent Quran core-boundary localization
 
 Complete (focused offline architecture investigation; production unchanged):
