@@ -35,6 +35,8 @@
     "calibration:canonical-reconstruction:validation:capture": "node --experimental-strip-types tools/regression/capture-canonical-passage-reconstruction-validation.ts",
     "calibration:canonical-reconstruction:validation:evaluate": "node --experimental-strip-types tools/regression/evaluate-canonical-passage-reconstruction-validation.ts",
     "calibration:canonical-reconstruction:validation:privacy": "node --experimental-strip-types tools/regression/validate-canonical-passage-reconstruction-privacy.ts",
+    "calibration:integrity-edge:evaluate": "node --experimental-strip-types tools/regression/evaluate-quran-integrity-edge-completion.ts",
+    "calibration:integrity-edge:privacy": "node --experimental-strip-types tools/regression/validate-quran-integrity-edge-privacy.ts",
     "analyze:netlify-server": "node scripts/analyze-netlify-server.mjs",
     "check:translation:live": "LIVE_TRANSLATION_CHECK=1 node --experimental-strip-types scripts/check-translation.ts",
     "start": "next start",
