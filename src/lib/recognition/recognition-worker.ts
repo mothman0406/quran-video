@@ -1,12 +1,13 @@
 /// <reference lib="webworker" />
 
 import { analyzeMonoPcm } from "./audio-analysis.ts";
-import { createFastConformerIdentificationRunner, createFastConformerRunner } from "./local-fastconformer.ts";
+import { createCompleteRangeFastConformerRunner, createFastConformerIdentificationRunner, createFastConformerRunner } from "./local-fastconformer.ts";
+import type { FastConformerIdentificationResult } from "./fastconformer-identification.ts";
 import type { RecognitionWorkerRequest, RecognitionWorkerResponse } from "./recognition-worker-protocol.ts";
 import { detectLocalSpeechRegions } from "./vad.ts";
 
 const TARGET_SAMPLE_RATE = 16_000;
-type PreparedJob = { audio: Float32Array; speechRegions: Awaited<ReturnType<typeof detectLocalSpeechRegions>>; audioAnalysis: ReturnType<typeof analyzeMonoPcm> };
+type PreparedJob = { audio: Float32Array; speechRegions: Awaited<ReturnType<typeof detectLocalSpeechRegions>>; audioAnalysis: ReturnType<typeof analyzeMonoPcm>; identification?: FastConformerIdentificationResult };
 const jobs = new Map<number, PreparedJob>();
 const cancelled = new Set<number>();
 let workQueue = Promise.resolve();
@@ -48,7 +49,18 @@ async function identify(jobId: number) {
   const result = await createFastConformerIdentificationRunner(job.audio, job.speechRegions)((progress) => {
     if (!cancelled.has(jobId)) post({ type: "progress", jobId, progress });
   });
+  job.identification = result;
   if (!cancelled.has(jobId)) post({ type: "identified", jobId, result });
+}
+
+async function completeRange(message: Extract<RecognitionWorkerRequest, { type: "complete-range" }>) {
+  const job = jobs.get(message.jobId);
+  if (!job) throw new Error("Recognition audio is no longer available.");
+  if (!job.identification) throw new Error("Quran identification must run before complete-range resolution.");
+  const result = await createCompleteRangeFastConformerRunner(job.audio, job.speechRegions, message.analysisRunId)(job.identification, (progress) => {
+    if (!cancelled.has(message.jobId)) post({ type: "progress", jobId: message.jobId, progress });
+  });
+  if (!cancelled.has(message.jobId)) post({ type: "complete-range", jobId: message.jobId, result });
 }
 
 function copyPcm(jobId: number) {
@@ -83,6 +95,7 @@ self.onmessage = (event: MessageEvent<RecognitionWorkerRequest>) => {
     if (message.type === "prepare") await prepare(message);
     else if (message.type === "identify") await identify(message.jobId);
     else if (message.type === "copy-pcm") copyPcm(message.jobId);
+    else if (message.type === "complete-range") await completeRange(message);
     else if (message.type === "align") await align(message);
   }).catch((error: unknown) => {
     if (!cancelled.has(message.jobId)) post({ type: "error", jobId: message.jobId, message: error instanceof Error ? error.message : "Local recognition worker failed." });

@@ -13,6 +13,7 @@ import {
   FASTCONFORMER_IDENTIFICATION_DEFAULTS,
   advanceQuranContinuationState,
   buildQuranWideLexicalIndex,
+  ctcForwardScore,
   identifyQuranWindow,
   summarizeFastConformerIdentification,
   type FastConformerIdentificationResult,
@@ -39,6 +40,23 @@ import {
   type FastConformerProgress,
   type FastConformerProgressCallback,
 } from "./contracts.ts";
+import { boundedBoundaryRegion, normalizedBlankCtcLogLikelihood, voicedDurationInRegion } from "./quran-boundary-acoustics.ts";
+import { completeBoundedEdges, type EdgeAcousticEvidence } from "./quran-edge-completion.ts";
+import {
+  canonicalSpanFromExactRange,
+  resolveQuranCore,
+  versesForExactRange,
+  type QuranBoundaryLocalization,
+  type QuranCoreDecision,
+  type QuranEdgeVerification,
+  type QuranExactRange,
+} from "./quran-complete-range.ts";
+import {
+  FROZEN_CORE_BOUNDARY_RULE,
+  locateCoreBoundary,
+  selectApplicableCoreBoundaries,
+  sliceCtcLogits,
+} from "./quran-core-boundary-localizer.ts";
 export {
   FASTCONFORMER_MODEL,
   FASTCONFORMER_MODEL_ARTIFACT,
@@ -236,6 +254,30 @@ export type FastConformerRunner = (
 ) => Promise<FastConformerResult>;
 /** Independent Quran-wide CTC identifier used before canonical passage selection. */
 export type FastConformerIdentificationRunner = (onProgress?: FastConformerProgressCallback) => Promise<FastConformerIdentificationResult>;
+
+export type FastConformerCompleteRangeResult = {
+  status: "complete" | "rejected" | "failed";
+  reason: string | null;
+  coreDecision: QuranCoreDecision;
+  exactRange: QuranExactRange | null;
+  canonicalSpan: ReturnType<typeof canonicalSpanFromExactRange>;
+  boundaryLocalization: QuranBoundaryLocalization | null;
+  edgeVerification: QuranEdgeVerification | null;
+  alignment: FastConformerResult | null;
+  reuse: {
+    pcmReused: true;
+    vadReused: true;
+    modelSessionReused: boolean;
+    fullRecordingLogitsReused: boolean;
+    globalQuranSearches: 1;
+    edgeInferenceCount: number;
+  };
+};
+
+export type FastConformerCompleteRangeRunner = (
+  identification: FastConformerIdentificationResult,
+  onProgress?: FastConformerProgressCallback,
+) => Promise<FastConformerCompleteRangeResult>;
 
 let sharedModelPromise: Promise<LoadedFastConformer> | null = null;
 let sharedQuranIdentificationIndexPromise: Promise<QuranWideLexicalIndex> | null = null;
@@ -749,38 +791,6 @@ function unavailable(
   };
 }
 
-async function runUpstreamTilawaOracle(
-  audio: Float32Array,
-  logits: Float32Array,
-  frames: number,
-  vocabSize: number,
-  assets: FastConformerAssets,
-): Promise<UpstreamTilawaResult> {
-  try {
-    const { createTilawaSession } = await import("@tilawa/core");
-    const quran = hafsVerses.map((verse) => {
-      const [surah, ayah] = verse.verseKey.split(":").map(Number);
-      return { surah, ayah, text_uthmani: verse.text, surah_name: "", surah_name_en: "" };
-    });
-    const session = createTilawaSession(
-      { run: async () => ({ logprobs: logits, timeSteps: frames, vocabSize }) },
-      { vocab: assets.vocabulary, quranCtcTokens: assets.tokenTable, quran, blankId: BLANK_TOKEN_ID },
-    );
-    const result = await session.transcribeRaw(audio);
-    return {
-      status: "complete",
-      transcript: result.text,
-      detectedPassage: result.championMatch
-        ? { startVerseKey: `${result.championMatch.surah}:${result.championMatch.ayah}`, endVerseKey: `${result.championMatch.surah}:${result.championMatch.ayah_end ?? result.championMatch.ayah}` }
-        : null,
-      confidence: result.championMatch?.score ?? null,
-      tokenCount: result.tokenIds?.length ?? 0,
-    };
-  } catch (error) {
-    return { status: "unavailable", transcript: "", detectedPassage: null, confidence: null, tokenCount: 0, reason: error instanceof Error ? error.message : String(error) };
-  }
-}
-
 function quranWideIdentificationIndex(assets: FastConformerAssets): Promise<QuranWideLexicalIndex> {
   sharedQuranIdentificationIndexPromise ??= Promise.resolve().then(() => {
     const canonicalWords = canonicalCtcWords(hafsVerses);
@@ -911,6 +921,292 @@ export function createFastConformerIdentificationRunner(audio: Float32Array, spe
   };
 }
 
+async function inferFastConformer(loaded: LoadedFastConformer, audio: Float32Array) {
+  const outputs = await loaded.session.run({
+    audio_signal: new loaded.ort.Tensor("float32", audio, [1, audio.length]),
+    length: new loaded.ort.Tensor("int64", BigInt64Array.from([BigInt(audio.length)]), [1]),
+  });
+  const output = outputs[loaded.session.outputNames[0]!];
+  const [, frames, vocabularySize] = output?.dims ?? [];
+  if (!output || !(output.data instanceof Float32Array) || !frames || !vocabularySize || vocabularySize <= BLANK_TOKEN_ID) {
+    throw new Error("FastConformer returned an unsupported CTC log-probability shape.");
+  }
+  return { values: output.data, frames, vocabularySize };
+}
+
+function emptyBoundaryLocation(edge: "start" | "end", atMs: number) {
+  return { edge, searchStartMs: atMs, searchEndMs: atMs, coarseEvaluationCount: 0, fineEvaluationCount: 0, selected: null, candidates: [] } as const;
+}
+
+async function verifyAdjacentEdge(input: {
+  edge: "start" | "end";
+  candidateAyah: number;
+  surah: number;
+  coreStartMs: number;
+  coreEndMs: number;
+  durationMs: number;
+  audio: Float32Array;
+  speechRegions: readonly VadSpeechRegion[];
+  loaded: LoadedFastConformer;
+}): Promise<EdgeAcousticEvidence> {
+  const region = boundedBoundaryRegion({
+    edge: input.edge,
+    coreStartMs: input.coreStartMs,
+    coreEndMs: input.coreEndMs,
+    audioDurationMs: input.durationMs,
+  });
+  const boundaryAudio = input.audio.slice(
+    Math.max(0, Math.floor(region.startMs * SAMPLE_RATE / 1_000)),
+    Math.min(input.audio.length, Math.ceil(region.endMs * SAMPLE_RATE / 1_000)),
+  );
+  const candidateVerses = versesForExactRange({ surah: input.surah, startAyah: input.candidateAyah, endAyah: input.candidateAyah });
+  const encoded = encodeFastConformerWords(canonicalCtcWords(candidateVerses), input.loaded.assets.tokenTable, input.loaded.assets.vocabulary, input.loaded.assets.quranText);
+  const logits = boundaryAudio.length ? await inferFastConformer(input.loaded, boundaryAudio) : null;
+  const rawCandidateScore = logits ? ctcForwardScore(logits, encoded.targetTokens.map((token) => token.tokenId), BLANK_TOKEN_ID) : null;
+  const candidateScore = rawCandidateScore === null || !logits ? null : rawCandidateScore / logits.frames;
+  const noExtensionScore = logits ? normalizedBlankCtcLogLikelihood(logits, BLANK_TOKEN_ID) : null;
+  const alignment = logits ? forceAlignCtc(encoded.canonicalWords, encoded.targetTokens, logits, {
+    blankTokenId: BLANK_TOKEN_ID,
+    startMs: region.startMs,
+    endMs: region.endMs,
+    finalSpeechEndMs: region.endMs,
+    frameExactEndpoints: true,
+  }) : null;
+  const rawPreludeScore = logits && encoded.optionalPreludeTokens.length
+    ? ctcForwardScore(logits, encoded.optionalPreludeTokens.map((token) => token.tokenId), BLANK_TOKEN_ID)
+    : null;
+  const preludeScore = rawPreludeScore === null || !logits ? null : rawPreludeScore / logits.frames;
+  const alignedTokenCount = alignment?.status === "complete" ? alignment.targetTokens.length : 0;
+  return {
+    edge: input.edge,
+    candidateAyah: input.candidateAyah,
+    voicedDurationMs: voicedDurationInRegion(input.speechRegions, region.startMs, region.endMs),
+    candidateTokenCount: encoded.targetTokens.length,
+    alignedTokenCount,
+    candidateLogLikelihoodPerFrame: candidateScore ?? Number.NEGATIVE_INFINITY,
+    noExtensionLogLikelihoodPerFrame: noExtensionScore ?? Number.NEGATIVE_INFINITY,
+    alignmentComplete: alignment?.status === "complete",
+    temporallyOrderedOutsideCore: input.edge === "start" ? region.endMs <= input.coreStartMs : region.startMs >= input.coreEndMs,
+    overlapsCoreAudio: input.edge === "start" ? region.endMs > input.coreStartMs : region.startMs < input.coreEndMs,
+    optionalBasmalahOnly: preludeScore !== null && candidateScore !== null && noExtensionScore !== null
+      && preludeScore > candidateScore && candidateScore <= noExtensionScore,
+  };
+}
+
+/**
+ * Resolves the frozen complete-range pipeline and final timing in one worker
+ * operation. It performs no Quran-wide search: the supplied identification is
+ * the sole global decision, while all later hypotheses are bounded and known.
+ */
+export function createCompleteRangeFastConformerRunner(
+  audio: Float32Array,
+  speechRegions: readonly VadSpeechRegion[],
+  analysisRunId?: string,
+): FastConformerCompleteRangeRunner {
+  return async (identification, onProgress) => {
+    const coreDecision = resolveQuranCore(identification);
+    const baseReuse = {
+      pcmReused: true as const,
+      vadReused: true as const,
+      modelSessionReused: sharedModelPromise !== null,
+      fullRecordingLogitsReused: false,
+      globalQuranSearches: 1 as const,
+      edgeInferenceCount: 0,
+    };
+    if (!coreDecision.accepted || !coreDecision.core) {
+      return { status: "rejected", reason: coreDecision.reason, coreDecision, exactRange: null, canonicalSpan: null, boundaryLocalization: null, edgeVerification: null, alignment: null, reuse: baseReuse };
+    }
+    const startedAt = performance.now();
+    try {
+      const memoryWarm = sharedModelPromise !== null;
+      sharedModelPromise ??= loadModel(onProgress).catch((error) => { sharedModelPromise = null; throw error; });
+      const loaded = await sharedModelPromise;
+      const core = coreDecision.core;
+      const coreVerses = versesForExactRange(core);
+      if (!coreVerses.length) throw new Error("The selected Quran core is outside the canonical corpus.");
+      const coreEncoded = encodeFastConformerWords(canonicalCtcWords(coreVerses), loaded.assets.tokenTable, loaded.assets.vocabulary, loaded.assets.quranText);
+      onProgress?.({ phase: "aligning-words", step: "inference" });
+      const inferenceStartedAt = performance.now();
+      const fullLogits = await inferFastConformer(loaded, audio);
+      const inferenceMs = Math.round(performance.now() - inferenceStartedAt);
+      const durationMs = Math.round(audio.length / SAMPLE_RATE * 1_000);
+      const firstSpeechMs = speechRegions[0]?.startMs ?? 0;
+      const finalSpeechMs = speechRegions.at(-1)?.endMs ?? durationMs;
+      const establishedLogits = sliceCtcLogits(fullLogits, 0, durationMs, firstSpeechMs, finalSpeechMs);
+      const established = establishedLogits ? forceAlignCtc(coreEncoded.canonicalWords, coreEncoded.targetTokens, establishedLogits, {
+        blankTokenId: BLANK_TOKEN_ID,
+        startMs: firstSpeechMs,
+        endMs: finalSpeechMs,
+        finalSpeechEndMs: finalSpeechMs,
+        frameExactEndpoints: true,
+      }) : null;
+      const establishedStartMs = established?.status === "complete" ? established.words[0]?.startMs ?? null : null;
+      const establishedEndMs = established?.status === "complete" ? established.verses.at(-1)?.endMs ?? null : null;
+      const surahAyahCount = hafsVerses.filter((verse) => verse.verseKey.startsWith(`${core.surah}:`)).length;
+      const anchorCount = FROZEN_CORE_BOUNDARY_RULE.boundaryTargetAyahCount;
+      const startAnchor = versesForExactRange({ surah: core.surah, startAyah: core.startAyah, endAyah: Math.min(core.endAyah, core.startAyah + anchorCount - 1) });
+      const endAnchor = versesForExactRange({ surah: core.surah, startAyah: Math.max(core.startAyah, core.endAyah - anchorCount + 1), endAyah: core.endAyah });
+      const startEncoded = encodeFastConformerWords(canonicalCtcWords(startAnchor), loaded.assets.tokenTable, loaded.assets.vocabulary, loaded.assets.quranText);
+      const endEncoded = encodeFastConformerWords(canonicalCtcWords(endAnchor), loaded.assets.tokenTable, loaded.assets.vocabulary, loaded.assets.quranText);
+      const startLocation = core.startAyah > 1 ? locateCoreBoundary({
+        edge: "start", audioStartMs: 0, audioEndMs: durationMs, firstSpeechMs, finalSpeechMs,
+        logits: fullLogits, canonicalWords: startEncoded.canonicalWords, targetTokens: startEncoded.targetTokens, blankTokenId: BLANK_TOKEN_ID,
+      }) : emptyBoundaryLocation("start", establishedStartMs ?? firstSpeechMs);
+      const endLocation = core.endAyah < surahAyahCount ? locateCoreBoundary({
+        edge: "end", audioStartMs: 0, audioEndMs: durationMs, firstSpeechMs, finalSpeechMs,
+        logits: fullLogits, canonicalWords: endEncoded.canonicalWords, targetTokens: endEncoded.targetTokens, blankTokenId: BLANK_TOKEN_ID,
+      }) : emptyBoundaryLocation("end", establishedEndMs ?? finalSpeechMs);
+      const applicable = selectApplicableCoreBoundaries({ core, surahAyahCount, establishedStartMs, establishedEndMs, startLocation, endLocation });
+      const coreStartMs = applicable.startMs;
+      const coreEndMs = applicable.endMs;
+      const localized = coreStartMs !== null && coreEndMs !== null && coreEndMs > coreStartMs
+        ? sliceCtcLogits(fullLogits, 0, durationMs, coreStartMs, coreEndMs)
+        : null;
+      const wholeCore = localized && coreStartMs !== null && coreEndMs !== null ? forceAlignCtc(coreEncoded.canonicalWords, coreEncoded.targetTokens, localized, {
+        blankTokenId: BLANK_TOKEN_ID,
+        startMs: coreStartMs,
+        endMs: coreEndMs,
+        finalSpeechEndMs: coreEndMs,
+        frameExactEndpoints: true,
+      }) : null;
+      const wholeCoreComplete = wholeCore?.status === "complete" && wholeCore.targetTokens.length === coreEncoded.targetTokens.length;
+      const boundaryLocalization: QuranBoundaryLocalization = { start: startLocation, end: endLocation, coreStartMs, coreEndMs, wholeCoreComplete };
+      if (!wholeCoreComplete || coreStartMs === null || coreEndMs === null) {
+        return { status: "rejected", reason: "incomplete-whole-core-alignment", coreDecision, exactRange: null, canonicalSpan: null, boundaryLocalization, edgeVerification: null, alignment: null, reuse: { ...baseReuse, modelSessionReused: memoryWarm, fullRecordingLogitsReused: true } };
+      }
+
+      const startEvidence = core.startAyah > 1 ? await verifyAdjacentEdge({
+        edge: "start", candidateAyah: core.startAyah - 1, surah: core.surah, coreStartMs, coreEndMs,
+        durationMs, audio, speechRegions, loaded,
+      }) : null;
+      const endEvidence = core.endAyah < surahAyahCount ? await verifyAdjacentEdge({
+        edge: "end", candidateAyah: core.endAyah + 1, surah: core.surah, coreStartMs, coreEndMs,
+        durationMs, audio, speechRegions, loaded,
+      }) : null;
+      const completed = completeBoundedEdges({ core, surahAyahCount, startEvidence, endEvidence });
+      const exactRange = completed.range;
+      const finalVerses = versesForExactRange(exactRange);
+      const canonicalSpan = canonicalSpanFromExactRange(exactRange);
+      if (!finalVerses.length || !canonicalSpan) throw new Error("The exact Quran range could not be expanded canonically.");
+      const encoded = encodeFastConformerWords(canonicalCtcWords(finalVerses), loaded.assets.tokenTable, loaded.assets.vocabulary, loaded.assets.quranText);
+      const finalStartMs = completed.start.extended || core.startAyah === 1 ? firstSpeechMs : coreStartMs;
+      const finalEndMs = completed.end.extended || core.endAyah === surahAyahCount ? finalSpeechMs : coreEndMs;
+      const finalLogits = sliceCtcLogits(fullLogits, 0, durationMs, finalStartMs, finalEndMs);
+      if (!finalLogits) throw new Error("The exact Quran range has no usable VAD-constrained alignment interval.");
+      const finalLogitValues = finalLogits.values instanceof Float32Array ? finalLogits.values : Float32Array.from(finalLogits.values);
+      onProgress?.({ phase: "aligning-words", step: "forced-alignment" });
+      const alignmentStartedAt = performance.now();
+      const alignmentWithoutPrelude = forceAlignCtc(encoded.canonicalWords, encoded.targetTokens, finalLogits, {
+        blankTokenId: BLANK_TOKEN_ID, startMs: finalStartMs, endMs: finalEndMs, finalSpeechEndMs: finalEndMs, frameExactEndpoints: true,
+      });
+      const alignmentWithPrelude = encoded.optionalPreludeTokens.length ? forceAlignCtc(encoded.canonicalWords, [...encoded.optionalPreludeTokens, ...encoded.targetTokens], finalLogits, {
+        blankTokenId: BLANK_TOKEN_ID, startMs: finalStartMs, endMs: finalEndMs, finalSpeechEndMs: finalEndMs, frameExactEndpoints: true,
+      }) : null;
+      const withoutPreludeScore = alignmentWithoutPrelude.status === "complete" ? alignmentWithoutPrelude.normalizedPathScore ?? null : null;
+      const withPreludeScore = alignmentWithPrelude?.status === "complete" ? alignmentWithPrelude.normalizedPathScore ?? null : null;
+      const preludePresent = withPreludeScore !== null && (withoutPreludeScore === null || withPreludeScore > withoutPreludeScore);
+      const ctcAlignment = preludePresent ? alignmentWithPrelude! : alignmentWithoutPrelude;
+      const transitionBoundaryWords = ctcAlignment.status === "complete"
+        ? deriveCtcTransitionBoundaryWords(ctcAlignment.canonicalWords, ctcAlignment.targetTokens, finalLogits, { blankTokenId: BLANK_TOKEN_ID, startMs: finalStartMs, endMs: finalEndMs }) ?? undefined
+        : undefined;
+      const alignment = transitionBoundaryWords ? {
+        ...ctcAlignment,
+        words: ctcAlignment.words.map((word, index) => ({ ...word, endMs: transitionBoundaryWords[index]?.endMs ?? word.endMs })),
+      } : ctcAlignment;
+      const alignmentMs = Math.round(performance.now() - alignmentStartedAt);
+      const forcedAlignmentMeanScore = alignment.status === "complete" && alignment.words.length
+        ? Number((alignment.words.reduce((sum, word) => sum + word.confidence, 0) / alignment.words.length).toFixed(4))
+        : null;
+      const fastConformerResult: FastConformerResult = {
+        status: alignment.status,
+        reason: alignment.reason,
+        analysisRunId,
+        tilawaRelease: FASTCONFORMER_TILAWA_RELEASE,
+        modelRevision: FASTCONFORMER_MODEL_REVISION,
+        vocabRevision: FASTCONFORMER_VOCAB_REVISION,
+        tokenTableRevision: FASTCONFORMER_TOKEN_TABLE_REVISION,
+        blankId: BLANK_TOKEN_ID,
+        vocabSize: fullLogits.vocabularySize,
+        targetValidation: encoded.targetValidation,
+        targetTokenMapping: encoded.targetTokenMapping,
+        optionalPrelude: {
+          available: encoded.optionalPreludeTokens.length > 0,
+          lexicalText: encoded.optionalPreludeLexicalText,
+          tokenIds: encoded.optionalPreludeTokens.map((token) => token.tokenId),
+          candidateWithoutPreludeScore: withoutPreludeScore,
+          candidateWithPreludeScore: withPreludeScore,
+          selected: preludePresent ? "present" : "absent",
+          startMs: preludePresent ? alignment.optionalPreludeTiming?.startMs ?? null : null,
+          endMs: preludePresent ? alignment.optionalPreludeTiming?.endMs ?? null : null,
+          ...(preludePresent && alignment.optionalPreludeWords ? { wordTimings: alignment.optionalPreludeWords.map((word) => ({ canonicalWordIndex: word.wordIndex, startMs: word.startMs, endMs: word.endMs })) } : {}),
+        },
+        firstCanonicalTokenFrame: alignment.status === "complete" ? alignment.firstCanonicalTokenFrame ?? null : null,
+        firstCanonicalWordStartMs: alignment.status === "complete" ? alignment.words[0]?.startMs ?? null : null,
+        upstreamTilawaResult: null,
+        upstreamTilawaDetectedPassage: null,
+        upstreamTilawaConfidence: null,
+        detectedRange: { startVerseKey: finalVerses[0]!.verseKey, endVerseKey: finalVerses.at(-1)!.verseKey, source: "known-canonical-passage" },
+        forcedAlignmentMeanScore,
+        greedyTranscript: greedyDecode(finalLogitValues, finalLogits.frames, finalLogits.vocabularySize, loaded.assets.vocabulary),
+        frameCount: finalLogits.frames,
+        frameDurationMs: Number(((finalEndMs - finalStartMs) / finalLogits.frames).toFixed(4)),
+        combinedTargetTokenCount: encoded.targetTokens.length,
+        alignmentComplete: alignment.status === "complete",
+        ayahTimings: alignment.verses.map((verse) => {
+          const words = alignment.words.filter((word) => word.verseKey === verse.verseKey);
+          return { verseKey: verse.verseKey, startMs: verse.startMs, endMs: verse.endMs, acousticScore: words.length ? Number((words.reduce((sum, word) => sum + word.alignmentScore, 0) / words.length).toFixed(4)) : 0 };
+        }),
+        rawLogits: { frames: finalLogits.frames, vocabularySize: finalLogits.vocabularySize, blankTokenId: BLANK_TOKEN_ID, frameDurationMs: Number(((finalEndMs - finalStartMs) / finalLogits.frames).toFixed(4)) },
+        wordEndPolicy: "ctc-transition-boundary",
+        alignment,
+        performance: {
+          modelArtifactBytes: FASTCONFORMER_MODEL_BYTES,
+          supportingAssetBytes: FASTCONFORMER_TOKEN_TABLE_BYTES + FASTCONFORMER_VOCAB_BYTES + FASTCONFORMER_QURAN_BYTES,
+          modelDownloadBytes: memoryWarm ? 0 : loaded.assets.downloadBytes,
+          cacheStatus: memoryWarm ? "memory" : loaded.assets.cacheStatus,
+          backend: loaded.backend,
+          ortImport: FASTCONFORMER_ORT_IMPORT,
+          ortVersion: FASTCONFORMER_ORT_VERSION,
+          executionProvider: "wasm",
+          wasmNumThreads: 1,
+          wasmSimd: true,
+          sessionCreateMs: loaded.sessionCreateMs,
+          modelLoadMs: loaded.modelLoadMs,
+          alignmentMs,
+          modelBytes: loaded.assets.model.byteLength,
+          modelSha256: loaded.assets.modelSha256,
+          inferenceMs,
+          totalMs: Math.round(performance.now() - startedAt),
+        },
+      };
+      const edgeInferenceCount = Number(startEvidence !== null) + Number(endEvidence !== null);
+      return {
+        status: alignment.status === "complete" ? "complete" : "failed",
+        reason: alignment.status === "complete" ? null : alignment.reason ?? "incomplete-final-forced-alignment",
+        coreDecision,
+        exactRange,
+        canonicalSpan,
+        boundaryLocalization,
+        edgeVerification: { start: completed.start, end: completed.end },
+        alignment: fastConformerResult,
+        reuse: { ...baseReuse, modelSessionReused: memoryWarm, fullRecordingLogitsReused: true, edgeInferenceCount },
+      };
+    } catch (error) {
+      return {
+        status: "failed",
+        reason: error instanceof Error ? error.message : String(error),
+        coreDecision,
+        exactRange: null,
+        canonicalSpan: null,
+        boundaryLocalization: null,
+        edgeVerification: null,
+        alignment: null,
+        reuse: baseReuse,
+      };
+    }
+  };
+}
+
 /** Creates a lazy browser-only known-passage runner over the same decoded 16 kHz PCM. */
 export function createFastConformerRunner(
   audio: Float32Array,
@@ -946,7 +1242,6 @@ export function createFastConformerRunner(
       const [, frames, vocabularySize] = output?.dims ?? [];
       if (!output || !(output.data instanceof Float32Array) || !frames || !vocabularySize || vocabularySize <= BLANK_TOKEN_ID) throw new Error("FastConformer returned an unsupported CTC log-probability shape.");
       const inferenceMs = Math.round(performance.now() - inferenceStartedAt);
-      const upstreamTilawaResult = await runUpstreamTilawaOracle(window.audio, output.data, frames, vocabularySize, loaded.assets);
       failureStage = "forced-alignment";
       onProgress?.({ phase: "aligning-words", step: "forced-alignment" });
       const alignmentStartedAt = performance.now();
@@ -1017,9 +1312,9 @@ export function createFastConformerRunner(
         },
         firstCanonicalTokenFrame: alignment.status === "complete" ? alignment.firstCanonicalTokenFrame ?? null : null,
         firstCanonicalWordStartMs: alignment.status === "complete" ? alignment.words[0]?.startMs ?? null : null,
-        upstreamTilawaResult,
-        upstreamTilawaDetectedPassage: upstreamTilawaResult.detectedPassage,
-        upstreamTilawaConfidence: upstreamTilawaResult.confidence,
+        upstreamTilawaResult: null,
+        upstreamTilawaDetectedPassage: null,
+        upstreamTilawaConfidence: null,
         detectedRange: verses.length ? { startVerseKey: verses[0]!.verseKey, endVerseKey: verses.at(-1)!.verseKey, source: "known-canonical-passage" } : null,
         forcedAlignmentMeanScore,
         greedyTranscript,

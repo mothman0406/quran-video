@@ -1,7 +1,7 @@
 import type { AudioAnalysis } from "./audio-analysis.ts";
 import type { QuranCorpusVerse } from "./core.ts";
 import type { FastConformerProgress } from "./contracts.ts";
-import type { FastConformerResult } from "./local-fastconformer.ts";
+import type { FastConformerCompleteRangeResult, FastConformerResult } from "./local-fastconformer.ts";
 import type { FastConformerIdentificationResult } from "./fastconformer-identification.ts";
 import type { RecognitionWorkerRequest, RecognitionWorkerResponse } from "./recognition-worker-protocol.ts";
 import type { VadSpeechRegion } from "./speech-regions.ts";
@@ -51,6 +51,10 @@ export class LocalRecognitionWorkerClient {
     return this.request<FastConformerIdentificationResult>({ type: "identify", jobId }, "identified", [], onProgress);
   }
 
+  completeRange(jobId: number, analysisRunId: string, onProgress?: (progress: FastConformerProgress) => void) {
+    return this.request<FastConformerCompleteRangeResult>({ type: "complete-range", jobId, analysisRunId }, "complete-range", [], onProgress);
+  }
+
   copyPcm(jobId: number) {
     return this.request<Float32Array>({ type: "copy-pcm", jobId }, "pcm", []);
   }
@@ -88,7 +92,7 @@ export class LocalRecognitionWorkerClient {
     if (message.type !== pending.expected) return;
     this.pending.delete(message.jobId);
     if (message.type === "prepared") pending.resolve({ audioAnalysis: message.audioAnalysis, speechRegions: message.speechRegions, durationMs: message.durationMs });
-    else if (message.type === "identified") pending.resolve(message.result);
+    else if (message.type === "identified" || message.type === "complete-range") pending.resolve(message.result);
     else if (message.type === "pcm") pending.resolve(new Float32Array(message.buffer));
     else pending.resolve(message.result);
   }
