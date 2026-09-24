@@ -630,7 +630,7 @@ export default function Home() {
               const runtime = videoJobManager.getRuntime(project.id);
               if (runtime) {
                 cloudProjectLoadStarted.current = true;
-                loadSelectedSource(runtime.originalSource, runtime.editorMedia, project.sourceMedia ?? mediaSourceFromFile(runtime.originalSource, mediaKindForFile(runtime.originalSource) ?? "video"), { preserveCaptions: true, restoredCompletedRecognition: project.captionSegments.length > 0, editorPlaybackUrl: runtime.editorPlaybackUrl });
+                loadSelectedSource(runtime.originalSource, runtime.editorMedia, project.sourceMedia ?? mediaSourceFromFile(runtime.originalSource, mediaKindForFile(runtime.originalSource) ?? "video"), { preserveCaptions: true, restoredCompletedRecognition: project.captionSegments.length > 0, editorPlaybackUrl: runtime.editorPlaybackUrl, openingProject: project });
               }
             }
           })
@@ -868,7 +868,7 @@ export default function Home() {
       /* Arabic remains available when translation enrichment fails. */
     }
   }
-  function loadSelectedSource(originalSource: File, editorMedia: File, nextSource: MediaSource, options?: { preserveCaptions?: boolean; restoredCompletedRecognition?: boolean; editorPlaybackUrl?: string | null; disposeEditorMedia?: () => Promise<void>; preparedAudio?: PreparedRecognitionAudio }) {
+  function loadSelectedSource(originalSource: File, editorMedia: File, nextSource: MediaSource, options?: { preserveCaptions?: boolean; restoredCompletedRecognition?: boolean; editorPlaybackUrl?: string | null; disposeEditorMedia?: () => Promise<void>; preparedAudio?: PreparedRecognitionAudio; openingProject?: SavedProject }) {
     exportAbort.current?.abort();
     clearCompletedExport();
     invalidateRecognitionForSourceChange();
@@ -878,7 +878,11 @@ export default function Home() {
     const previousDisposer = editorMediaDisposer.current;
     editorMediaDisposer.current = options?.disposeEditorMedia ?? null;
     if (previousDisposer && previousDisposer !== options?.disposeEditorMedia) void previousDisposer();
-    const opening = pendingOpenProject;
+    // A routed runtime is attached in the same render that schedules
+    // pendingOpenProject. Carry the already-known project explicitly so this
+    // handoff cannot replace its saved trim with the initial zero-duration
+    // state before React commits the queued project update.
+    const opening = options?.openingProject ?? pendingOpenProject;
     setOriginalSourceFile(originalSource);
     setVideoFile(editorMedia);
     const nextUrl = options?.editorPlaybackUrl ?? URL.createObjectURL(editorMedia);

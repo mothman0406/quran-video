@@ -1,6 +1,36 @@
 # Status
 
-## Current milestone: Quran complete-range production implementation
+## Current milestone: Quran complete-range browser QA
+
+Complete:
+
+- Ran the actual production `/create` flow in isolated Chrome with existing
+  local media. Positive B completed exactly as `101:1-11` with all 11 canonical
+  ayat once in order. Optional exact-stop Case 2 completed as `86:1-12` with
+  all 12 canonical ayat.
+- Verified first-caption onset, three interior playback transitions, final-
+  caption retention through recitation end, direct seeking, editor loading,
+  full-range timeline state, and temporary manual timing edit preservation.
+- Found and fixed one narrow editor handoff bug: a stale React closure replaced
+  the saved full-source trim with the 250 ms minimum when opening a generated
+  runtime project. The known opening project is now passed explicitly; no
+  recognition module, threshold, fixture, model, or architecture changed.
+- Primary timings were 339 ms media preparation, 58,983 ms recognition, and
+  619 ms editor-ready. The optional second clip measured 677 ms, 83,764 ms,
+  and 611 ms respectively.
+- Each production request performed one global Quran search and one retained
+  FastConformer session initialization. No server inference, source upload,
+  duplicate search, fatal console error, worker crash, or OOM was observed.
+- Post-fix verification passes the focused 8/8 flow tests, full 553/553 suite,
+  strict TypeScript, quiet lint, production build, whitespace checks, frozen
+  complete-range acceptance, and 7/7 production/offline parity tests.
+
+Conclusion: **BROWSER QA PASSED** and **QURAN RECOGNITION MILESTONE COMPLETE:
+YES**. No additional recognition architecture/testing milestone is recommended
+without a new concrete real-world failure. Details:
+`docs/QURAN_COMPLETE_RANGE_BROWSER_QA.md`.
+
+## Completed milestone: Quran complete-range production implementation
 
 Complete in code and automated validation; manual browser QA remains:
 
