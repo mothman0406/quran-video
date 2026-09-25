@@ -14,6 +14,7 @@ test("project format presets expose the expected dimensions and aspect ratios", 
   assert.equal(PROJECT_FORMATS.vertical.width / PROJECT_FORMATS.vertical.height, 9 / 16);
   assert.equal(PROJECT_FORMATS.landscape.width / PROJECT_FORMATS.landscape.height, 16 / 9);
   assert.equal(PROJECT_FORMATS.square.width / PROJECT_FORMATS.square.height, 1);
+  assert.equal(PROJECT_FORMATS.portrait.width / PROJECT_FORMATS.portrait.height, 4 / 5);
 });
 
 test("new source dimensions select portrait, landscape, or square canvas defaults", () => {

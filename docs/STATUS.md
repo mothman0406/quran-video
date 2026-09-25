@@ -1,5 +1,37 @@
 # Status
 
+## Current milestone: Pre-generation caption controls
+
+Complete in implementation and automated validation:
+
+- Added a polished five-section Layout, Quran, Translation, Effects, and
+  Toggles control panel to `/create`, with Layout active first and reactive
+  state preserved between sections.
+- Added 4:5, shared caption position/drag state, Arabic/translation spacing,
+  safe fonts, sizes, weights, italic, colors, dim, outline, shadow, fade,
+  translation, ayah-number, existing word-highlight, and truthful locked Full
+  Ayah controls. Reset affects presentation only.
+- One `CaptionPresentationSettings` value now drives the create sample and the
+  generated project. Saved presentation drives watch preview, direct finished-
+  video download, editor hydration/preview, and editor export. Source video
+  remains contain-fit and is never stretched.
+- Finished videos can render and download from `/videos`; the advanced editor
+  is optional. Its restored Media/Canvas/Inspector/timeline UI and Settings/
+  Subtitles navigation remain intact, with only minimal presentation-state and
+  render plumbing added.
+- Presentation changes do not invoke media preparation, FastConformer, VAD,
+  reconstruction, boundary localization, forced alignment, or any recognition
+  path. Recognition source files are unchanged.
+- Focused pre-generation/export/persistence/editor-invariant coverage passes
+  70/70. The full suite passes 563/563, strict TypeScript and quiet lint pass,
+  and the production build succeeds with its pinned FFmpeg asset check.
+- Browser automation and a browser executable are not installed in this
+  workspace, so no interactive browser or generated-file visual QA was
+  claimed. Automated preview/export field parity and direct-download wiring
+  are covered by the passing focused and full suites.
+
+Details: `docs/PRE_GENERATION_CAPTION_CONTROLS.md`.
+
 ## Current milestone: Quran complete-range browser QA
 
 Complete:

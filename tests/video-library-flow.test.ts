@@ -51,11 +51,19 @@ test("watch composes source media with saved CaptionSegments rather than requiri
 test("ready cards offer Watch, Edit, Download, Delete and TikTok-coming-soon without YouTube", () => {
   assert.match(videos, /"Watch"/);
   assert.match(videos, />Edit<\/Link>/);
-  assert.match(videos, />Download<\/Link>/);
+  assert.match(videos, /void download\(card\)/);
   assert.match(videos, />Delete<\/button>/);
   assert.match(videos, /Post to TikTok/);
   assert.match(videos, /Coming soon/);
   assert.doesNotMatch(videos, /YouTube/i);
+});
+
+test("finished videos download directly with the exact saved presentation without opening the editor", () => {
+  assert.match(videos, /createLocalExportConfiguration/);
+  for (const field of ["card.project.format", "card.project.typography", "card.project.captionBackground", "card.project.captionEffects", "card.project.positioning", "card.project.transitionSettings", "card.project.showVerseNumber"]) assert.match(videos, new RegExp(field.replaceAll(".", "\\.")));
+  assert.match(videos, /offlineWebCodecsRenderer\.render/);
+  assert.match(videos, /link\.download = output\.fileName/);
+  assert.doesNotMatch(videos, /editor\?project=\$\{encodeURIComponent\(card\.id\)\}&export=1/);
 });
 
 test("cloud persistence saves source, thumbnail, and project state but never a rendered final MP4", () => {

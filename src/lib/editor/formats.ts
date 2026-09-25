@@ -7,8 +7,9 @@ export type ProjectFormatDefinition = ProjectFormat & {
 
 export const PROJECT_FORMATS: Record<ProjectFormatPreset, ProjectFormatDefinition> = {
   vertical: { preset: "vertical", width: 1080, height: 1920, label: "9:16 vertical", aspectRatio: 9 / 16 },
-  landscape: { preset: "landscape", width: 1920, height: 1080, label: "16:9 landscape", aspectRatio: 16 / 9 },
   square: { preset: "square", width: 1080, height: 1080, label: "1:1 square", aspectRatio: 1 },
+  portrait: { preset: "portrait", width: 1080, height: 1350, label: "4:5 portrait", aspectRatio: 4 / 5 },
+  landscape: { preset: "landscape", width: 1920, height: 1080, label: "16:9 landscape", aspectRatio: 16 / 9 },
 };
 
 /** Converts a UI format definition into the exact durable editor/project shape. */
@@ -83,6 +84,11 @@ export const SAFE_AREA_GUIDES: Record<ProjectFormatPreset, readonly SafeAreaGuid
     { id: "center-horizontal", label: "center", kind: "center-line", axis: "horizontal" },
   ],
   square: [
+    { id: "title-action", label: "title / action safe", kind: "region", left: 0.08, top: 0.08, right: 0.08, bottom: 0.08, tone: "safe" },
+    { id: "center-vertical", label: "center", kind: "center-line", axis: "vertical" },
+    { id: "center-horizontal", label: "center", kind: "center-line", axis: "horizontal" },
+  ],
+  portrait: [
     { id: "title-action", label: "title / action safe", kind: "region", left: 0.08, top: 0.08, right: 0.08, bottom: 0.08, tone: "safe" },
     { id: "center-vertical", label: "center", kind: "center-line", axis: "vertical" },
     { id: "center-horizontal", label: "center", kind: "center-line", axis: "horizontal" },

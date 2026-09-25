@@ -37,6 +37,7 @@ import {
   createCaptionSegmentsFromVerseBoundaries,
   generatedCaptionBoundaryTrace,
   DEFAULT_CAPTION_BACKGROUND,
+  DEFAULT_CAPTION_EFFECTS,
   DEFAULT_CAPTION_PRESENTATION,
   DEFAULT_TRANSITION_SETTINGS,
   DEFAULT_TYPOGRAPHY,
@@ -56,6 +57,7 @@ import {
   updateCaptionPosition,
   updateCaptionSegmentTiming,
   type CaptionBackground,
+  type CaptionEffects,
   type CaptionPositioning,
   type CaptionSegment,
   type TransitionSettings,
@@ -180,11 +182,13 @@ type ExportState =
   | "error"
   | null;
 type AutomaticRecognitionRequest = { identity: string; file: File; sourceUrl: string | null; preparedAudio?: PreparedRecognitionAudio; restoredCompletedRecognition: boolean };
+const EDITOR_FORMAT_PRESETS: readonly ProjectFormatPreset[] = ["vertical", "square", "landscape"];
 type EditorProjectHistoryState = {
   segments: CaptionSegment[];
   mediaTrim: MediaTrim;
   typography: Typography;
   captionBackground: CaptionBackground;
+  captionEffects: CaptionEffects;
   projectFormat: ProjectFormat;
   positioning: CaptionPositioning;
   transitionSettings: TransitionSettings;
@@ -286,6 +290,7 @@ export default function Home() {
   const [captionBackground, setCaptionBackground] = useState<CaptionBackground>(
     DEFAULT_CAPTION_BACKGROUND,
   );
+  const [captionEffects, setCaptionEffects] = useState<CaptionEffects>(DEFAULT_CAPTION_EFFECTS);
   const [projectFormat, setProjectFormat] = useState<ProjectFormat>(
     DEFAULT_PROJECT_FORMAT,
   );
@@ -408,6 +413,7 @@ export default function Home() {
     mediaTrim,
     typography,
     captionBackground,
+    captionEffects,
     projectFormat,
     positioning,
     transitionSettings,
@@ -478,6 +484,7 @@ export default function Home() {
     mediaTrim,
     typography,
     captionBackground,
+    captionEffects,
     projectFormat,
     positioning,
     transitionSettings,
@@ -492,6 +499,7 @@ export default function Home() {
     setMediaTrim(next.mediaTrim);
     setTypography(next.typography);
     setCaptionBackground(next.captionBackground);
+    setCaptionEffects(next.captionEffects);
     setProjectFormat(next.projectFormat);
     setPositioning(next.positioning);
     setTransitionSettings(next.transitionSettings);
@@ -762,6 +770,7 @@ export default function Home() {
     },
     positioning,
     captionBackground,
+    captionEffects,
     typography,
     transitionSettings,
     playbackRate,
@@ -775,6 +784,7 @@ export default function Home() {
     segments,
     typography,
     captionBackground,
+    captionEffects,
     positioning,
     transitionSettings,
     showVerseNumber,
@@ -982,6 +992,7 @@ export default function Home() {
     setPositioning(resetCaptionPositioning(projectFormat));
     setTypography(resetTypographyDefaults());
     setCaptionBackground(DEFAULT_CAPTION_BACKGROUND);
+    setCaptionEffects(DEFAULT_CAPTION_EFFECTS);
     setTransitionSettings(DEFAULT_TRANSITION_SETTINGS);
     setPlaybackRate(DEFAULT_PLAYBACK_RATE);
     setShowVerseNumber(DEFAULT_CAPTION_PRESENTATION.showVerseNumber);
@@ -1031,6 +1042,7 @@ export default function Home() {
       },
       positioning,
       captionBackground,
+      captionEffects,
       typography,
       transitionSettings,
       playbackRate,
@@ -1151,7 +1163,7 @@ export default function Home() {
       const saved = { ...snapshot, title: row.name, createdAt: row.created_at, updatedAt: row.updated_at };
       cloudBaselineUpdatedAt.current = row.updated_at;
       cloudMedia.current = { sourcePath: row.source_media_path, thumbnailPath: row.thumbnail_path, thumbnailSize: row.thumbnail_size_bytes, sourceFingerprint: snapshot.sourceMedia?.fingerprint ?? null };
-      savedSignature.current = JSON.stringify({ projectName: row.name, sourceMedia: snapshot.sourceMedia, projectAssets: snapshot.projectAssets, activeMediaAssetId: snapshot.activeMediaAssetId, mediaTrim: snapshot.mediaTrim, format: snapshot.format, verseAlignments: snapshot.verseAlignments, captionSegments: snapshot.captionSegments, captions: snapshot.captions, positioning: snapshot.positioning, captionBackground: snapshot.captionBackground, typography: snapshot.typography, transitionSettings: snapshot.transitionSettings, playbackRate: snapshot.playbackRate, showVerseNumber: snapshot.showVerseNumber });
+      savedSignature.current = JSON.stringify({ projectName: row.name, sourceMedia: snapshot.sourceMedia, projectAssets: snapshot.projectAssets, activeMediaAssetId: snapshot.activeMediaAssetId, mediaTrim: snapshot.mediaTrim, format: snapshot.format, verseAlignments: snapshot.verseAlignments, captionSegments: snapshot.captionSegments, captions: snapshot.captions, positioning: snapshot.positioning, captionBackground: snapshot.captionBackground, captionEffects: snapshot.captionEffects, typography: snapshot.typography, transitionSettings: snapshot.transitionSettings, playbackRate: snapshot.playbackRate, showVerseNumber: snapshot.showVerseNumber });
       setCloudProjectId(row.id); setSavedProject(saved); setProjectName(row.name); setCloudSaveOpen(false); setCloudSaveStatus(null); setDirty(false);
       setCloudProjects(await listCloudProjects()); setErrorMessage(null);
     } catch (error) {
@@ -1186,6 +1198,7 @@ export default function Home() {
     setSegments(resolveCaptionTranslationSegments(project.captionSegments as CaptionSegment[]));
     setPositioning(project.positioning);
     setCaptionBackground(project.captionBackground);
+    setCaptionEffects(project.captionEffects);
     setTypography(project.typography);
     setTransitionSettings(project.transitionSettings);
     setPlaybackRate(resolvePlaybackRate(project.playbackRate));
@@ -1207,6 +1220,7 @@ export default function Home() {
       captions: project.captions,
       positioning: project.positioning,
       captionBackground: project.captionBackground,
+      captionEffects: project.captionEffects,
       typography: project.typography,
       transitionSettings: project.transitionSettings,
       playbackRate: project.playbackRate,
@@ -2657,6 +2671,7 @@ export default function Home() {
         segments,
         typography,
         captionBackground,
+        captionEffects,
         positioning,
         transitionSettings,
         showVerseNumber,
@@ -2784,6 +2799,7 @@ export default function Home() {
         splitBoundary={splitBoundary}
         typography={typography}
         captionBackground={captionBackground}
+        captionEffects={captionEffects}
         projectFormat={projectFormat}
         positioning={positioning}
         transitionSettings={transitionSettings}
@@ -3269,7 +3285,7 @@ export default function Home() {
                       }
                     >
                       {(
-                        Object.keys(PROJECT_FORMATS) as ProjectFormatPreset[]
+                        EDITOR_FORMAT_PRESETS
                       ).map((preset) => (
                         <option key={preset} value={preset}>
                           {PROJECT_FORMATS[preset].label}
@@ -3702,7 +3718,7 @@ export default function Home() {
                       }
                     >
                       {(
-                        Object.keys(PROJECT_FORMATS) as ProjectFormatPreset[]
+                        EDITOR_FORMAT_PRESETS
                       ).map((preset) => (
                         <option key={preset} value={preset}>
                           {PROJECT_FORMATS[preset].label}

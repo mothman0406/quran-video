@@ -5,6 +5,7 @@ import CaptionPreview from "@/components/caption-preview";
 import type { CaptionSegment } from "@/lib/editor/captions";
 import { getVerses } from "@/lib/quran/local";
 import type { SavedProject } from "@/lib/schemas/project";
+import { videoDimOpacity } from "@/lib/editor/presentation-settings";
 
 export default function ComposedVideoPreview({ project, sourceUrl, className = "" }: { project: SavedProject; sourceUrl: string; className?: string }) {
   const [currentTimeMs, setCurrentTimeMs] = useState(0);
@@ -18,6 +19,7 @@ export default function ComposedVideoPreview({ project, sourceUrl, className = "
     {project.sourceMedia?.hasVideo
       ? <video src={sourceUrl} controls playsInline preload="metadata" onTimeUpdate={(event) => setCurrentTimeMs(event.currentTarget.currentTime * 1_000)} onSeeked={(event) => setCurrentTimeMs(event.currentTarget.currentTime * 1_000)} />
       : <div className="composed-audio"><span aria-hidden="true">۝</span><strong>{project.title}</strong><audio src={sourceUrl} controls preload="metadata" onTimeUpdate={(event) => setCurrentTimeMs(event.currentTarget.currentTime * 1_000)} onSeeked={(event) => setCurrentTimeMs(event.currentTarget.currentTime * 1_000)} /></div>}
+    <div className="composed-video-dim" aria-hidden="true" style={{ backgroundColor: `rgba(0, 0, 0, ${videoDimOpacity(project.captionEffects)})` }} />
     <div className="composed-caption-layer" aria-hidden="true">
       <CaptionPreview
         currentTimeMs={currentTimeMs}

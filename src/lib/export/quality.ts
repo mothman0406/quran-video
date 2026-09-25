@@ -24,9 +24,9 @@ export function exportQualityPreset(quality: ExportQuality): ExportQualityPreset
 }
 
 const EXPORT_DIMENSIONS: Record<ExportQuality, Record<ProjectFormatPreset, readonly [number, number]>> = {
-  basic: { vertical: [720, 1280], landscape: [1280, 720], square: [720, 720] },
-  standard: { vertical: [1080, 1920], landscape: [1920, 1080], square: [1080, 1080] },
-  ultra: { vertical: [2160, 3840], landscape: [3840, 2160], square: [2160, 2160] },
+  basic: { vertical: [720, 1280], square: [720, 720], portrait: [720, 900], landscape: [1280, 720] },
+  standard: { vertical: [1080, 1920], square: [1080, 1080], portrait: [1080, 1350], landscape: [1920, 1080] },
+  ultra: { vertical: [2160, 3840], square: [2160, 2160], portrait: [2160, 2700], landscape: [3840, 2160] },
 };
 
 /** The one quality ladder used by the editor, preflight, and local renderer. */

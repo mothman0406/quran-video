@@ -19,6 +19,7 @@ import {
 import { quranFontDefinitions } from "../quran/content.ts";
 import { mediabunnyVideoTransform, sourceVideoFitForMediabunny } from "../editor/formats.ts";
 import { drawExportCaptions } from "./caption-canvas.ts";
+import { videoDimOpacity } from "../editor/presentation-settings.ts";
 import { clampMediaTrim, exportOutputDurationMs, exportOutputTimeToSourceTime } from "../editor/media.ts";
 import { StreamingWsola } from "./audio-time-stretch.ts";
 import { audioOutputIsValid, selectOutputProfile } from "./output.ts";
@@ -182,6 +183,11 @@ export const offlineWebCodecsRenderer: LocalVideoRenderer = {
         try {
           context.clearRect(0, 0, canvas.width, canvas.height);
           if (sample) sample.drawWithFit(context, { fit: sourceVideoFitForMediabunny() });
+          const dimOpacity = videoDimOpacity(request.captionEffects);
+          if (dimOpacity > 0) {
+            context.fillStyle = `rgba(0,0,0,${dimOpacity})`;
+            context.fillRect(0, 0, canvas.width, canvas.height);
+          }
           drawExportCaptions(context, request, exportOutputTimeToSourceTime(frame.timestamp * 1_000, trim, Math.round(fullSourceDuration * 1_000), request.playbackRate), arabicFont);
           report("rendering", renderedFrameCount / timeline.length);
           report("encoding", renderedFrameCount / timeline.length);
