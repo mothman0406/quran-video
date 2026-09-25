@@ -46,6 +46,7 @@ export class MediaCompatibilityError extends Error {
 
 export type MediaInspection = {
   readable: boolean;
+  container?: string;
   kind: MediaKind;
   hasVideo: boolean;
   hasAudio: boolean;
@@ -57,6 +58,8 @@ export type MediaInspection = {
   videoCodec?: string | null;
   audioCodec?: string | null;
   audioStreamCount?: number;
+  selectedAudioTrackId?: number;
+  selectedAudioTrackNumber?: number;
   audioSampleRate?: number;
   audioChannels?: number;
 };

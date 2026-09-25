@@ -157,11 +157,9 @@ export default function QuickCreate() {
       const recognitionPromise = prepareRecognitionAudio(next, abort.signal, (event) => publishPreparation(job, event));
       const [editorOutcome, recognitionOutcome] = await Promise.allSettled([editorPromise, recognitionPromise]);
       if (editorOutcome.status === "rejected") {
-        abort.abort();
         throw editorOutcome.reason;
       }
       if (recognitionOutcome.status === "rejected") {
-        abort.abort();
         await editorOutcome.value.dispose();
         throw recognitionOutcome.reason;
       }
@@ -275,7 +273,7 @@ export default function QuickCreate() {
   }
 
   const kind = selected ? mediaKindForFile(selected) : null;
-  const status = preparationLabel(progress, Boolean(prepared));
+  const status = error ? "Preparation failed" : preparationLabel(progress, Boolean(prepared));
   const replacementNotice = Boolean(session && entitlements.plan === "free" && entitlements.cloudProjectLimit !== null && cloudCount >= entitlements.cloudProjectLimit);
   const sampleWords = SAMPLE_VERSE.arabic.uthmani.split(/\s+/u);
   const highlightedWord = resolveWordHighlightPresentation({ baseTextColor: typography.textColor, highlightColor: typography.wordHighlightColor, intensity: typography.wordHighlightIntensity, isHighlighted: true });
@@ -344,7 +342,7 @@ export default function QuickCreate() {
           </fieldset>}
         </div>
         {replacementNotice && <p className="quick-create-fifo">Free keeps your 3 most recent saved videos. Generating this will replace your oldest saved video.</p>}
-        {error && <div className="quick-create-error" role="alert"><strong>We couldn’t prepare this recording.</strong><p>{error}</p><span>Choose another recording</span></div>}
+        {error && <div className="quick-create-error" role="alert"><strong>We couldn’t prepare this recording.</strong><p>{error}</p><div><button type="button" onClick={() => void prepare(selected ?? undefined)}>Retry</button><span>or choose another recording</span></div></div>}
         <button className="quick-create-generate" type="button" disabled={!prepared} onClick={generate}>{prepared ? "Generate captions" : selected ? "Preparing recording…" : "Choose a recording"}</button>
         <p className="quick-create-local-note">Generation continues locally while this tab stays open. A finished MP4 is rendered only when you download.</p>
       </aside>

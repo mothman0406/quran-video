@@ -7,6 +7,7 @@ import { compatibilityErrorFromUnknown, MAX_RECOGNITION_PCM_BYTES, MediaCompatib
 import type { MediaKind } from "../editor/media.ts";
 import type { DecodedAudioChannels } from "./local-audio-decode.ts";
 import { mediaDebug, mediaDebugEnabled, visibleFileExtension } from "./media-debug.ts";
+import { runDeterministicRecognitionAudioRouter, withMediaPreparationTimeout } from "./media-preparation-router.ts";
 
 export type PreparedEditorMedia = {
   /** Immutable authoritative source for recognition, export, save, and retry. */
@@ -25,7 +26,7 @@ export type PreparedEditorMedia = {
 /** The only PCM representation passed into Quran identification and timing. */
 export type PreparedRecognitionAudio = {
   pcm: DecodedAudioChannels;
-  decodePath: "native" | "ffmpeg";
+  decodePath: "webcodecs" | "ffmpeg";
   reason: "native-safe" | "native-decode-unavailable" | "native-pcm-unusable" | "media-audio-fallback";
   inspection: MediaInspection;
 };
@@ -76,19 +77,61 @@ function abortError() { return new DOMException("Media preparation cancelled.", 
 function assertNotAborted(signal?: AbortSignal) { if (signal?.aborted) throw abortError(); }
 function isAbort(error: unknown): boolean { return error instanceof DOMException && error.name === "AbortError"; }
 
-async function browserCanPlay(file: File, mimeType: string, hasVideo: boolean): Promise<boolean> {
+async function browserCanPlay(file: File, mimeType: string, hasVideo: boolean, signal?: AbortSignal): Promise<boolean> {
   if (!hasVideo) return true;
   const element = document.createElement("video");
   const candidate = mimeType || file.type;
-  // An empty answer is deliberately not treated as support: the local route will probe before expensive work.
-  return Boolean(candidate && element.canPlayType(candidate));
+  if (candidate && element.canPlayType(candidate)) return true;
+
+  // MIME support answers are hints and are notably conservative for some
+  // playable ISOBMFF/QuickTime combinations. Probe the actual source without
+  // decoding the whole recording or changing the authoritative File.
+  const objectUrl = URL.createObjectURL(file);
+  element.preload = "metadata";
+  element.muted = true;
+  try {
+    return await new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      const timeout = window.setTimeout(() => finish(false), 15_000);
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+        element.onloadeddata = null;
+        element.onerror = null;
+      };
+      const finish = (playable: boolean) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(playable);
+      };
+      const onAbort = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(abortError());
+      };
+      element.onloadeddata = () => finish(element.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA);
+      element.onerror = () => finish(false);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      element.src = objectUrl;
+      element.load();
+    });
+  } finally {
+    element.removeAttribute("src");
+    element.load();
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
-async function inspectTracks(file: File): Promise<MediaInspection> {
+async function inspectTracks(file: File, signal?: AbortSignal): Promise<MediaInspection> {
   const input = new Input({ source: new BlobSource(file), formats: ALL_FORMATS });
+  const abortInput = () => input.dispose();
+  signal?.addEventListener("abort", abortInput, { once: true });
   try {
     if (!await input.canRead()) throw new MediaCompatibilityError("unreadable");
-    const [audioTracks, audioTrack, videoTrack, duration, mimeType] = await Promise.all([
+    const [format, audioTracks, audioTrack, videoTrack, duration, mimeType] = await Promise.all([
+      input.getFormat(),
       input.getAudioTracks(),
       input.getPrimaryAudioTrack(),
       input.getPrimaryVideoTrack(),
@@ -99,7 +142,7 @@ async function inspectTracks(file: File): Promise<MediaInspection> {
       audioTrack?.getCodec() ?? null,
       videoTrack?.getCodec() ?? null,
       audioTrack?.canDecode() ?? false,
-      browserCanPlay(file, mimeType, Boolean(videoTrack)),
+      browserCanPlay(file, mimeType, Boolean(videoTrack), signal),
       videoTrack?.getCodedWidth(),
       videoTrack?.getCodedHeight(),
       audioTrack?.getSampleRate(),
@@ -108,6 +151,7 @@ async function inspectTracks(file: File): Promise<MediaInspection> {
     const kind = videoTrack ? "video" : "audio";
     return {
       readable: true,
+      container: format.name,
       kind,
       hasVideo: Boolean(videoTrack),
       hasAudio: Boolean(audioTrack),
@@ -119,6 +163,8 @@ async function inspectTracks(file: File): Promise<MediaInspection> {
       videoCodec,
       audioCodec,
       audioStreamCount: audioTracks.length,
+      selectedAudioTrackId: audioTrack?.id,
+      selectedAudioTrackNumber: audioTrack?.number,
       audioSampleRate,
       audioChannels,
     };
@@ -126,15 +172,26 @@ async function inspectTracks(file: File): Promise<MediaInspection> {
     if (error instanceof MediaCompatibilityError) throw error;
     throw compatibilityErrorFromUnknown(error, "unreadable");
   } finally {
+    signal?.removeEventListener("abort", abortInput);
     input.dispose();
   }
 }
 
+const inspectionPromises = new WeakMap<File, Promise<MediaInspection>>();
+
 /** Fast, lazy local preflight. It reads container metadata before FFmpeg work. */
 export async function inspectLocalMedia(file: File): Promise<MediaInspection> {
-  const inspection = await inspectTracks(file);
+  let pending = inspectionPromises.get(file);
+  if (!pending) {
+    const startedAt = performance.now();
+    pending = withMediaPreparationTimeout("Media inspection", 30_000, (signal) => inspectTracks(file, signal));
+    inspectionPromises.set(file, pending);
+    void pending.catch(() => inspectionPromises.delete(file));
+    void pending.then(() => mediaDebug("inspection-complete", { elapsedMilliseconds: Math.round(performance.now() - startedAt) }));
+  }
+  const inspection = await pending;
   mediaDebug("source-inspection", {
-    container: visibleFileExtension(file.name), fileSize: file.size,
+    container: inspection.container ?? visibleFileExtension(file.name), fileSize: file.size,
     browserPlayback: inspection.browserPlayback, nativeRecognitionAudio: inspection.nativeRecognitionAudio,
     audioStreams: inspection.audioStreamCount ?? 0, audioCodec: inspection.audioCodec ?? null,
     sourceSampleRate: inspection.audioSampleRate ?? null, channels: inspection.audioChannels ?? null,
@@ -145,7 +202,7 @@ export async function inspectLocalMedia(file: File): Promise<MediaInspection> {
 
 export function selectRecognitionAudioPath(inspection: MediaInspection): Pick<PreparedRecognitionAudio, "decodePath" | "reason"> {
   return inspection.nativeRecognitionAudio
-    ? { decodePath: "native", reason: "native-safe" }
+    ? { decodePath: "webcodecs", reason: "native-safe" }
     : { decodePath: "ffmpeg", reason: "media-audio-fallback" };
 }
 
@@ -373,9 +430,13 @@ async function runFfmpeg(
   }
 }
 
-async function probeFfmpeg(runtime: FfmpegRuntime, inputName: string, stream: "audio" | "media", signal?: AbortSignal) {
+export function selectedAudioMap(inspection: MediaInspection): string {
+  return `0:a:${Math.max(0, (inspection.selectedAudioTrackNumber ?? 1) - 1)}`;
+}
+
+async function probeFfmpeg(runtime: FfmpegRuntime, inputName: string, stream: "audio" | "media", inspection: MediaInspection, signal?: AbortSignal) {
   const args = stream === "audio"
-    ? ["-i", inputName, "-map", "0:a:0", "-vn", "-t", "1", "-f", "null", "-"]
+    ? ["-i", inputName, "-map", selectedAudioMap(inspection), "-vn", "-t", "1", "-f", "null", "-"]
     : ["-t", "1", "-i", inputName, "-map", "0:v:0", "-map", "0:a?", "-f", "null", "-"];
   await runFfmpeg(runtime, args, "audioDecodeFailed", signal);
   mediaDebug("probe", { stream, containerDemux: true, audioDecode: stream === "audio" ? true : undefined });
@@ -423,7 +484,7 @@ export async function prepareLocalMedia(file: File, signal?: AbortSignal, onPrep
       mountPoint = mounted.mountPoint;
       const { inputName } = mounted;
       onPreparation?.({ stage: "inspecting-recording" });
-      await probeFfmpeg(runtime, inputName, audioOnly ? "audio" : "media", signal);
+      await probeFfmpeg(runtime, inputName, audioOnly ? "audio" : "media", inspection, signal);
       assertNotAborted(signal);
       const command = audioOnly
         ? ["-i", inputName, "-map", "0:a:0", "-c:a", "aac", "-movflags", "+faststart", outputName]
@@ -527,8 +588,7 @@ async function reportRecognitionPreparation(
  * user selected. Every recognition-audio compatibility fallback shares this
  * sole FFmpeg path and its UMD runtime lifecycle.
  */
-export async function extractRecognitionPcm(file: File, signal?: AbortSignal, onPreparation?: (event: LocalMediaPreparationEvent) => void): Promise<DecodedAudioChannels> {
-  const inspection = await inspectLocalMedia(file);
+async function extractRecognitionPcmWithInspection(file: File, inspection: MediaInspection, signal?: AbortSignal, onPreparation?: (event: LocalMediaPreparationEvent) => void): Promise<DecodedAudioChannels> {
   // This is an explicitly requested alternate representation, not a second
   // compatibility-routing decision. Its safety envelope is the audio fallback
   // envelope, regardless of whether the native decoder also says it can play.
@@ -547,13 +607,13 @@ export async function extractRecognitionPcm(file: File, signal?: AbortSignal, on
       mountPoint = mounted.mountPoint;
       const { inputName } = mounted;
       onPreparation?.({ stage: "inspecting-recording" });
-      await probeFfmpeg(runtime, inputName, "audio", signal);
+      await probeFfmpeg(runtime, inputName, "audio", inspection, signal);
       const progressStage = "preparing-audio" as const;
       let lastDebugPercentage = -1;
       mediaDebug("conversion-start", { route, sourceDurationMs: inspection.durationMs ?? null });
       onPreparation?.({ stage: progressStage, sourceDurationMs: inspection.durationMs });
       await runFfmpeg(runtime, [
-        "-i", inputName, "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-acodec", "pcm_f32le", outputName,
+        "-i", inputName, "-map", selectedAudioMap(inspection), "-vn", "-ac", "1", "-ar", "16000", "-f", "f32le", "-acodec", "pcm_f32le", outputName,
       ], "pcmExtractionFailed", signal, (processedTimeMs) => {
         onPreparation?.({ stage: progressStage, processedTimeMs, sourceDurationMs: inspection.durationMs });
         const percentage = inspection.durationMs && inspection.durationMs > 0 ? Math.min(100, Math.max(0, Math.round((processedTimeMs / inspection.durationMs) * 100))) : null;
@@ -595,6 +655,11 @@ export async function extractRecognitionPcm(file: File, signal?: AbortSignal, on
   });
 }
 
+export async function extractRecognitionPcm(file: File, signal?: AbortSignal, onPreparation?: (event: LocalMediaPreparationEvent) => void): Promise<DecodedAudioChannels> {
+  const inspection = await inspectLocalMedia(file);
+  return extractRecognitionPcmWithInspection(file, inspection, signal, onPreparation);
+}
+
 /**
  * Select and create one canonical PCM representation before Quran recognition.
  * Decoder choice is based solely on inspected media and native decoder
@@ -609,32 +674,46 @@ export async function prepareRecognitionAudio(
   const inspection = await inspectLocalMedia(file);
   assertNotAborted(signal);
   const selection = selectRecognitionAudioPath(inspection);
-  if (selection.decodePath === "ffmpeg") {
-    const pcm = await extractRecognitionPcm(file, signal, onPreparation);
-    await reportRecognitionPreparation(file, inspection, "ffmpeg", selection.reason, pcm);
-    return { pcm, decodePath: "ffmpeg", reason: selection.reason, inspection };
-  }
-  const { canonicalizeNativeRecognitionPcm, decodeAudioChannels } = await import("./local-audio-decode.ts");
-  let decoded: DecodedAudioChannels;
-  try {
-    decoded = await decodeAudioChannels(file);
-  } catch {
-    assertNotAborted(signal);
-    const pcm = await extractRecognitionPcm(file, signal, onPreparation);
-    await reportRecognitionPreparation(file, inspection, "ffmpeg", "native-decode-unavailable", pcm);
-    return { pcm, decodePath: "ffmpeg", reason: "native-decode-unavailable", inspection };
-  }
-  try {
-    const pcm = canonicalizeNativeRecognitionPcm(decoded);
-    if (!isUsableCanonicalRecognitionPcm(pcm)) throw new Error("Native canonical PCM is unusable.");
-    await reportRecognitionPreparation(file, inspection, "native", "native-safe", pcm);
-    return { pcm, decodePath: "native", reason: "native-safe", inspection };
-  } catch {
-    assertNotAborted(signal);
-    const pcm = await extractRecognitionPcm(file, signal, onPreparation);
-    await reportRecognitionPreparation(file, inspection, "ffmpeg", "native-pcm-unusable", pcm);
-    return { pcm, decodePath: "ffmpeg", reason: "native-pcm-unusable", inspection };
-  }
+  if (!inspection.hasAudio || inspection.selectedAudioTrackId === undefined || !inspection.durationMs) throw new MediaCompatibilityError(inspection.hasAudio ? "audioDecodeFailed" : "noAudio");
+  if (recognitionPcmBytes(inspection.durationMs) > MAX_RECOGNITION_PCM_BYTES) throw new MediaCompatibilityError("recognitionAudioTooLarge");
+  let preferredFailed = false;
+  const startedAt = performance.now();
+  const routed = await runDeterministicRecognitionAudioRouter({
+    preferredSupported: selection.decodePath === "webcodecs",
+    signal,
+    onState: (state) => {
+      mediaDebug("recognition-preparation-state", { state });
+      if (state === "preparing-audio") onPreparation?.({ stage: "preparing-audio", sourceDurationMs: inspection.durationMs });
+      if (state === "compatibility-fallback") onPreparation?.({ stage: "preparing-converter" });
+    },
+    preparePreferred: async () => {
+      const { decodeDemuxedAudioToCanonicalPcm } = await import("./local-audio-decode.ts");
+      try {
+        const pcm = await withMediaPreparationTimeout("Browser audio decoding", 120_000, (timeoutSignal) => decodeDemuxedAudioToCanonicalPcm(file, {
+          trackId: inspection.selectedAudioTrackId!, durationMs: inspection.durationMs!, signal: timeoutSignal,
+          onProgress: (processedTimeMs) => onPreparation?.({ stage: "preparing-audio", processedTimeMs, sourceDurationMs: inspection.durationMs }),
+          onMetrics: (metrics) => mediaDebug("browser-audio-preparation-timing", metrics),
+        }), signal);
+        if (!isUsableCanonicalRecognitionPcm(pcm)) throw new Error("Browser canonical PCM is unusable.");
+        onPreparation?.({ stage: "preparing-audio", sourceDurationMs: inspection.durationMs, complete: true });
+        return pcm;
+      } catch (error) {
+        preferredFailed = true;
+        throw error;
+      }
+    },
+    prepareFallback: () => withMediaPreparationTimeout("Compatibility audio decoding", 15 * 60_000, (timeoutSignal) => extractRecognitionPcmWithInspection(file, inspection, timeoutSignal, onPreparation), signal),
+  });
+  const reason = routed.route === "webcodecs"
+    ? "native-safe"
+    : selection.decodePath === "ffmpeg"
+      ? "media-audio-fallback"
+      : preferredFailed
+        ? "native-decode-unavailable"
+        : "native-pcm-unusable";
+  await reportRecognitionPreparation(file, inspection, routed.route, reason, routed.value);
+  mediaDebug("recognition-preparation-complete", { path: routed.route, fallbackUsed: routed.fallbackUsed, elapsedMilliseconds: Math.round(performance.now() - startedAt) });
+  return { pcm: routed.value, decodePath: routed.route, reason, inspection };
 }
 
 export function releaseLocalMediaRuntime() {

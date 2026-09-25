@@ -17,6 +17,7 @@
     "benchmark:mediabunny-transmux": "node --experimental-strip-types scripts/benchmark-mediabunny-transmux.ts",
     "benchmark:mediabunny-transmux:chrome": "node --experimental-strip-types scripts/validate-mediabunny-transmux-chrome.ts",
     "regression:production-transmux:chrome": "node --experimental-strip-types scripts/validate-production-transmux-chrome.ts",
+    "regression:media-preparation:chrome": "node --experimental-strip-types scripts/validate-media-preparation-chrome.ts",
     "regression:quran": "node --experimental-strip-types tools/regression/run-quran.ts",
     "regression:quran-id": "node --experimental-strip-types tools/regression/run-quran-id.ts",
     "calibration:ctc": "node --experimental-strip-types tools/regression/capture-ctc-calibration.ts",
