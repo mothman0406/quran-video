@@ -4,7 +4,7 @@ import type { QuranVerseContent } from "../quran/content.ts";
 import type { VerseAlignment } from "./recognition.ts";
 import type { VerseBoundary } from "../recognition/core.ts";
 import type { z } from "zod";
-import type { CaptionBackgroundSchema, CaptionPositioningSchema, CaptionStyleOverridesSchema, TransitionSettingsSchema, TypographySchema } from "../schemas/project.ts";
+import type { CaptionBackgroundSchema, CaptionEffectsSchema, CaptionPositioningSchema, CaptionStyleOverridesSchema, TransitionSettingsSchema, TypographySchema } from "../schemas/project.ts";
 import type { ProjectFormat } from "../schemas/project.ts";
 import { SAHEEH_PHRASE_BOUNDARIES } from "./translation-segmentation.ts";
 
@@ -12,6 +12,7 @@ export type Typography = z.infer<typeof TypographySchema>;
 export type CaptionBackground = z.infer<typeof CaptionBackgroundSchema>;
 export type CaptionPositioning = z.infer<typeof CaptionPositioningSchema>;
 export type TransitionSettings = z.infer<typeof TransitionSettingsSchema>;
+export type CaptionEffects = z.infer<typeof CaptionEffectsSchema>;
 export type CaptionStyleOverrides = z.infer<typeof CaptionStyleOverridesSchema>;
 export type CaptionPresentationSettings = { showVerseNumber: boolean };
 
@@ -227,6 +228,7 @@ export const DEFAULT_CAPTION_POSITIONING_BY_FORMAT: Record<ProjectFormat["preset
   vertical: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING },
   landscape: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING, y: 0.5, translationY: 0.66 },
   square: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING, y: 0.52, translationY: 0.66 },
+  portrait: { ...DEFAULT_VERTICAL_CAPTION_POSITIONING, y: 0.58, translationY: 0.72 },
 };
 
 export const DEFAULT_TYPOGRAPHY: Typography = {
@@ -236,6 +238,8 @@ export const DEFAULT_TYPOGRAPHY: Typography = {
   transliterationFontFamily: "Arial, Helvetica, sans-serif",
   arabicFontSize: 38,
   translationFontSize: 15,
+  translationFontWeight: "400",
+  translationItalic: false,
   transliterationFontSize: 14,
   textColor: "#ffffff",
   wordHighlightMode: "read-so-far",
@@ -279,6 +283,10 @@ export const DEFAULT_TRANSITION_SETTINGS: TransitionSettings = {
   fadeOutMs: 225,
   blurFadeEnabled: false,
   blurFadeMaxPx: 12,
+};
+
+export const DEFAULT_CAPTION_EFFECTS: CaptionEffects = {
+  videoDimLevel: 0,
 };
 
 export function resetTypography(): Typography {

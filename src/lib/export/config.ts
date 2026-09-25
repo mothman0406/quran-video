@@ -1,4 +1,4 @@
-import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "../editor/captions.ts";
+import { DEFAULT_CAPTION_EFFECTS, type CaptionBackground, type CaptionEffects, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "../editor/captions.ts";
 import type { ProjectFormat } from "../schemas/project.ts";
 import type { LocalExportConfiguration } from "./types.ts";
 import type { MediaTrim } from "../editor/media.ts";
@@ -10,6 +10,7 @@ export function createLocalExportConfiguration(input: {
   segments: readonly CaptionSegment[];
   typography: Typography;
   captionBackground: CaptionBackground;
+  captionEffects?: CaptionEffects;
   positioning: CaptionPositioning;
   transitionSettings: TransitionSettings;
   showVerseNumber: boolean;
@@ -24,7 +25,7 @@ export function createLocalExportConfiguration(input: {
   return {
     format: exportFormatForQuality(input.format, quality), quality,
     segments: input.segments.map((segment) => ({ ...segment, verseKeys: [...segment.verseKeys], ...(segment.wordTimings ? { wordTimings: segment.wordTimings.map((timing) => ({ ...timing })) } : {}), ...(segment.styleOverrides ? { styleOverrides: JSON.parse(JSON.stringify(segment.styleOverrides)) } : {}), timingEvidence: { ...segment.timingEvidence, start: { ...segment.timingEvidence.start }, end: { ...segment.timingEvidence.end } } })),
-    typography: { ...input.typography }, captionBackground: { ...input.captionBackground }, positioning: { ...input.positioning }, transitionSettings: { ...input.transitionSettings }, showVerseNumber: input.showVerseNumber,
+    typography: { ...input.typography }, captionBackground: { ...input.captionBackground }, captionEffects: { ...(input.captionEffects ?? DEFAULT_CAPTION_EFFECTS) }, positioning: { ...input.positioning }, transitionSettings: { ...input.transitionSettings }, showVerseNumber: input.showVerseNumber,
     watermarkRequired: input.watermarkRequired,
     playbackRate: resolvePlaybackRate(input.playbackRate), ...(input.mediaTrim ? { mediaTrim: { ...input.mediaTrim } } : {}),
   };

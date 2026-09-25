@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY } from "../src/lib/editor/captions.ts";
-import { DEFAULT_PROJECT_FORMAT } from "../src/lib/editor/formats.ts";
+import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_EFFECTS, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY } from "../src/lib/editor/captions.ts";
+import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS } from "../src/lib/editor/formats.ts";
 import { createMemoryProjectRepository, loadSavedProject, serializeSavedProject, sourceFingerprint, validateSavedProject, verifySourceFile } from "../src/lib/project-storage.ts";
 import type { SavedProject } from "../src/lib/schemas/project.ts";
 import { projectAssetFromMediaSource, projectTextAssets } from "../src/lib/editor/project-assets.ts";
 import { mediaSourceFromFile } from "../src/lib/editor/media.ts";
 
 function project(overrides: Partial<SavedProject> = {}): SavedProject {
-  return { version: 2, id: "project-1", title: "Evening recitation", sourceMedia: { kind: "video", hasVideo: true, hasAudio: true, fileName: "recitation.mp4", fileSize: 42, mimeType: "video/mp4", durationMs: 12_000, fingerprint: "recitation.mp4:42:video/mp4" }, mediaTrim: { startMs: 0, endMs: 12_000 }, format: DEFAULT_PROJECT_FORMAT, verseAlignments: [], captionSegments: [], captions: { arabic: true, translation: true, transliteration: false, translationEdition: "english_saheeh" }, positioning: DEFAULT_CAPTION_POSITIONING, captionBackground: DEFAULT_CAPTION_BACKGROUND, typography: DEFAULT_TYPOGRAPHY, transitionSettings: DEFAULT_TRANSITION_SETTINGS, showVerseNumber: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", ...overrides, playbackRate: overrides.playbackRate ?? 1, projectAssets: overrides.projectAssets ?? [], activeMediaAssetId: overrides.activeMediaAssetId ?? null };
+  return { version: 2, id: "project-1", title: "Evening recitation", sourceMedia: { kind: "video", hasVideo: true, hasAudio: true, fileName: "recitation.mp4", fileSize: 42, mimeType: "video/mp4", durationMs: 12_000, fingerprint: "recitation.mp4:42:video/mp4" }, mediaTrim: { startMs: 0, endMs: 12_000 }, format: DEFAULT_PROJECT_FORMAT, verseAlignments: [], captionSegments: [], captions: { arabic: true, translation: true, transliteration: false, translationEdition: "english_saheeh" }, positioning: DEFAULT_CAPTION_POSITIONING, captionBackground: DEFAULT_CAPTION_BACKGROUND, typography: DEFAULT_TYPOGRAPHY, transitionSettings: DEFAULT_TRANSITION_SETTINGS, showVerseNumber: false, createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", ...overrides, playbackRate: overrides.playbackRate ?? 1, captionEffects: overrides.captionEffects ?? DEFAULT_CAPTION_EFFECTS, projectAssets: overrides.projectAssets ?? [], activeMediaAssetId: overrides.activeMediaAssetId ?? null };
 }
 
 test("save creates metadata, updates by stable id, and stores no media bytes", async () => {
@@ -123,6 +123,30 @@ test("highlight setting migration preserves explicit choices while missing legac
   assert.equal(loadSavedProject(project({ typography: legacyTypography as SavedProject["typography"] })).typography.wordHighlightMode, "read-so-far");
   assert.equal(loadSavedProject(project({ typography: { ...DEFAULT_TYPOGRAPHY, wordHighlightMode: "off" } })).typography.wordHighlightMode, "off");
   assert.equal(loadSavedProject(project({ typography: { ...DEFAULT_TYPOGRAPHY, wordHighlightMode: "current-word" } })).typography.wordHighlightMode, "current-word");
+});
+
+test("pre-generation presentation survives persistence and legacy projects receive safe new defaults", () => {
+  const selected = project({
+    format: PROJECT_FORMATS.portrait,
+    positioning: { ...DEFAULT_CAPTION_POSITIONING, y: 0.61 },
+    typography: { ...DEFAULT_TYPOGRAPHY, arabicFontSize: 51, textColor: "#f3ead7", translationFontFamily: "Georgia, serif", translationFontSize: 18, translationFontWeight: "600", translationItalic: true, translationTextColor: "#dce8ff", translationSpacingBelowArabic: 19, arabicOutlineEnabled: true, arabicOutlineWidth: 2, arabicOutlineColor: "#14221a", arabicShadowBlur: 11 },
+    transitionSettings: { ...DEFAULT_TRANSITION_SETTINGS, fadeInMs: 350, fadeOutMs: 350 },
+    captionEffects: { videoDimLevel: 28 },
+    showVerseNumber: true,
+  });
+  const restored = loadSavedProject(serializeSavedProject(selected));
+  assert.deepEqual(restored.format, { preset: "portrait", width: 1080, height: 1350 });
+  assert.deepEqual(restored.typography, selected.typography);
+  assert.deepEqual(restored.captionEffects, { videoDimLevel: 28 });
+  assert.deepEqual(restored.transitionSettings, selected.transitionSettings);
+  assert.equal(restored.positioning.y, 0.61);
+  assert.equal(restored.showVerseNumber, true);
+
+  const legacy = { ...project(), captionEffects: undefined, typography: { ...DEFAULT_TYPOGRAPHY, translationFontWeight: undefined, translationItalic: undefined } } as unknown as SavedProject;
+  const migrated = loadSavedProject(legacy);
+  assert.deepEqual(migrated.captionEffects, DEFAULT_CAPTION_EFFECTS);
+  assert.equal(migrated.typography.translationFontWeight, "400");
+  assert.equal(migrated.typography.translationItalic, false);
 });
 
 test("source verification accepts matching metadata and reports mismatch without attaching it silently", () => {

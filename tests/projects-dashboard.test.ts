@@ -16,10 +16,11 @@ test("videos library combines guest-local and authenticated private records with
 test("ready video cards expose composed watch, advanced edit, and on-demand download", () => {
   assert.match(videos, /<ComposedVideoPreview/);
   assert.match(videos, /\/editor\?project=/);
-  assert.match(videos, /&export=1/);
+  assert.match(videos, /offlineWebCodecsRenderer\.render/);
+  assert.match(videos, /captionEffects: card\.project\.captionEffects/);
   assert.match(videos, /"Watch"/);
   assert.match(videos, />Edit<\/Link>/);
-  assert.match(videos, />Download<\/Link>/);
+  assert.match(videos, /: "Download"/);
 });
 
 test("legacy projects redirect compatibly and undetected items remain recoverable", () => {

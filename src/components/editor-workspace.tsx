@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Maximize2, Minimize2, Pause, Play, Upload, Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent, type SyntheticEvent } from "react";
-import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "@/lib/editor/captions";
+import type { CaptionBackground, CaptionEffects, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "@/lib/editor/captions";
 import type { ProjectAsset, ProjectFormat, ProjectFormatPreset } from "@/lib/schemas/project";
 import { EXPORT_QUALITY_PRESETS, exportQualityPreset, type ExportQuality } from "@/lib/export/quality";
 import { canExportQuality, watermarkRequiredForExport, type AccountEntitlements } from "@/lib/entitlements";
@@ -35,10 +35,12 @@ import type { CaptionCanvasBounds, PlatformCollision, SocialPlatformId } from "@
 import { WORKSPACE_LAYOUT_DEFAULTS, clampWorkspacePanelWidth, clampWorkspaceTimelineHeight } from "@/lib/editor/workspace-layout";
 import { canFullscreenComposedPreview, isComposedPreviewFullscreen, toggleComposedPreviewFullscreen } from "@/lib/editor/fullscreen";
 import type { MediaPlaybackClock } from "@/lib/editor/playback-clock";
+import { videoDimOpacity } from "@/lib/editor/presentation-settings";
 
 type VideoMetadata = { durationSeconds: number; width: number; height: number };
 type Stage = "idle" | "preparing" | "detecting-speech" | "loading-model" | "transcribing" | "matching" | "captions" | "complete" | "error";
 type ExportState = { phase: ExportPhase; fraction: number; elapsedSeconds: number; estimatedRemainingSeconds?: number } | "complete" | "error" | null;
+const EDITOR_FORMAT_PRESETS: readonly ProjectFormatPreset[] = ["vertical", "square", "landscape"];
 
 type EditorWorkspaceProps = {
   videoFile: File | null;
@@ -70,6 +72,7 @@ type EditorWorkspaceProps = {
   splitBoundary: number;
   typography: Typography;
   captionBackground: CaptionBackground;
+  captionEffects: CaptionEffects;
   projectFormat: ProjectFormat;
   positioning: CaptionPositioning;
   transitionSettings: TransitionSettings;
@@ -277,7 +280,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
   const {
     videoFile, videoUrl, videoMetadata, mediaSource, projectAssets, activeMediaAssetId, mediaTrim, videoRef, previewRef, timelineRef, stage, progress, support,
     alignments, content, currentTimeMs, playbackClock, segments, selectedSegmentId, selectedSegment, selectedIndex,
-    selectedObject, rightInspectorMode, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, projectFormat, positioning,
+    selectedObject, rightInspectorMode, styleScope, inspectorStyle, selectedHasStyleOverrides, splitBoundary, typography, captionBackground, captionEffects, projectFormat, positioning,
     transitionSettings, playbackRate, showVerseNumber, showSafeArea, platformPreview, platformCollisions, projectName, dirty, session, accountEntitlements, onRefreshEntitlements, canUndo, canRedo, busy, localStyles, localStyleName, authOpen, availableBuiltInStyles, availableQuranStyles,
     exportOpen, exportPreflight, exportQuality, exportFormat, outputPlan, exportResult, exportIsStale, exportState, exportError, exportDiagnostics, errorMessage, mediaPreparation, mediaCompatibilityError, onRetrySourceRestore, timingWarning,
     showCorrection, surah, startAyah, endAyah, selectedFormatDefinition, timelineTooltip, timelineViewport, waveformData,
@@ -493,7 +496,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
       <Link className="editor-brand" href="/" aria-label="Quran AutoCaption home"><span className="editor-brand-mark">۝</span><div><p>Quran AutoCaption</p><span>Recitation editor</span></div></Link>
       <div className="editor-project-title"><input aria-label="Project name" value={projectName} onChange={(event) => onProjectNameChange(event.target.value)} /><span>{videoFile?.name ?? "No local source"}</span></div>
       <div className="editor-top-actions">
-        <div className="editor-format-switcher" aria-label="Project format">{(Object.keys(PROJECT_FORMATS) as ProjectFormatPreset[]).map((preset) => <button key={preset} type="button" className={projectFormat.preset === preset ? "is-active" : ""} onClick={() => onChangeFormat(preset)}>{preset === "vertical" ? "9:16" : preset === "landscape" ? "16:9" : "1:1"}</button>)}</div>
+        <div className="editor-format-switcher" aria-label="Project format">{EDITOR_FORMAT_PRESETS.map((preset) => <button key={preset} type="button" className={projectFormat.preset === preset ? "is-active" : ""} onClick={() => onChangeFormat(preset)}>{preset === "vertical" ? "9:16" : preset === "landscape" ? "16:9" : "1:1"}</button>)}</div>
         <span className={`editor-save-state ${dirty ? "is-dirty" : ""}`}><i />{dirty ? "Unsaved" : "Saved"}</span>
         <button className="editor-icon-button" type="button" aria-label="Undo" title="Undo ⌘Z" disabled={!canUndo} onClick={onUndo}>↶</button>
         <button className="editor-icon-button" type="button" aria-label="Redo" title="Redo ⇧⌘Z" disabled={!canRedo} onClick={onRedo}>↷</button>
@@ -556,6 +559,7 @@ export default function EditorWorkspace(props: EditorWorkspaceProps) {
     {videoUrl ? <div ref={setFullscreenPreviewRef} className="editor-fullscreen-preview" data-project-format={projectFormat.preset}>
             <div ref={previewRef} className={`project-preview-canvas editor-canvas ${mediaSource?.hasVideo ? "" : "editor-audio-canvas"}`} data-project-aspect-ratio={selectedFormatDefinition.aspectRatio} data-project-format={projectFormat.preset} style={{ aspectRatio: `${projectFormat.width} / ${projectFormat.height}` }} onPointerDown={onCanvasBackgroundPointerDown}>
               {mediaSource?.hasVideo ? <video ref={setPreviewMediaRef} className="h-full w-full object-contain" playsInline preload="metadata" src={videoUrl} data-video-fit={DEFAULT_SOURCE_VIDEO_FIT} onPointerDown={onSelectMedia} onLoadStart={() => setIsPreviewPlaying(false)} onLoadedMetadata={(event) => { onLoadedMetadata(event); syncPreviewVolume(event); }} onTimeUpdate={onVideoTimeUpdate} onPlay={(event) => { setIsPreviewPlaying(true); onMediaPlay(event); }} onPause={(event) => { setIsPreviewPlaying(false); onMediaPause(event); }} onEnded={(event) => { setIsPreviewPlaying(false); onMediaEnded(event); }} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onVolumeChange={syncPreviewVolume} onError={onVideoError}>Your browser does not support video playback.</video> : <audio ref={setPreviewMediaRef} className="editor-audio-element" preload="metadata" src={videoUrl} onPointerDown={onSelectMedia} onLoadStart={() => setIsPreviewPlaying(false)} onLoadedMetadata={(event) => { onLoadedMetadata(event); syncPreviewVolume(event); }} onTimeUpdate={onVideoTimeUpdate} onPlay={(event) => { setIsPreviewPlaying(true); onMediaPlay(event); }} onPause={(event) => { setIsPreviewPlaying(false); onMediaPause(event); }} onEnded={(event) => { setIsPreviewPlaying(false); onMediaEnded(event); }} onSeeking={onMediaSeeking} onSeeked={onMediaSeeking} onVolumeChange={syncPreviewVolume} onError={onVideoError}>Your browser does not support audio playback.</audio>}
+              <div className="editor-video-dim" aria-hidden="true" style={{ backgroundColor: `rgba(0, 0, 0, ${videoDimOpacity(captionEffects)})` }} />
               {showSafeArea && <SafeAreaOverlay format={projectFormat} />}
               <SocialPlatformGuideOverlay platform={platformPreview} />
               <CaptionPreview currentTimeMs={currentTimeMs} playbackClock={playbackClock} segments={segments} content={content} typography={typography} captionBackground={captionBackground} positioning={positioning} format={projectFormat} transitionSettings={transitionSettings} showVerseNumber={showVerseNumber} selectedSegmentId={selectedSegmentId} selectedObject={selectedObject} onSelectObject={onSelectObject} onObjectPointerDown={onObjectPointerDown} onResizePointerDown={onResizePointerDown} onPointerMove={onObjectPointerMove} onPointerUp={onObjectPointerUp} onCaptionBoundsChange={onCaptionBoundsChange} />

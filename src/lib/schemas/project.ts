@@ -48,7 +48,7 @@ export const MediaTrimSchema = z.strictObject({
 });
 
 export const ProjectFormatSchema = z.strictObject({
-  preset: z.enum(["vertical", "square", "landscape"]),
+  preset: z.enum(["vertical", "square", "portrait", "landscape"]),
   width: PositiveInteger,
   height: PositiveInteger,
 });
@@ -156,6 +156,8 @@ export const TypographySchema = z.strictObject({
   transliterationFontFamily: z.string().min(1),
   arabicFontSize: z.number().finite().positive(),
   translationFontSize: z.number().finite().positive(),
+  translationFontWeight: z.enum(["400", "600", "700"]).default("400"),
+  translationItalic: z.boolean().default(false),
   transliterationFontSize: z.number().finite().positive(),
   /** Legacy typography snapshots predate the editable Arabic color control. */
   textColor: z.string().min(1).default("#ffffff"),
@@ -195,6 +197,11 @@ export const TransitionSettingsSchema = z.strictObject({
   blurFadeMaxPx: z.number().finite().nonnegative().default(12),
 });
 
+export const CaptionEffectsSchema = z.strictObject({
+  /** Percentage of black composited over source media before captions render. */
+  videoDimLevel: z.number().finite().min(0).max(100),
+});
+
 /** Styling-only state used by built-in and browser-local caption styles. */
 export const CaptionStyleSchema = z.strictObject({
   typography: TypographySchema,
@@ -213,7 +220,7 @@ const CaptionStyleOverrideSchema = z.strictObject({
   // accidental overrides when a saved project is parsed.
   typography: z.strictObject({
     quranStyle: z.enum(["madinah-qcf", "uthmani", "indopak", "kfgqpc"]).optional(), arabicFontFamily: z.string().min(1).optional(), translationFontFamily: z.string().min(1).optional(), transliterationFontFamily: z.string().min(1).optional(),
-    arabicFontSize: z.number().finite().positive().optional(), translationFontSize: z.number().finite().positive().optional(), transliterationFontSize: z.number().finite().positive().optional(), textColor: z.string().min(1).optional(), wordHighlightMode: z.enum(["off", "current-word", "read-so-far"]).optional(), wordHighlightColor: z.string().min(1).optional(), wordHighlightIntensity: z.number().finite().min(0).max(1).optional(),
+    arabicFontSize: z.number().finite().positive().optional(), translationFontSize: z.number().finite().positive().optional(), translationFontWeight: z.enum(["400", "600", "700"]).optional(), translationItalic: z.boolean().optional(), transliterationFontSize: z.number().finite().positive().optional(), textColor: z.string().min(1).optional(), wordHighlightMode: z.enum(["off", "current-word", "read-so-far"]).optional(), wordHighlightColor: z.string().min(1).optional(), wordHighlightIntensity: z.number().finite().min(0).max(1).optional(),
     arabicOutlineEnabled: z.boolean().optional(), arabicOutlineWidth: z.number().finite().nonnegative().optional(), arabicOutlineColor: z.string().min(1).optional(), arabicShadowEnabled: z.boolean().optional(), arabicShadowBlur: z.number().finite().nonnegative().optional(), arabicShadowStrength: z.number().finite().min(0).max(1).optional(), arabicOpacity: z.number().finite().min(0).max(1).optional(), textAlign: z.enum(["left", "center", "right"]).optional(), arabicLineSpacing: z.number().finite().positive().optional(),
     translationVisible: z.boolean().optional(), translationTextColor: z.string().min(1).optional(), translationOutlineEnabled: z.boolean().optional(), translationOutlineWidth: z.number().finite().nonnegative().optional(), translationOutlineColor: z.string().min(1).optional(), translationShadowEnabled: z.boolean().optional(), translationShadowBlur: z.number().finite().nonnegative().optional(), translationShadowStrength: z.number().finite().min(0).max(1).optional(), translationOpacity: z.number().finite().min(0).max(1).optional(), translationSpacingBelowArabic: z.number().finite().nonnegative().optional(), translationTextAlign: z.enum(["left", "center", "right"]).optional(), transliterationVisible: z.boolean().optional(),
   }).optional(),
@@ -250,6 +257,7 @@ export const ProjectSchema = z.strictObject({
   captionBackground: CaptionBackgroundSchema,
   typography: TypographySchema,
   transitionSettings: TransitionSettingsSchema,
+  captionEffects: CaptionEffectsSchema.default({ videoDimLevel: 0 }),
   /** Presentation/export rate. Canonical caption and word timings remain source time. */
   playbackRate: z.union([z.literal(0.5), z.literal(0.75), z.literal(1), z.literal(1.25), z.literal(1.5), z.literal(2)]).default(1),
   showVerseNumber: z.boolean().default(false),

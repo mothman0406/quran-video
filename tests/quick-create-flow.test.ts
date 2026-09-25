@@ -35,10 +35,10 @@ test("original and editor representations remain explicit with truthful local pr
 test("pre-generation controls remain enabled during preparation and persist into the project", () => {
   assert.match(quickCreate, /fieldset disabled=\{!selected\}/);
   assert.match(quickCreate, /aria-label="Caption vertical position"/);
-  assert.match(quickCreate, /aria-label="Caption size"/);
-  assert.match(quickCreate, /Show translation/);
+  assert.match(quickCreate, /aria-label="Quran caption size"/);
+  assert.match(quickCreate, /<strong>Translation<\/strong>/);
   assert.match(quickCreate, /Word highlighting/);
-  assert.match(quickCreate, /wordHighlightMode: highlightEnabled \? "read-so-far"/);
+  assert.match(quickCreate, /wordHighlightMode: event\.currentTarget\.checked \? "read-so-far" : "off"/);
   assert.match(quickCreate, /captionSegments: \[\]/);
 });
 

@@ -1,4 +1,4 @@
-import type { CaptionBackground, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "../editor/captions.ts";
+import type { CaptionBackground, CaptionEffects, CaptionPositioning, CaptionSegment, TransitionSettings, Typography } from "../editor/captions.ts";
 import type { ProjectFormat } from "../schemas/project.ts";
 import type { ExportQuality } from "./quality.ts";
 import type { MediaTrim } from "../editor/media.ts";
@@ -31,6 +31,7 @@ export type LocalExportConfiguration = {
   segments: readonly CaptionSegment[];
   typography: Typography;
   captionBackground: CaptionBackground;
+  captionEffects: CaptionEffects;
   positioning: CaptionPositioning;
   transitionSettings: TransitionSettings;
   showVerseNumber: boolean;

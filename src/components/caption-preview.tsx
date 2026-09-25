@@ -190,7 +190,7 @@ function CaptionPreview({
       const background = captionBackgroundStyle(segmentBackground);
       const arabicWidth = `${segmentPositioning.maxWidthPercent * 100}%`;
       const translationWidth = `${(translationStyleState.positioning.translationMaxWidthPercent ?? translationStyleState.positioning.maxWidthPercent) * 100}%`;
-      const translationStyle = { ...styleText("translation", translationStyleState.typography), color: translationStyleState.typography.translationTextColor, fontFamily: translationStyleState.typography.translationFontFamily, fontSize: translationStyleState.typography.translationFontSize, opacity: translationStyleState.typography.translationOpacity, margin: 0 };
+      const translationStyle = { ...styleText("translation", translationStyleState.typography), color: translationStyleState.typography.translationTextColor, fontFamily: translationStyleState.typography.translationFontFamily, fontSize: translationStyleState.typography.translationFontSize, fontWeight: translationStyleState.typography.translationFontWeight, fontStyle: translationStyleState.typography.translationItalic ? "italic" : "normal", opacity: translationStyleState.typography.translationOpacity, margin: 0 };
       const objectClass = (kind: CaptionObject) => `caption-object ${selectedSegmentId === segment.id && selectedObject === kind ? "caption-object-selected" : ""}`;
       const handles = (kind: CaptionObject) => selectedSegmentId === segment.id && selectedObject === kind ? <>
         <button aria-label={`Resize ${kind} text box from left`} className="caption-handle caption-handle-left" type="button" onPointerDown={(event) => onResizePointerDown(event, kind, "left")} onPointerMove={onPointerMove} onPointerUp={onPointerUp} />

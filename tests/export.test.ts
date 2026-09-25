@@ -123,6 +123,7 @@ test("quality presets map to deterministic bitrate tiers and Standard is the def
   assert.deepEqual(Object.keys(EXPORT_QUALITY_PRESETS), ["basic", "standard", "ultra"]);
   assert.deepEqual(exportFormatForQuality({ preset: "landscape" }, "basic"), { preset: "landscape", width: 1280, height: 720 });
   assert.deepEqual(exportFormatForQuality({ preset: "square" }, "ultra"), { preset: "square", width: 2160, height: 2160 });
+  assert.deepEqual(exportFormatForQuality({ preset: "portrait" }, "standard"), { preset: "portrait", width: 1080, height: 1350 });
 });
 
 test("export filenames are safe and use the Quran passage range", () => {
@@ -196,13 +197,16 @@ test("renderer validation accepts every quality-ladder project format", () => {
     { preset: "square" as const, width: 720, height: 720 },
     { preset: "square" as const, width: 1080, height: 1080 },
     { preset: "square" as const, width: 2160, height: 2160 },
+    { preset: "portrait" as const, width: 720, height: 900 },
+    { preset: "portrait" as const, width: 1080, height: 1350 },
+    { preset: "portrait" as const, width: 2160, height: 2700 },
   ]) assert.equal(validateExportProjectFormat(format), null);
   assert.equal(validateExportProjectFormat({ preset: "vertical", width: 1, height: 1 }), "The selected project format is invalid.");
   for (const quality of ["basic", "standard", "ultra"] as const) assert.equal(validateLocalExportInputs({ size: 1, type: "video/mp4" } as File, config({ quality })).length, 0);
 });
 
 test("all supported aspect ratios retain their output dimensions", () => {
-  assert.deepEqual(Object.values(PROJECT_FORMATS).map(({ width, height }) => [width, height]), [[1080, 1920], [1920, 1080], [1080, 1080]]);
+  assert.deepEqual(Object.values(PROJECT_FORMATS).map(({ width, height }) => [width, height]), [[1080, 1920], [1080, 1080], [1080, 1350], [1920, 1080]]);
 });
 
 test("preview and export use the same source contain mapping and exclude safe-area overlays", () => {

@@ -5,13 +5,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import ComposedVideoPreview from "@/components/composed-video-preview";
 import DashboardShell from "@/components/dashboard-shell";
+import AccountPanel from "@/components/account-panel";
 import { deleteCloudProject, downloadCloudProjectSource, getAuthSession, getPrivateThumbnailUrl, getSupabaseClient, listCloudProjectRecords, type CloudProjectRecord } from "@/lib/cloud-sync";
-import { accountEntitlementsForPlan, type AccountEntitlements } from "@/lib/entitlements";
-import { getAccountEntitlements } from "@/lib/entitlements/client";
+import { accountEntitlementsForPlan, defaultExportQualityForPlan, type AccountEntitlements } from "@/lib/entitlements";
+import { authorizeAccountExport, getAccountEntitlements } from "@/lib/entitlements/client";
 import { createProjectRepository } from "@/lib/project-storage";
 import { quranProjectMetadata } from "@/lib/cloud-projects";
 import type { SavedProject } from "@/lib/schemas/project";
 import { useVideoJobs, videoJobManager, type VideoJobStatus } from "@/lib/video-jobs";
+import { createLocalExportConfiguration } from "@/lib/export/config";
+import { validateLocalExportInputs } from "@/lib/export/validation";
+import { localExportFailureMessage } from "@/lib/export/lifecycle";
+import type { ExportPhase } from "@/lib/export/types";
+import type { CaptionSegment } from "@/lib/editor/captions";
 
 type Filter = "all" | "ready" | "generating" | "failed";
 type VideoCard = {
@@ -54,6 +60,9 @@ export default function VideosDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [watching, setWatching] = useState<VideoCard | null>(null);
   const [watchLoading, setWatchLoading] = useState<string | null>(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const [exportingId, setExportingId] = useState<string | null>(null);
+  const [exportProgress, setExportProgress] = useState<{ phase: ExportPhase; fraction: number } | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -158,6 +167,61 @@ export default function VideosDashboard() {
     }
   }
 
+  async function download(card: VideoCard) {
+    if (!session) {
+      setAuthOpen(true);
+      return;
+    }
+    setExportingId(card.id); setExportProgress({ phase: "preparing", fraction: 0 }); setError(null);
+    try {
+      let runtime = videoJobManager.getRuntime(card.id);
+      if (!runtime && card.cloud) {
+        const restored = await downloadCloudProjectSource(card.cloud.row);
+        if (restored.status !== "ready") throw new Error("This saved source video could not be loaded. Relink the recording in the advanced editor.");
+        runtime = videoJobManager.attachRuntime(card.id, restored.file);
+      }
+      if (!runtime) throw new Error("This browser no longer has the source recording. Relink it in the advanced editor before downloading.");
+      const quality = defaultExportQualityForPlan(entitlements.plan);
+      const authorization = await authorizeAccountExport(session, quality);
+      if (!authorization.allowed) throw new Error(authorization.message);
+      const configuration = createLocalExportConfiguration({
+        format: card.project.format,
+        segments: card.project.captionSegments as CaptionSegment[],
+        typography: card.project.typography,
+        captionBackground: card.project.captionBackground,
+        captionEffects: card.project.captionEffects,
+        positioning: card.project.positioning,
+        transitionSettings: card.project.transitionSettings,
+        showVerseNumber: card.project.showVerseNumber,
+        mediaTrim: card.project.mediaTrim,
+        playbackRate: card.project.playbackRate,
+        quality: authorization.quality,
+        watermarkRequired: authorization.watermarkRequired,
+      });
+      const validationErrors = validateLocalExportInputs(runtime.originalSource, configuration);
+      if (validationErrors.length) throw new Error(validationErrors[0]);
+      const { offlineWebCodecsRenderer } = await import("@/lib/export/offline-webcodecs");
+      const output = await offlineWebCodecsRenderer.render({
+        source: runtime.originalSource,
+        ...configuration,
+        onProgress: (progress) => setExportProgress({ phase: progress.phase, fraction: progress.fraction }),
+      });
+      const objectUrl = URL.createObjectURL(output.blob);
+      const link = document.createElement("a");
+      link.href = objectUrl;
+      link.download = output.fileName;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+    } catch (caught) {
+      setError(localExportFailureMessage(caught));
+    } finally {
+      setExportingId(null); setExportProgress(null);
+    }
+  }
+
   async function remove(card: VideoCard) {
     if (!window.confirm(`Delete “${card.project.title}”?${card.cloud || card.cloudSaved ? "\n\nThis also removes its private saved source media." : ""}`)) return;
     try {
@@ -187,9 +251,10 @@ export default function VideosDashboard() {
       </button>
       <div className="video-card-body"><h2>{card.project.title}</h2><p>{quranProjectMetadata(card.project).passageLabel ?? card.project.sourceMedia?.displayName ?? card.project.sourceMedia?.fileName ?? "Quran recitation"}</p><span>{relativeTime(card.project.createdAt)}{card.cloudSaved ? " · Saved privately" : " · On this device"}</span>
         {card.error && <small className="video-card-error">{card.error}</small>}{card.cloudError && <small className="video-card-warning">{card.cloudError}</small>}
-        {card.status === "ready" ? <footer><button type="button" onClick={() => void watch(card)} disabled={watchLoading === card.id}>{watchLoading === card.id ? "Opening…" : "Watch"}</button><Link href={`/editor?project=${encodeURIComponent(card.id)}`}>Edit</Link><Link href={`/editor?project=${encodeURIComponent(card.id)}&export=1`}>Download</Link><button type="button" className="is-danger" onClick={() => void remove(card)}>Delete</button><button type="button" className="video-tiktok" disabled>Post to TikTok <span>Coming soon</span></button></footer> : <footer>{(card.status === "failed" || card.status === "interrupted") && (videoJobManager.getRuntime(card.id) ? <button type="button" onClick={() => videoJobManager.retry(card.id)}>Retry</button> : <Link href={`/editor?project=${encodeURIComponent(card.id)}`}>Retry in editor</Link>)}<button type="button" className="is-danger" onClick={() => void remove(card)}>Delete</button></footer>}
+        {card.status === "ready" ? <footer><button type="button" onClick={() => void watch(card)} disabled={watchLoading === card.id}>{watchLoading === card.id ? "Opening…" : "Watch"}</button><Link href={`/editor?project=${encodeURIComponent(card.id)}`}>Edit</Link><button type="button" onClick={() => void download(card)} disabled={exportingId !== null}>{exportingId === card.id ? `${exportProgress?.phase ?? "Preparing"} ${Math.round((exportProgress?.fraction ?? 0) * 100)}%` : "Download"}</button><button type="button" className="is-danger" onClick={() => void remove(card)}>Delete</button><button type="button" className="video-tiktok" disabled>Post to TikTok <span>Coming soon</span></button></footer> : <footer>{(card.status === "failed" || card.status === "interrupted") && (videoJobManager.getRuntime(card.id) ? <button type="button" onClick={() => videoJobManager.retry(card.id)}>Retry</button> : <Link href={`/editor?project=${encodeURIComponent(card.id)}`}>Retry in editor</Link>)}<button type="button" className="is-danger" onClick={() => void remove(card)}>Delete</button></footer>}
       </div>
     </article>)}</div>}
-    {watching && videoJobManager.getRuntime(watching.id) && <div className="watch-backdrop" role="dialog" aria-modal="true" aria-label={`Watch ${watching.project.title}`} onMouseDown={(event) => { if (event.target === event.currentTarget) setWatching(null); }}><div className="watch-modal"><header><div><span>CAPTIONED PREVIEW</span><h2>{watching.project.title}</h2></div><button type="button" aria-label="Close preview" onClick={() => setWatching(null)}>×</button></header><ComposedVideoPreview project={watching.project} sourceUrl={videoJobManager.getRuntime(watching.id)!.sourceUrl} /><footer><Link href={`/editor?project=${encodeURIComponent(watching.id)}`}>Open advanced editor</Link><Link href={`/editor?project=${encodeURIComponent(watching.id)}&export=1`}>Download</Link></footer></div></div>}
+    {watching && videoJobManager.getRuntime(watching.id) && <div className="watch-backdrop" role="dialog" aria-modal="true" aria-label={`Watch ${watching.project.title}`} onMouseDown={(event) => { if (event.target === event.currentTarget) setWatching(null); }}><div className="watch-modal"><header><div><span>CAPTIONED PREVIEW</span><h2>{watching.project.title}</h2></div><button type="button" aria-label="Close preview" onClick={() => setWatching(null)}>×</button></header><ComposedVideoPreview project={watching.project} sourceUrl={videoJobManager.getRuntime(watching.id)!.sourceUrl} /><footer><Link href={`/editor?project=${encodeURIComponent(watching.id)}`}>Open advanced editor</Link><button type="button" onClick={() => void download(watching)} disabled={exportingId !== null}>{exportingId === watching.id ? `${exportProgress?.phase ?? "Preparing"} ${Math.round((exportProgress?.fraction ?? 0) * 100)}%` : "Download"}</button></footer></div></div>}
+    {authOpen && <AccountPanel session={null} authReturnPath="/videos" onClose={() => setAuthOpen(false)} />}
   </section></DashboardShell>;
 }

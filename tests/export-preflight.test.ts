@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, type CaptionSegment } from "../src/lib/editor/captions.ts";
+import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_EFFECTS, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, type CaptionSegment } from "../src/lib/editor/captions.ts";
 import { DEFAULT_PROJECT_FORMAT } from "../src/lib/editor/formats.ts";
 import { getVerse } from "../src/lib/quran/local.ts";
 import { quranDisplayText } from "../src/lib/quran/content.ts";
@@ -47,6 +47,7 @@ function project(overrides: Partial<Project> = {}): Project {
     captions: { arabic: true, translation: true, transliteration: false, translationEdition: "english_saheeh" },
     positioning: DEFAULT_CAPTION_POSITIONING,
     captionBackground: DEFAULT_CAPTION_BACKGROUND,
+    captionEffects: DEFAULT_CAPTION_EFFECTS,
     typography: { ...DEFAULT_TYPOGRAPHY, wordHighlightMode: "off" },
     transitionSettings: DEFAULT_TRANSITION_SETTINGS,
     playbackRate: 1,
