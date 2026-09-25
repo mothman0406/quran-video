@@ -882,7 +882,7 @@ export default function Home() {
     exportAbort.current?.abort();
     clearCompletedExport();
     invalidateRecognitionForSourceChange();
-    const waveformJob = ++waveformGeneration.current;
+    waveformGeneration.current += 1;
     setWaveformData(null);
     if (videoUrl?.startsWith("blob:")) URL.revokeObjectURL(videoUrl);
     const previousDisposer = editorMediaDisposer.current;
@@ -900,7 +900,13 @@ export default function Home() {
     setMediaSource(nextSource);
     setMediaTrim(opening?.mediaTrim ?? (options?.preserveCaptions ? mediaTrim : createMediaTrim(projectDurationMs(nextSource))));
     setTimelineViewport(createTimelineViewport(projectDurationMs(nextSource)));
-    void loadWaveform(editorMedia, waveformJob);
+    if (options?.preparedAudio) {
+      const pcm = options.preparedAudio.pcm;
+      setWaveformData({
+        durationMs: Math.round(pcm.frameCount * 1_000 / pcm.sampleRate),
+        peaks: waveformPeaksFromPcm(pcm.channelBuffers.map((buffer) => new Float32Array(buffer))),
+      });
+    }
     setVideoMetadata(null);
     setErrorMessage(opening ? `Reselect source media: ${opening.sourceMedia?.fileName ?? originalSource.name}` : null);
     setShowCorrection(false);
@@ -1277,26 +1283,6 @@ export default function Home() {
       return;
     resetEditorState();
   }
-  async function loadWaveform(file: File, job: number) {
-    try {
-      const AudioContextConstructor = window.AudioContext;
-      if (!AudioContextConstructor) return;
-      const context = new AudioContextConstructor();
-      try {
-        const audio = await context.decodeAudioData(await file.arrayBuffer());
-        if (job !== waveformGeneration.current) return;
-        setWaveformData({
-          durationMs: Math.round(audio.duration * 1_000),
-          peaks: waveformPeaksFromPcm(Array.from({ length: audio.numberOfChannels }, (_, index) => audio.getChannelData(index))),
-        });
-      } finally {
-        await context.close();
-      }
-    } catch {
-      // A previewable file can still have a browser decoder unavailable to Web Audio.
-      if (job === waveformGeneration.current) setWaveformData(null);
-    }
-  }
   async function selectMediaFile(next: File | undefined) {
     if (!next) return;
     const validationError = mediaFileError(next);
@@ -1318,11 +1304,9 @@ export default function Home() {
         prepareRecognitionAudio(next, abort.signal, (event) => publishMediaPreparation(mediaJob, event)),
       ]);
       if (editorOutcome.status === "rejected") {
-        abort.abort();
         throw editorOutcome.reason;
       }
       if (recognitionOutcome.status === "rejected") {
-        abort.abort();
         await editorOutcome.value.dispose();
         throw recognitionOutcome.reason;
       }
@@ -1492,6 +1476,10 @@ export default function Home() {
       if (abort.signal.aborted) return;
       if (authoritativeAudio.decodePath === "ffmpeg") setMediaSource((current) => current?.compatibility === "native" ? { ...current, compatibility: "audio-fallback" } : current);
       if (job !== generation.current) return;
+      setWaveformData({
+        durationMs: Math.round(authoritativeAudio.pcm.frameCount * 1_000 / authoritativeAudio.pcm.sampleRate),
+        peaks: waveformPeaksFromPcm(authoritativeAudio.pcm.channelBuffers.map((buffer) => new Float32Array(buffer))),
+      });
       setStage("detecting-speech");
       recognitionJobs.current.update(job, "processing");
       reportProgress("analyzing-speech");

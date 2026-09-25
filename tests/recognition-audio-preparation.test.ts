@@ -23,21 +23,21 @@ test("media preparation selects one canonical PCM before Quran recognition", () 
   const compatibility = readFileSync("src/lib/recognition/local-media-compatibility.ts", "utf8");
   assert.match(compatibility, /export async function prepareRecognitionAudio/);
   assert.match(compatibility, /Decoder choice is based solely on inspected media and native decoder/);
-  assert.match(compatibility, /return \{ pcm, decodePath: "ffmpeg", reason: selection\.reason, inspection \}/);
-  assert.match(compatibility, /return \{ pcm, decodePath: "native", reason: "native-safe", inspection \}/);
+  assert.match(compatibility, /runDeterministicRecognitionAudioRouter/);
+  assert.match(compatibility, /return \{ pcm: routed\.value, decodePath: routed\.route, reason, inspection \}/);
   assert.doesNotMatch(compatibility, /FastConformer|canonicalSpan/);
 });
 
 test("sample rate alone never initializes FFmpeg for browser-decodable media", () => {
   for (const audioSampleRate of [44_100, 22_050, 48_000, 16_000]) {
-    assert.deepEqual(selectRecognitionAudioPath(inspection({ audioSampleRate, audioChannels: 2 })), { decodePath: "native", reason: "native-safe" });
+    assert.deepEqual(selectRecognitionAudioPath(inspection({ audioSampleRate, audioChannels: 2 })), { decodePath: "webcodecs", reason: "native-safe" });
   }
 });
 
 test("actual native decoder incompatibility selects the single FFmpeg fallback before recognition", () => {
   assert.deepEqual(selectRecognitionAudioPath(inspection({ nativeRecognitionAudio: false, audioSampleRate: 44_100 })), { decodePath: "ffmpeg", reason: "media-audio-fallback" });
   const compatibility = readFileSync("src/lib/recognition/local-media-compatibility.ts", "utf8");
-  assert.match(compatibility, /catch \{[\s\S]*?reason: "native-decode-unavailable"/);
+  assert.match(compatibility, /preferredFailed[\s\S]*?"native-decode-unavailable"/);
   assert.doesNotMatch(compatibility, /non-integral-resample|requiresFfmpegCanonicalPcm/);
 });
 

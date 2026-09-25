@@ -1,5 +1,39 @@
 # Status
 
+## Current milestone: Deterministic media preparation hardening
+
+Complete:
+
+- Replaced whole-video `arrayBuffer()` / Web Audio recognition decoding with
+  Mediabunny selected-track demux and audio-only WebCodecs decoding. Decoded
+  samples downmix/resample directly into canonical 16 kHz mono PCM; video
+  frames are never decoded for recognition.
+- Added one capability router: preferred audio decoding once, one generic
+  FFmpeg-WASM audio-only fallback, then deterministic failure. No device,
+  filename, extension, or MIME-only routing was added.
+- Actual media-element probing now corrects conservative MIME hints. The
+  original source remains authoritative for preview, playback, save, and
+  export; the editor waveform reuses canonical PCM instead of decoding the
+  complete video again.
+- Added bounded inspection/decode waits, explicit preparation states,
+  cancellation and stale-job protection, scoped resource cleanup, and visible
+  Retry / Choose another failure recovery.
+- The exact 268.33 MiB, 50.253-second HEVC/AAC phone fixture improved from
+  more than four minutes/effectively stalled to 937 ms audio preparation and
+  1,032 ms total `/create` readiness. Original preview playback and Generate
+  availability passed. No fallback or console error occurred.
+- The Mac AVC/AAC regression fixture completed in 690 ms audio preparation and
+  741 ms total, with original preview playback, Generate availability, and no
+  fallback or console error.
+- Focused deterministic routing, fallback-once, canonical PCM, no-audio,
+  multi-track, unsupported-video/decodable-audio, cancellation, timeout,
+  source-preservation, no-video-decode, error UX, and pre-generation controls
+  coverage passes. The focused media/pre-generation regression is 83/83 and
+  the full suite is 575/575. Strict TypeScript, quiet lint, the production
+  build with pinned asset checks, and whitespace validation pass.
+
+Details: `docs/DETERMINISTIC_MEDIA_PREPARATION.md`.
+
 ## Current milestone: Pre-generation caption controls
 
 Complete in implementation and automated validation:
