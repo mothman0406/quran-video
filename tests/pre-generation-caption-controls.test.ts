@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { DEFAULT_CAPTION_EFFECTS, DEFAULT_TYPOGRAPHY } from "../src/lib/editor/captions.ts";
+import { DEFAULT_CAPTION_EFFECTS, DEFAULT_TYPOGRAPHY, effectiveTranslationColor } from "../src/lib/editor/captions.ts";
+import { CANONICAL_BASMALAH_ARABIC, CANONICAL_BASMALAH_TRANSLATION } from "../src/lib/quran/content.ts";
 import { PROJECT_FORMATS } from "../src/lib/editor/formats.ts";
 import {
   DEFAULT_PRE_GENERATION_PRESENTATION_SECTION,
@@ -38,6 +39,10 @@ test("presentation defaults are complete, clean, and preserve the existing creat
   assert.equal(value.typography.textColor, "#ffffff");
   assert.equal(value.typography.translationVisible, true);
   assert.equal(value.typography.wordHighlightMode, "read-so-far");
+  assert.equal(value.typography.wordHighlightColor, "#ffffff");
+  assert.equal(value.typography.translationTextColor, "#ffffff");
+  assert.equal(value.typography.translationOpacity, 1);
+  assert.equal(value.typography.translationMatchHighlightColor, false);
   assert.equal(value.showVerseNumber, false);
   assert.deepEqual(value.captionEffects, DEFAULT_CAPTION_EFFECTS);
   assert.equal(value.transitionSettings.fadeInMs, 225);
@@ -63,11 +68,30 @@ test("switching sections and formats preserves presentation values and adds 4:5 
 });
 
 test("all requested controls write the one shared presentation state", () => {
-  for (const label of ["Caption vertical position", "Text spacing", "Quran font", "Quran caption size", "Quran color picker", "Translation language", "Translation font", "Translation size", "Translation weight", "Italic", "Translation color picker", "Video dim level", "Outline width", "Outline color picker", "Shadow intensity", "Caption fade duration", "Translation", "Ayah numbers", "Full Ayah is always enabled", "Word highlighting", "Reset presentation defaults"]) {
+  for (const label of ["Caption vertical position", "Text spacing", "Quran font", "Quran caption size", "Quran color", "Word highlight color", "Translation language", "Translation font", "Translation size", "Translation weight", "Italic", "Translation color", "Match highlight color", "Video dim level", "Outline width", "Outline color picker", "Shadow intensity", "Caption fade duration", "Translation", "Ayah numbers", "Full Ayah is always enabled", "Word highlighting", "Reset presentation defaults"]) {
     assert.match(quickCreate, new RegExp(label));
   }
   assert.match(quickCreate, /\["vertical", "square", "portrait", "landscape"\]/);
   assert.match(quickCreate, /setPresentation\(defaultCaptionPresentationSettings\(\)\)/);
+});
+
+test("create sample uses canonical Basmallah and demonstrates every highlight state", () => {
+  assert.equal(CANONICAL_BASMALAH_ARABIC, "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ");
+  assert.equal(CANONICAL_BASMALAH_TRANSLATION, "In the name of Allah, the Entirely Merciful, the Especially Merciful.");
+  assert.match(quickCreate, /CANONICAL_BASMALAH_ARABIC\.split/);
+  assert.match(quickCreate, /index === 0 \? "read" : index === 1 \? "current" : "unread"/);
+  assert.match(quickCreate, /wordHighlightMode === "off" \? "read"/);
+  assert.match(quickCreate, /data-sample-word-state/);
+  assert.doesNotMatch(quickCreate, /getVerse\("93:1"\)|By the morning brightness/);
+});
+
+test("validated spectrum and hex controls preserve independent translation color while linked", () => {
+  assert.match(quickCreate, /type="color"/);
+  assert.ok(quickCreate.includes('pattern="#[0-9A-Fa-f]{6}"'));
+  assert.match(quickCreate, /HEX_COLOR\.test\(next\)/);
+  const linked = { ...DEFAULT_TYPOGRAPHY, translationTextColor: "#112233", wordHighlightColor: "#abcdef", translationMatchHighlightColor: true };
+  assert.equal(effectiveTranslationColor(linked), "#abcdef");
+  assert.equal(effectiveTranslationColor({ ...linked, translationMatchHighlightColor: false }), "#112233");
 });
 
 test("style changes are visual-only and cannot restart preparation or recognition", () => {

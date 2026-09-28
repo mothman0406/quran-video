@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
-import { arabicCaptionPresentationWords, captionBackgroundStyle, captionVisualStatesAtTime, getActiveCaptionSegment, linkedCaptionStackLayout, resolveWordHighlightPresentation, translationDisplayText, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
+import { arabicCaptionPresentationWords, captionBackgroundStyle, captionVisualStatesAtTime, effectiveTranslationColor, linkedCaptionStackLayout, resolveWordHighlightPresentation, translationDisplayText, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import { quranFontDefinitions } from "@/lib/quran/content";
 import type { ProjectFormat } from "@/lib/schemas/project";
@@ -103,8 +103,7 @@ function CaptionPreview({
   useEffect(() => {
     const applyVisualState = () => {
       // This exact selector is the shared preview/timeline/test authority.
-      const active = getActiveCaptionSegment(segments, effectivePresentationTimeMs);
-      const states = active ? captionVisualStatesAtTime(segments, effectivePresentationTimeMs, transitionSettings) : [];
+      const states = captionVisualStatesAtTime(segments, effectivePresentationTimeMs, transitionSettings);
       const stateById = new Map(states.map((state) => [state.segment.id, state]));
       layerRefs.current.forEach((layer, id) => {
         const state = stateById.get(id);
@@ -190,7 +189,7 @@ function CaptionPreview({
       const background = captionBackgroundStyle(segmentBackground);
       const arabicWidth = `${segmentPositioning.maxWidthPercent * 100}%`;
       const translationWidth = `${(translationStyleState.positioning.translationMaxWidthPercent ?? translationStyleState.positioning.maxWidthPercent) * 100}%`;
-      const translationStyle = { ...styleText("translation", translationStyleState.typography), color: translationStyleState.typography.translationTextColor, fontFamily: translationStyleState.typography.translationFontFamily, fontSize: translationStyleState.typography.translationFontSize, fontWeight: translationStyleState.typography.translationFontWeight, fontStyle: translationStyleState.typography.translationItalic ? "italic" : "normal", opacity: translationStyleState.typography.translationOpacity, margin: 0 };
+      const translationStyle = { ...styleText("translation", translationStyleState.typography), color: effectiveTranslationColor(translationStyleState.typography), fontFamily: translationStyleState.typography.translationFontFamily, fontSize: translationStyleState.typography.translationFontSize, fontWeight: translationStyleState.typography.translationFontWeight, fontStyle: translationStyleState.typography.translationItalic ? "italic" : "normal", opacity: translationStyleState.typography.translationOpacity, margin: 0 };
       const objectClass = (kind: CaptionObject) => `caption-object ${selectedSegmentId === segment.id && selectedObject === kind ? "caption-object-selected" : ""}`;
       const handles = (kind: CaptionObject) => selectedSegmentId === segment.id && selectedObject === kind ? <>
         <button aria-label={`Resize ${kind} text box from left`} className="caption-handle caption-handle-left" type="button" onPointerDown={(event) => onResizePointerDown(event, kind, "left")} onPointerMove={onPointerMove} onPointerUp={onPointerUp} />
@@ -212,8 +211,8 @@ function CaptionPreview({
         <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic", segmentTypography), color: segmentTypography.textColor, fontFamily: quranFontDefinitions[segmentTypography.quranStyle].family, fontSize: segmentTypography.arabicFontSize, lineHeight: segmentTypography.arabicLineSpacing, opacity: segmentTypography.arabicOpacity }}><span data-caption-arabic-text>{arabicWords.map((word, index) => <Fragment key={`${segment.id}-${word.kind}-${index}`}>
           {index > 0 && (word.kind === "verse-number" ? "\u00a0" : " ")}
           {(() => {
-            const presentation = resolveWordHighlightPresentation({ baseTextColor: segmentTypography.textColor, highlightColor: segmentTypography.wordHighlightColor, intensity: segmentTypography.wordHighlightIntensity, isHighlighted: word.highlighted });
-            return <span data-caption-quran-word={word.kind === "quran-word" ? "true" : undefined} data-caption-word-highlighted={word.highlighted ? "true" : "false"} style={word.highlighted ? { color: presentation.color, textShadow: `0 0 ${presentation.glowBlurPx}px ${presentation.glowColor}` } : undefined}>{word.text}</span>;
+            const presentation = resolveWordHighlightPresentation({ baseTextColor: segmentTypography.textColor, highlightColor: segmentTypography.wordHighlightColor, intensity: segmentTypography.wordHighlightIntensity, isHighlighted: word.highlighted, state: word.state });
+            return <span data-caption-quran-word={word.kind === "quran-word" ? "true" : undefined} data-caption-word-highlighted={word.highlighted ? "true" : "false"} data-caption-word-state={word.state} style={{ color: presentation.color, opacity: presentation.opacity, textShadow: presentation.glowBlurPx ? `0 0 ${presentation.glowBlurPx}px ${presentation.glowColor}` : undefined }}>{word.text}</span>;
           })()}
         </Fragment>)}</span></p>
         {handles("arabic")}

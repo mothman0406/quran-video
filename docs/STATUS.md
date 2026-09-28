@@ -3101,3 +3101,13 @@ Complete (offline only, **NO CANDIDATE**):
 
 Verification: focused tests and `npx tsc --noEmit` pass. Full final checks are
 recorded at milestone handoff.
+
+## Current milestone: Caption highlight and transitions polish
+
+- Reworked the shared Quran word presentation into read, current, and unread states. Read words use the configured Quran color at full opacity, the current word uses the configured highlight color with a restrained glow, unread words remain visible at 32% of the configured Quran color, and ayah markers remain bright.
+- Changed the default word highlight from Electric Lime to white and raised the default translation presentation to full white opacity. Highlight-off mode now renders every Arabic word in the bright read state.
+- Replaced the Quick Create Ad-Duha sample with the canonical shared Basmallah and the established English display wording. The static sample deterministically shows read/current/unread states when highlighting is enabled and all-read styling when disabled.
+- Added validated spectrum-plus-hex controls for word highlight and translation colors. Translation can link to the highlight color without overwriting its stored independent color; the link persists and is also available in the editor inspector.
+- Replaced linear single-layer verse fades with complementary smoothstep crossfades for adjacent captions. The outgoing and incoming Arabic/translation layers overlap without a blank interval, zero duration remains instant, and the existing 225 ms setting/schema remains compatible.
+- Preview/watch and Canvas/MP4 export consume the same word-state, effective-color, and crossfade helpers. Recognition, canonical Quran reconstruction, word timing, and manual caption timing code were not changed.
+- Added focused coverage for defaults, word-state opacity/color, highlight-off behavior, Basmallah sample states, validated controls, linked-color restoration, persistence/legacy defaults, smoothstep endpoints, complementary no-gap crossfades, zero-duration switching, and preview/export parity.

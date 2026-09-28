@@ -41,6 +41,7 @@ import {
   DEFAULT_CAPTION_PRESENTATION,
   DEFAULT_TRANSITION_SETTINGS,
   DEFAULT_TYPOGRAPHY,
+  effectiveTranslationColor,
   getActiveCaptionSegment,
   mergeCaptionWithNext,
   mergeCaptionWithPrevious,
@@ -2459,7 +2460,7 @@ export default function Home() {
     if (selectedObject === "arabic") {
       updateProjectHistory((current) => ({ ...current, typography: { ...current.typography, quranStyle: defaults.quranStyle, arabicFontFamily: defaults.arabicFontFamily, arabicFontSize: defaults.arabicFontSize, textColor: defaults.textColor, wordHighlightMode: defaults.wordHighlightMode, wordHighlightColor: defaults.wordHighlightColor, wordHighlightIntensity: defaults.wordHighlightIntensity, arabicOutlineEnabled: defaults.arabicOutlineEnabled, arabicOutlineWidth: defaults.arabicOutlineWidth, arabicOutlineColor: defaults.arabicOutlineColor, arabicShadowEnabled: defaults.arabicShadowEnabled, arabicShadowBlur: defaults.arabicShadowBlur, arabicShadowStrength: defaults.arabicShadowStrength, arabicOpacity: defaults.arabicOpacity, textAlign: defaults.textAlign, arabicLineSpacing: defaults.arabicLineSpacing } }));
     } else if (selectedObject === "translation") {
-      updateProjectHistory((current) => ({ ...current, typography: { ...current.typography, translationFontFamily: defaults.translationFontFamily, translationFontSize: defaults.translationFontSize, translationTextColor: defaults.translationTextColor, translationOutlineEnabled: defaults.translationOutlineEnabled, translationOutlineWidth: defaults.translationOutlineWidth, translationOutlineColor: defaults.translationOutlineColor, translationShadowEnabled: defaults.translationShadowEnabled, translationShadowBlur: defaults.translationShadowBlur, translationShadowStrength: defaults.translationShadowStrength, translationOpacity: defaults.translationOpacity, translationTextAlign: defaults.translationTextAlign, translationSpacingBelowArabic: defaults.translationSpacingBelowArabic, translationVisible: defaults.translationVisible } }));
+      updateProjectHistory((current) => ({ ...current, typography: { ...current.typography, translationFontFamily: defaults.translationFontFamily, translationFontSize: defaults.translationFontSize, translationTextColor: defaults.translationTextColor, translationMatchHighlightColor: defaults.translationMatchHighlightColor, translationOutlineEnabled: defaults.translationOutlineEnabled, translationOutlineWidth: defaults.translationOutlineWidth, translationOutlineColor: defaults.translationOutlineColor, translationShadowEnabled: defaults.translationShadowEnabled, translationShadowBlur: defaults.translationShadowBlur, translationShadowStrength: defaults.translationShadowStrength, translationOpacity: defaults.translationOpacity, translationTextAlign: defaults.translationTextAlign, translationSpacingBelowArabic: defaults.translationSpacingBelowArabic, translationVisible: defaults.translationVisible } }));
     }
   }
   function alignTranslationBelowArabic() {
@@ -3984,7 +3985,8 @@ export default function Home() {
                         <input
                           className="mt-1 h-8 w-full rounded-lg border"
                           type="color"
-                          value={typography.translationTextColor}
+                          value={effectiveTranslationColor(typography)}
+                          disabled={typography.translationMatchHighlightColor}
                           onChange={(event) =>
                             updateTypography(
                               "translationTextColor",
@@ -3994,6 +3996,10 @@ export default function Home() {
                         />
                       </label>
                     </div>
+                    <label className="mt-2 flex items-center gap-2 text-xs">
+                      <input checked={typography.translationMatchHighlightColor} type="checkbox" onChange={(event) => updateTypography("translationMatchHighlightColor", event.target.checked)} />
+                      Match highlight color
+                    </label>
                     <label className="mt-2 block text-xs">
                       Translation font
                       <select

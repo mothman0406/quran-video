@@ -163,7 +163,7 @@ export const TypographySchema = z.strictObject({
   textColor: z.string().min(1).default("#ffffff"),
   /** Word highlighting is presentation-only; fresh and legacy-inherited styles read so far. */
   wordHighlightMode: z.enum(["off", "current-word", "read-so-far"]).default("read-so-far"),
-  wordHighlightColor: z.string().min(1).default("#B7FF00"),
+  wordHighlightColor: z.string().min(1).default("#ffffff"),
   /** Visual prominence of highlighted Quran words without affecting base caption opacity. */
   wordHighlightIntensity: z.number().finite().min(0).max(1).default(0.85),
   arabicOutlineEnabled: z.boolean(),
@@ -177,6 +177,8 @@ export const TypographySchema = z.strictObject({
   arabicLineSpacing: z.number().finite().positive(),
   translationVisible: z.boolean(),
   translationTextColor: z.string().min(1),
+  /** When linked, the saved independent translation color remains intact. */
+  translationMatchHighlightColor: z.boolean().default(false),
   translationOutlineEnabled: z.boolean(),
   translationOutlineWidth: z.number().finite().nonnegative(),
   translationOutlineColor: z.string().min(1),
@@ -222,7 +224,7 @@ const CaptionStyleOverrideSchema = z.strictObject({
     quranStyle: z.enum(["madinah-qcf", "uthmani", "indopak", "kfgqpc"]).optional(), arabicFontFamily: z.string().min(1).optional(), translationFontFamily: z.string().min(1).optional(), transliterationFontFamily: z.string().min(1).optional(),
     arabicFontSize: z.number().finite().positive().optional(), translationFontSize: z.number().finite().positive().optional(), translationFontWeight: z.enum(["400", "600", "700"]).optional(), translationItalic: z.boolean().optional(), transliterationFontSize: z.number().finite().positive().optional(), textColor: z.string().min(1).optional(), wordHighlightMode: z.enum(["off", "current-word", "read-so-far"]).optional(), wordHighlightColor: z.string().min(1).optional(), wordHighlightIntensity: z.number().finite().min(0).max(1).optional(),
     arabicOutlineEnabled: z.boolean().optional(), arabicOutlineWidth: z.number().finite().nonnegative().optional(), arabicOutlineColor: z.string().min(1).optional(), arabicShadowEnabled: z.boolean().optional(), arabicShadowBlur: z.number().finite().nonnegative().optional(), arabicShadowStrength: z.number().finite().min(0).max(1).optional(), arabicOpacity: z.number().finite().min(0).max(1).optional(), textAlign: z.enum(["left", "center", "right"]).optional(), arabicLineSpacing: z.number().finite().positive().optional(),
-    translationVisible: z.boolean().optional(), translationTextColor: z.string().min(1).optional(), translationOutlineEnabled: z.boolean().optional(), translationOutlineWidth: z.number().finite().nonnegative().optional(), translationOutlineColor: z.string().min(1).optional(), translationShadowEnabled: z.boolean().optional(), translationShadowBlur: z.number().finite().nonnegative().optional(), translationShadowStrength: z.number().finite().min(0).max(1).optional(), translationOpacity: z.number().finite().min(0).max(1).optional(), translationSpacingBelowArabic: z.number().finite().nonnegative().optional(), translationTextAlign: z.enum(["left", "center", "right"]).optional(), transliterationVisible: z.boolean().optional(),
+    translationVisible: z.boolean().optional(), translationTextColor: z.string().min(1).optional(), translationMatchHighlightColor: z.boolean().optional(), translationOutlineEnabled: z.boolean().optional(), translationOutlineWidth: z.number().finite().nonnegative().optional(), translationOutlineColor: z.string().min(1).optional(), translationShadowEnabled: z.boolean().optional(), translationShadowBlur: z.number().finite().nonnegative().optional(), translationShadowStrength: z.number().finite().min(0).max(1).optional(), translationOpacity: z.number().finite().min(0).max(1).optional(), translationSpacingBelowArabic: z.number().finite().nonnegative().optional(), translationTextAlign: z.enum(["left", "center", "right"]).optional(), transliterationVisible: z.boolean().optional(),
   }).optional(),
   positioning: z.strictObject({
     anchor: z.enum(["top", "center", "bottom"]).optional(), x: z.number().finite().min(0).max(1).optional(), y: z.number().finite().min(0).max(1).optional(), translationX: z.number().finite().min(0).max(1).optional(), translationY: z.number().finite().min(0).max(1).optional(), translationPositionLinked: z.boolean().optional(), maxWidthPercent: z.number().finite().positive().max(1).optional(), translationMaxWidthPercent: z.number().finite().positive().max(1).optional(), translationGapPx: z.number().int().nonnegative().optional(),

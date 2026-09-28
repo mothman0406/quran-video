@@ -120,7 +120,11 @@ test("highlight setting migration preserves explicit choices while missing legac
   delete legacyTypography.wordHighlightMode;
   delete legacyTypography.wordHighlightColor;
   delete legacyTypography.wordHighlightIntensity;
-  assert.equal(loadSavedProject(project({ typography: legacyTypography as SavedProject["typography"] })).typography.wordHighlightMode, "read-so-far");
+  delete legacyTypography.translationMatchHighlightColor;
+  const loadedLegacy = loadSavedProject(project({ typography: legacyTypography as SavedProject["typography"] })).typography;
+  assert.equal(loadedLegacy.wordHighlightMode, "read-so-far");
+  assert.equal(loadedLegacy.wordHighlightColor, "#ffffff");
+  assert.equal(loadedLegacy.translationMatchHighlightColor, false);
   assert.equal(loadSavedProject(project({ typography: { ...DEFAULT_TYPOGRAPHY, wordHighlightMode: "off" } })).typography.wordHighlightMode, "off");
   assert.equal(loadSavedProject(project({ typography: { ...DEFAULT_TYPOGRAPHY, wordHighlightMode: "current-word" } })).typography.wordHighlightMode, "current-word");
 });
@@ -129,7 +133,7 @@ test("pre-generation presentation survives persistence and legacy projects recei
   const selected = project({
     format: PROJECT_FORMATS.portrait,
     positioning: { ...DEFAULT_CAPTION_POSITIONING, y: 0.61 },
-    typography: { ...DEFAULT_TYPOGRAPHY, arabicFontSize: 51, textColor: "#f3ead7", translationFontFamily: "Georgia, serif", translationFontSize: 18, translationFontWeight: "600", translationItalic: true, translationTextColor: "#dce8ff", translationSpacingBelowArabic: 19, arabicOutlineEnabled: true, arabicOutlineWidth: 2, arabicOutlineColor: "#14221a", arabicShadowBlur: 11 },
+    typography: { ...DEFAULT_TYPOGRAPHY, arabicFontSize: 51, textColor: "#f3ead7", wordHighlightColor: "#ffeeaa", translationFontFamily: "Georgia, serif", translationFontSize: 18, translationFontWeight: "600", translationItalic: true, translationTextColor: "#dce8ff", translationMatchHighlightColor: true, translationSpacingBelowArabic: 19, arabicOutlineEnabled: true, arabicOutlineWidth: 2, arabicOutlineColor: "#14221a", arabicShadowBlur: 11 },
     transitionSettings: { ...DEFAULT_TRANSITION_SETTINGS, fadeInMs: 350, fadeOutMs: 350 },
     captionEffects: { videoDimLevel: 28 },
     showVerseNumber: true,

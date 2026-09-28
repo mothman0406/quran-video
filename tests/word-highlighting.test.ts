@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { arabicCaptionPresentationWords, createCaptionSegmentsFromVerseBoundaries, mergeCaptionWithNext, resolveWordHighlightPresentation, splitCaptionSegment } from "../src/lib/editor/captions.ts";
+import { DEFAULT_UNREAD_WORD_OPACITY, arabicCaptionPresentationWords, createCaptionSegmentsFromVerseBoundaries, effectiveTranslationColor, mergeCaptionWithNext, resolveWordHighlightPresentation, splitCaptionSegment } from "../src/lib/editor/captions.ts";
 import { CaptionSegmentSchema, TypographySchema } from "../src/lib/schemas/project.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
@@ -96,13 +96,26 @@ test("only the terminal piece of a split ayah carries and highlights the ornamen
   assert.equal(finalWords.at(-1)?.highlighted, true);
 });
 
-test("shared highlight presentation is vivid at the default intensity and only affects highlighted text", () => {
-  const highlighted = resolveWordHighlightPresentation({ baseTextColor: "#ffffff", highlightColor: "#B7FF00", intensity: 0.85, isHighlighted: true });
-  const normal = resolveWordHighlightPresentation({ baseTextColor: "#ffffff", highlightColor: "#B7FF00", intensity: 0.85, isHighlighted: false });
-  assert.equal(highlighted.color, "#B7FF00");
-  assert.ok(highlighted.glowBlurPx > 9);
-  assert.equal(normal.color, "#ffffff");
-  assert.equal(normal.glowBlurPx, 0);
+test("shared word presentation keeps read words strong, current words colored, and unread words visible", () => {
+  const current = resolveWordHighlightPresentation({ baseTextColor: "#ffffff", highlightColor: "#56aaff", intensity: 0.85, isHighlighted: true, state: "current" });
+  const read = resolveWordHighlightPresentation({ baseTextColor: "#ffffff", highlightColor: "#56aaff", intensity: 0.85, isHighlighted: true, state: "read" });
+  const unread = resolveWordHighlightPresentation({ baseTextColor: "#ffffff", highlightColor: "#56aaff", intensity: 0.85, isHighlighted: false, state: "unread" });
+  assert.deepEqual([current.color, current.opacity], ["#56aaff", 1]);
+  assert.ok(current.glowBlurPx > 0 && current.glowBlurPx < 6);
+  assert.deepEqual([read.color, read.opacity, read.glowBlurPx], ["#ffffff", 1, 0]);
+  assert.deepEqual([unread.color, unread.opacity, unread.glowBlurPx], ["#ffffff", DEFAULT_UNREAD_WORD_OPACITY, 0]);
+});
+
+test("read-so-far exposes read, current, and unread states while highlight off makes all words bright", () => {
+  assert.deepEqual(arabicCaptionPresentationWords(segment(), false, 1_250, "read-so-far").map((word) => word.state), ["read", "current", "unread"]);
+  assert.deepEqual(arabicCaptionPresentationWords(segment(), false, 1_250, "off").map((word) => word.state), ["read", "read", "read"]);
+});
+
+test("translation color linking is live and preserves the independent saved color", () => {
+  const typography = { translationTextColor: "#123456", wordHighlightColor: "#abcdef", translationMatchHighlightColor: true };
+  assert.equal(effectiveTranslationColor(typography), "#abcdef");
+  assert.equal(effectiveTranslationColor({ ...typography, wordHighlightColor: "#fedcba" }), "#fedcba");
+  assert.equal(effectiveTranslationColor({ ...typography, translationMatchHighlightColor: false }), "#123456");
 });
 
 test("split and merged pieces retain only their owned canonical word timings", () => {
@@ -121,7 +134,8 @@ test("basmalah without precise canonical word timings and legacy persistence bot
   const persisted = CaptionSegmentSchema.parse(segment());
   assert.equal(persisted.wordTimings?.length, 3);
   assert.equal(TypographySchema.shape.wordHighlightMode.parse(undefined), "read-so-far");
-  assert.equal(TypographySchema.shape.wordHighlightColor.parse(undefined), "#B7FF00");
+  assert.equal(TypographySchema.shape.wordHighlightColor.parse(undefined), "#ffffff");
+  assert.equal(TypographySchema.shape.translationMatchHighlightColor.parse(undefined), false);
   assert.equal(TypographySchema.shape.wordHighlightIntensity.parse(undefined), 0.85);
 });
 

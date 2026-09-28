@@ -48,9 +48,9 @@ test("legacy caption styles without an Arabic text color fall back to the existi
   assert.equal(migrated.typography.textColor, "#ffffff");
 });
 
-test("new default caption style retains the vivid read-so-far highlight settings", () => {
+test("new default caption style uses a white cinematic read-so-far highlight", () => {
   const style = captionStyleFromState(DEFAULT_TYPOGRAPHY, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_BACKGROUND, DEFAULT_TRANSITION_SETTINGS);
   assert.equal(style.typography.wordHighlightMode, "read-so-far");
-  assert.equal(style.typography.wordHighlightColor, "#B7FF00");
+  assert.equal(style.typography.wordHighlightColor, "#ffffff");
   assert.equal(style.typography.wordHighlightIntensity, 0.85);
 });
