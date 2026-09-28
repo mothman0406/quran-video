@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type Poi
 import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import DashboardShell from "@/components/dashboard-shell";
-import { arabicIndicNumber, captionPositionBounds, resolveWordHighlightPresentation } from "@/lib/editor/captions";
+import { captionPositionBounds, effectiveTranslationColor, resolveWordHighlightPresentation, type ArabicWordVisualState } from "@/lib/editor/captions";
 import { PROJECT_FORMATS, projectFormatForPreset } from "@/lib/editor/formats";
 import { DEFAULT_PRE_GENERATION_PRESENTATION_SECTION, FULL_AYAH_DISPLAY_INHERENT, PRE_GENERATION_PRESENTATION_SECTIONS, defaultCaptionPresentationSettings, presentationForFormat, videoDimOpacity, type CaptionPresentationSettings, type PreGenerationPresentationSection } from "@/lib/editor/presentation-settings";
 import { MEDIA_FILE_ACCEPT, mediaFileError, mediaKindForFile, mediaSourceFromFile } from "@/lib/editor/media";
@@ -12,8 +12,7 @@ import { projectAssetFromMediaSource } from "@/lib/editor/project-assets";
 import { accountEntitlementsForPlan, type AccountEntitlements } from "@/lib/entitlements";
 import { getAccountEntitlements } from "@/lib/entitlements/client";
 import { getAuthSession, getSupabaseClient, listCloudProjectRecords } from "@/lib/cloud-sync";
-import { getVerse } from "@/lib/quran/local";
-import { quranFontDefinitions, type QuranScript } from "@/lib/quran/content";
+import { CANONICAL_BASMALAH_ARABIC, CANONICAL_BASMALAH_TRANSLATION, quranFontDefinitions, type QuranScript } from "@/lib/quran/content";
 import { mediaCompatibilityErrorMessage } from "@/lib/media-compatibility";
 import type { MediaInspection } from "@/lib/media-compatibility";
 import { LocalMediaPreparationProgressController, type LocalMediaPreparationProgress } from "@/lib/recognition/local-media-progress";
@@ -30,7 +29,14 @@ type PreparedSelection = {
   preparedAudio?: DecodedAudioChannels;
 };
 
-const SAMPLE_VERSE = getVerse("93:1")!;
+const HEX_COLOR = /^#[0-9a-f]{6}$/iu;
+
+function ColorControl({ label, value, onChange, disabled = false }: { label: string; value: string; onChange(value: string): void; disabled?: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const displayedValue = draft ?? value;
+  const valid = HEX_COLOR.test(displayedValue);
+  return <label className="quick-create-color"><span>{label}</span><input aria-label={`${label} picker`} type="color" value={HEX_COLOR.test(value) ? value : "#ffffff"} disabled={disabled} onChange={(event) => { setDraft(null); onChange(event.currentTarget.value); }} /><input aria-label={`${label} hex`} value={displayedValue} disabled={disabled} pattern="#[0-9A-Fa-f]{6}" aria-invalid={!valid} onBlur={() => setDraft(null)} onChange={(event) => { const next = event.currentTarget.value; if (HEX_COLOR.test(next)) { setDraft(null); onChange(next); } else setDraft(next); }} /></label>;
+}
 function cleanTitle(name: string): string {
   const value = name.replace(/\.[^.]+$/u, "").replace(/[_-]+/gu, " ").replace(/\s+/gu, " ").trim();
   return value.slice(0, 200) || "New Quran video";
@@ -275,8 +281,8 @@ export default function QuickCreate() {
   const kind = selected ? mediaKindForFile(selected) : null;
   const status = error ? "Preparation failed" : preparationLabel(progress, Boolean(prepared));
   const replacementNotice = Boolean(session && entitlements.plan === "free" && entitlements.cloudProjectLimit !== null && cloudCount >= entitlements.cloudProjectLimit);
-  const sampleWords = SAMPLE_VERSE.arabic.uthmani.split(/\s+/u);
-  const highlightedWord = resolveWordHighlightPresentation({ baseTextColor: typography.textColor, highlightColor: typography.wordHighlightColor, intensity: typography.wordHighlightIntensity, isHighlighted: true });
+  const sampleWords = CANONICAL_BASMALAH_ARABIC.split(/\s+/u);
+  const sampleWordState = (index: number): ArabicWordVisualState => typography.wordHighlightMode === "off" ? "read" : index === 0 ? "read" : index === 1 ? "current" : "unread";
   const shadow = typography.arabicShadowEnabled ? typography.arabicShadowBlur : 0;
   const outline = typography.arabicOutlineEnabled ? typography.arabicOutlineWidth : 0;
   const positionMaximum = captionPositionBounds(presentation.projectFormat).y[1];
@@ -297,8 +303,8 @@ export default function QuickCreate() {
           <div className="quick-create-preview-dim" aria-hidden="true" style={{ backgroundColor: `rgba(0, 0, 0, ${videoDimOpacity(captionEffects)})` }} />
           <div className="quick-create-sample" style={{ top: `${positioning.y * 100}%`, gap: `${typography.translationSpacingBelowArabic}px`, transitionDuration: `${transitionSettings.fadeInMs}ms` }} aria-label="Sample caption placement. This is preview content, not detected Quran text." onPointerDown={moveCaption} onPointerMove={moveCaption} onPointerUp={() => setDragging(false)} onPointerCancel={() => setDragging(false)}>
             <span>Sample preview</span>
-            <p dir="rtl" lang="ar" style={{ color: typography.textColor, fontFamily: `${quranFont.family}, ${quranFont.fallbackFamily}`, fontSize: `${typography.arabicFontSize}px`, opacity: typography.arabicOpacity, WebkitTextStroke: outline ? `${outline}px ${typography.arabicOutlineColor}` : "0 transparent", textShadow: shadow ? `0 2px ${shadow}px rgba(0,0,0,${typography.arabicShadowStrength})` : "none" }}>{sampleWords.map((word, index) => { const read = typography.wordHighlightMode !== "off" && index < Math.ceil(sampleWords.length / 2); return <b style={read ? { color: highlightedWord.color, textShadow: `0 0 ${highlightedWord.glowBlurPx}px ${highlightedWord.glowColor}` } : undefined} key={`${word}-${index}`}>{word}{" "}</b>; })}{showVerseNumber && <b>{arabicIndicNumber(1)}</b>}</p>
-            {typography.translationVisible && <small style={{ color: typography.translationTextColor, fontFamily: typography.translationFontFamily, fontSize: `${typography.translationFontSize}px`, fontWeight: typography.translationFontWeight, fontStyle: typography.translationItalic ? "italic" : "normal", opacity: typography.translationOpacity, WebkitTextStroke: typography.translationOutlineEnabled ? `${typography.translationOutlineWidth}px ${typography.translationOutlineColor}` : "0 transparent", textShadow: typography.translationShadowEnabled ? `0 2px ${typography.translationShadowBlur}px rgba(0,0,0,${typography.translationShadowStrength})` : "none" }}>By the morning brightness</small>}
+            <p dir="rtl" lang="ar" style={{ color: typography.textColor, fontFamily: `${quranFont.family}, ${quranFont.fallbackFamily}`, fontSize: `${typography.arabicFontSize}px`, opacity: typography.arabicOpacity, WebkitTextStroke: outline ? `${outline}px ${typography.arabicOutlineColor}` : "0 transparent", textShadow: shadow ? `0 2px ${shadow}px rgba(0,0,0,${typography.arabicShadowStrength})` : "none" }}>{sampleWords.map((word, index) => { const state = sampleWordState(index); const presentation = resolveWordHighlightPresentation({ baseTextColor: typography.textColor, highlightColor: typography.wordHighlightColor, intensity: typography.wordHighlightIntensity, isHighlighted: state === "current", state }); return <span data-sample-word-state={state} style={{ color: presentation.color, opacity: presentation.opacity, textShadow: presentation.glowBlurPx ? `0 0 ${presentation.glowBlurPx}px ${presentation.glowColor}` : undefined }} key={`${word}-${index}`}>{word}{index < sampleWords.length - 1 ? " " : ""}</span>; })}</p>
+            {typography.translationVisible && <small style={{ color: effectiveTranslationColor(typography), fontFamily: typography.translationFontFamily, fontSize: `${typography.translationFontSize}px`, fontWeight: typography.translationFontWeight, fontStyle: typography.translationItalic ? "italic" : "normal", opacity: typography.translationOpacity, WebkitTextStroke: typography.translationOutlineEnabled ? `${typography.translationOutlineWidth}px ${typography.translationOutlineColor}` : "0 transparent", textShadow: typography.translationShadowEnabled ? `0 2px ${typography.translationShadowBlur}px rgba(0,0,0,${typography.translationShadowStrength})` : "none" }}>{CANONICAL_BASMALAH_TRANSLATION}</small>}
           </div>
         </div>}
         {selected && <div className="quick-create-file"><div><strong>{selected.name}</strong><span>{(selected.size / 1024 / 1024).toFixed(1)} MB · Prepared locally on this device</span></div><label><input type="file" accept={MEDIA_FILE_ACCEPT} onChange={selectFile} />Choose another</label></div>}
@@ -316,7 +322,8 @@ export default function QuickCreate() {
           {activeSection === "quran" && <fieldset disabled={!selected}>
             <label className="quick-create-field">Quran font<select aria-label="Quran font" value={typography.quranStyle} onChange={(event) => { const quranStyle = event.currentTarget.value as QuranScript; updateTypography({ quranStyle, arabicFontFamily: quranFontDefinitions[quranStyle].family }); }}>{Object.entries(quranFontDefinitions).filter(([, font]) => !font.source.includes("{page}")).map(([value, font]) => <option key={value} value={value}>{font.label}</option>)}</select></label>
             <label className="quick-create-range"><span>Size <output>{typography.arabicFontSize}px</output></span><input aria-label="Quran caption size" type="range" min="24" max="64" value={typography.arabicFontSize} onChange={(event) => updateTypography({ arabicFontSize: Number(event.currentTarget.value) })} /></label>
-            <label className="quick-create-color"><span>Color</span><input aria-label="Quran color picker" type="color" value={typography.textColor} onChange={(event) => updateTypography({ textColor: event.currentTarget.value })} /><input aria-label="Quran color hex" value={typography.textColor} pattern="#[0-9A-Fa-f]{6}" onChange={(event) => updateTypography({ textColor: event.currentTarget.value })} /></label>
+            <ColorControl label="Quran color" value={typography.textColor} onChange={(textColor) => updateTypography({ textColor })} />
+            <ColorControl label="Word highlight color" value={typography.wordHighlightColor} onChange={(wordHighlightColor) => updateTypography({ wordHighlightColor })} />
           </fieldset>}
           {activeSection === "translation" && <fieldset disabled={!selected}>
             <label className="quick-create-field">Language<select aria-label="Translation language" value="english_saheeh" disabled><option value="english_saheeh">English · Saheeh International</option></select></label>
@@ -324,7 +331,8 @@ export default function QuickCreate() {
             <label className="quick-create-range"><span>Size <output>{typography.translationFontSize}px</output></span><input aria-label="Translation size" type="range" min="10" max="32" value={typography.translationFontSize} onChange={(event) => updateTypography({ translationFontSize: Number(event.currentTarget.value) })} /></label>
             <div className="quick-create-choice"><span>Weight</span><div role="radiogroup" aria-label="Translation weight">{(["400", "600", "700"] as const).map((weight) => <button type="button" role="radio" aria-checked={typography.translationFontWeight === weight} className={typography.translationFontWeight === weight ? "is-selected" : ""} key={weight} onClick={() => updateTypography({ translationFontWeight: weight })}>{weight === "400" ? "Regular" : weight === "600" ? "Semibold" : "Bold"}</button>)}</div></div>
             <label className="quick-create-switch"><span><strong>Italic</strong><small>Use an italic translation style.</small></span><input type="checkbox" checked={typography.translationItalic} onChange={(event) => updateTypography({ translationItalic: event.currentTarget.checked })} /></label>
-            <label className="quick-create-color"><span>Color</span><input aria-label="Translation color picker" type="color" value={typography.translationTextColor} onChange={(event) => updateTypography({ translationTextColor: event.currentTarget.value })} /><input aria-label="Translation color hex" value={typography.translationTextColor} pattern="#[0-9A-Fa-f]{6}" onChange={(event) => updateTypography({ translationTextColor: event.currentTarget.value })} /></label>
+            <ColorControl label="Translation color" value={effectiveTranslationColor(typography)} disabled={typography.translationMatchHighlightColor} onChange={(translationTextColor) => updateTypography({ translationTextColor })} />
+            <label className="quick-create-switch"><span><strong>Match highlight color</strong><small>Keep translation linked to the word highlight color.</small></span><input type="checkbox" checked={typography.translationMatchHighlightColor} onChange={(event) => updateTypography({ translationMatchHighlightColor: event.currentTarget.checked })} /></label>
           </fieldset>}
           {activeSection === "effects" && <fieldset disabled={!selected}>
             <label className="quick-create-range"><span>Dim level <output>{captionEffects.videoDimLevel}%</output></span><input aria-label="Video dim level" type="range" min="0" max="70" value={captionEffects.videoDimLevel} onChange={(event) => updateEffects({ videoDimLevel: Number(event.currentTarget.value) })} /></label>

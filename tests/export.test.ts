@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createLocalExportConfiguration, snapshotLocalExportConfiguration } from "../src/lib/export/config.ts";
-import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, arabicCaptionPresentationWords, captionVisualStatesAtTime } from "../src/lib/editor/captions.ts";
+import { drawExportCaptions } from "../src/lib/export/caption-canvas.ts";
+import type { LocalExportRequest } from "../src/lib/export/types.ts";
+import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, arabicCaptionPresentationWords, captionVisualStatesAtTime, smoothstep } from "../src/lib/editor/captions.ts";
 import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, SAFE_AREA_OVERLAY_METADATA, mediabunnyVideoTransform, sourceVideoFitForMediabunny, sourceVideoFitForPreview } from "../src/lib/editor/formats.ts";
 import { audioOutputIsValid, selectOutputProfile, sourceAudioRequiresOutput } from "../src/lib/export/output.ts";
 import { DEFAULT_LOCAL_RENDERER_ID } from "../src/lib/export/offline-webcodecs.ts";
@@ -71,7 +73,30 @@ test("preview media rate changes preserve source currentTime and pitch where sup
 test("export reuses the preview transition interpolation without a second timing model", () => {
   const value = config();
   assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings), captionVisualStatesAtTime([segment], 1_112, DEFAULT_TRANSITION_SETTINGS));
-  assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings).map(({ opacity, blurPx }) => ({ opacity, blurPx })), [{ opacity: 112 / 225, blurPx: 0 }]);
+  assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings).map(({ opacity, blurPx }) => ({ opacity, blurPx })), [{ opacity: smoothstep(112 / 225), blurPx: 0 }]);
+});
+
+test("Canvas renderer crossfades each translation with its Arabic ayah using the shared opacity", () => {
+  const second = { ...segment, id: "93:2#1", verseKeys: ["93:2"], startMs: 2_000, endMs: 3_000, arabic: "وَاللَّيْلِ", translation: "And by the night" };
+  const first = { ...segment, endMs: 2_000 };
+  const value = config({ segments: [first, second] });
+  const drawn: Array<{ text: string; opacity: number }> = [];
+  const alphaStack: number[] = [];
+  let alpha = 1;
+  const context = {
+    get globalAlpha() { return alpha; },
+    set globalAlpha(value: number) { alpha = value; },
+    save() { alphaStack.push(alpha); },
+    restore() { alpha = alphaStack.pop() ?? 1; },
+    measureText(text: string) { return { width: text.length * 10 }; },
+    fillText(text: string) { drawn.push({ text, opacity: alpha }); },
+    strokeText() {}, beginPath() {}, roundRect() {}, fill() {},
+  } as unknown as CanvasRenderingContext2D;
+  drawExportCaptions(context, value as unknown as LocalExportRequest, 1_887.5, "UthmanicHafs");
+  assert.deepEqual(drawn.filter(({ text }) => text === "By the morning brightness" || text === "And by the night"), [
+    { text: "By the morning brightness", opacity: 0.5 },
+    { text: "And by the night", opacity: 0.5 },
+  ]);
 });
 
 test("preview and export retain the same highlight-capable basmalah segment", () => {

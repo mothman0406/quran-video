@@ -18,10 +18,14 @@ export type CaptionPresentationSettings = { showVerseNumber: boolean };
 
 export type WordHighlightPresentation = {
   color: string;
+  opacity: number;
   glowColor: string;
   glowBlurPx: number;
   glowOpacity: number;
 };
+
+export type ArabicWordVisualState = "read" | "current" | "unread";
+export const DEFAULT_UNREAD_WORD_OPACITY = 0.32;
 
 export const DEFAULT_CAPTION_PRESENTATION: CaptionPresentationSettings = {
   showVerseNumber: true,
@@ -148,19 +152,24 @@ export function resolveWordHighlightPresentation({
   highlightColor,
   intensity,
   isHighlighted,
+  state,
 }: {
   baseTextColor: string;
   highlightColor: string;
   intensity: number;
   isHighlighted: boolean;
+  state?: ArabicWordVisualState;
 }): WordHighlightPresentation {
-  if (!isHighlighted) return { color: baseTextColor, glowColor: "transparent", glowBlurPx: 0, glowOpacity: 0 };
+  const resolvedState = state ?? (isHighlighted ? "current" : "read");
+  if (resolvedState === "unread") return { color: baseTextColor, opacity: DEFAULT_UNREAD_WORD_OPACITY, glowColor: "transparent", glowBlurPx: 0, glowOpacity: 0 };
+  if (resolvedState === "read") return { color: baseTextColor, opacity: 1, glowColor: "transparent", glowBlurPx: 0, glowOpacity: 0 };
   const strength = Math.max(0, Math.min(1, intensity));
-  const glowOpacity = 0.18 + strength * 0.62;
+  const glowOpacity = 0.12 + strength * 0.2;
   return {
     color: highlightColor,
+    opacity: 1,
     glowColor: colorWithOpacity(highlightColor, glowOpacity),
-    glowBlurPx: 2 + strength * 9,
+    glowBlurPx: 1 + strength * 4,
     glowOpacity,
   };
 }
@@ -184,7 +193,7 @@ export function arabicCaptionPresentationWords(
   const appendNormal = (start: number, end: number) => {
     for (const sourceWord of sourceWords.slice(start, end)) {
       const text = cleanQuranArabicForDisplay(sourceWord);
-      if (text) result.push({ text, highlighted: false, kind: "quran-word" });
+      if (text) result.push({ text, highlighted: false, state: mode === "off" ? "read" : "read", kind: "quran-word" });
     }
   };
   let cursor = 0;
@@ -192,7 +201,14 @@ export function arabicCaptionPresentationWords(
     if (!validWordTiming(timing, sourceWords.length) || timing.sourceWordStart < cursor) continue;
     appendNormal(cursor, timing.sourceWordStart);
     const text = cleanQuranArabicForDisplay(sourceWords.slice(timing.sourceWordStart, timing.sourceWordEnd).join(" "));
-    if (text) result.push({ text, highlighted: isCaptionWordHighlighted(segment, timing, timeMs, mode), kind: "quran-word" });
+    if (text) {
+      const highlighted = isCaptionWordHighlighted(segment, timing, timeMs, mode);
+      const current = mode !== "off" && timeMs >= timing.startMs && timeMs < timing.endMs && timeMs >= segment.startMs && timeMs < segment.endMs;
+      const state: ArabicWordVisualState = mode === "off" || mode === "current-word"
+        ? (current ? "current" : "read")
+        : current ? "current" : highlighted ? "read" : "unread";
+      result.push({ text, highlighted, state, kind: "quran-word" });
+    }
     cursor = timing.sourceWordEnd;
   }
   appendNormal(cursor, sourceWords.length);
@@ -203,7 +219,7 @@ export function arabicCaptionPresentationWords(
     .filter((timing) => validWordTiming(timing, sourceWords.length))
     .sort((left, right) => left.canonicalWordIndex - right.canonicalWordIndex)
     .at(-1);
-  if (verseNumber) result.push({ text: verseNumber, highlighted: finalTiming ? isCaptionWordHighlighted(segment, finalTiming, timeMs, mode) : false, kind: "verse-number" });
+  if (verseNumber) result.push({ text: verseNumber, highlighted: finalTiming ? isCaptionWordHighlighted(segment, finalTiming, timeMs, mode) : false, state: "read", kind: "verse-number" });
   return result;
 }
 
@@ -243,7 +259,7 @@ export const DEFAULT_TYPOGRAPHY: Typography = {
   transliterationFontSize: 14,
   textColor: "#ffffff",
   wordHighlightMode: "read-so-far",
-  wordHighlightColor: "#B7FF00",
+  wordHighlightColor: "#ffffff",
   wordHighlightIntensity: 0.85,
   arabicOutlineEnabled: false,
   arabicOutlineWidth: 1,
@@ -255,14 +271,15 @@ export const DEFAULT_TYPOGRAPHY: Typography = {
   textAlign: "center",
   arabicLineSpacing: 1.35,
   translationVisible: true,
-  translationTextColor: "#f2f2f2",
+  translationTextColor: "#ffffff",
+  translationMatchHighlightColor: false,
   translationOutlineEnabled: false,
   translationOutlineWidth: 1,
   translationOutlineColor: "#000000",
   translationShadowEnabled: true,
   translationShadowBlur: 5,
   translationShadowStrength: 0.55,
-  translationOpacity: 0.82,
+  translationOpacity: 1,
   translationSpacingBelowArabic: 8,
   translationTextAlign: "center",
   transliterationVisible: false,
@@ -433,6 +450,16 @@ function clampOpacity(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
+/** Deterministic ease-in-out curve shared by DOM preview and Canvas export. */
+export function smoothstep(value: number): number {
+  const progress = clampOpacity(value);
+  return progress * progress * (3 - 2 * progress);
+}
+
+export function effectiveTranslationColor(typography: Pick<Typography, "translationMatchHighlightColor" | "translationTextColor" | "wordHighlightColor">): string {
+  return typography.translationMatchHighlightColor ? typography.wordHighlightColor : typography.translationTextColor;
+}
+
 export type CaptionTransitionState = {
   opacity: number;
   blurPx: number;
@@ -459,8 +486,8 @@ export function captionTransitionAtTime(
 ): CaptionTransitionState {
   if (!Number.isFinite(timeMs) || timeMs < segment.startMs || timeMs >= segment.endMs) return { opacity: 0, blurPx: 0 };
   if (settings.type === "none") return { opacity: 1, blurPx: 0 };
-  const fadeIn = settings.fadeInMs > 0 ? clampOpacity((timeMs - segment.startMs) / settings.fadeInMs) : 1;
-  const fadeOut = settings.fadeOutMs > 0 ? clampOpacity((segment.endMs - timeMs) / settings.fadeOutMs) : 1;
+  const fadeIn = settings.fadeInMs > 0 ? smoothstep((timeMs - segment.startMs) / settings.fadeInMs) : 1;
+  const fadeOut = settings.fadeOutMs > 0 ? smoothstep((segment.endMs - timeMs) / settings.fadeOutMs) : 1;
   const opacity = Math.min(fadeIn, fadeOut);
   return { opacity, blurPx: blurAtOpacity(opacity, settings) };
 }
@@ -494,8 +521,36 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
   timeMs: number,
   settings: TransitionSettings = DEFAULT_TRANSITION_SETTINGS,
 ): CaptionVisualState<T>[] {
+  if (!Number.isFinite(timeMs)) return [];
+  if (settings.type === "fade" && settings.fadeInMs > 0) {
+    for (let index = 0; index < segments.length - 1; index += 1) {
+      const outgoing = segments[index]!;
+      const incoming = segments[index + 1]!;
+      if (outgoing.endMs !== incoming.startMs) continue;
+      const duration = Math.min(settings.fadeInMs, settings.fadeOutMs, outgoing.endMs - outgoing.startMs, incoming.endMs - incoming.startMs);
+      const startMs = outgoing.endMs - duration;
+      if (duration <= 0 || timeMs < startMs || timeMs >= outgoing.endMs) continue;
+      const incomingOpacity = smoothstep((timeMs - startMs) / duration);
+      const outgoingOpacity = 1 - incomingOpacity;
+      return [
+        { segment: outgoing, opacity: outgoingOpacity, blurPx: blurAtOpacity(outgoingOpacity, settings) },
+        { segment: incoming, opacity: incomingOpacity, blurPx: blurAtOpacity(incomingOpacity, settings) },
+      ];
+    }
+  }
   const active = getActiveCaptionSegment(segments, timeMs);
   if (!active) return [];
+  const activeIndex = segments.indexOf(active);
+  const previous = activeIndex > 0 ? segments[activeIndex - 1] : undefined;
+  const next = activeIndex >= 0 ? segments[activeIndex + 1] : undefined;
+  const hasAdjacentPrevious = previous?.endMs === active.startMs;
+  const hasAdjacentNext = next?.startMs === active.endMs;
+  if (settings.type === "fade" && (hasAdjacentPrevious || hasAdjacentNext)) {
+    const fadeIn = hasAdjacentPrevious || settings.fadeInMs <= 0 ? 1 : smoothstep((timeMs - active.startMs) / settings.fadeInMs);
+    const fadeOut = hasAdjacentNext || settings.fadeOutMs <= 0 ? 1 : smoothstep((active.endMs - timeMs) / settings.fadeOutMs);
+    const opacity = Math.min(fadeIn, fadeOut);
+    return [{ segment: active, opacity, blurPx: blurAtOpacity(opacity, settings) }];
+  }
   return [{ segment: active, ...captionTransitionAtTime(active, timeMs, settings) }];
 }
 
@@ -550,6 +605,7 @@ export type WordHighlightMode = Typography["wordHighlightMode"];
 export type ArabicPresentationWord = {
   text: string;
   highlighted: boolean;
+  state: ArabicWordVisualState;
   /** The generated ayah ornament is deliberately never a Quran word. */
   kind: "quran-word" | "verse-number";
 };

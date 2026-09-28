@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { CANONICAL_BASMALAH_ARABIC, arabicCaptionDisplay, arabicIndicNumber, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, cleanQuranArabicForDisplay, composeArabicCaptionText, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetCaptionTranslationSegment, resetTransitionSettings, resetTypography, resolveCaptionTranslationSegments, resizeCaptionWidth, splitCaptionSegment, translationDisplayText, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming, updateCaptionTranslationSegment, type CaptionSegment } from "../src/lib/editor/captions.ts";
+import { CANONICAL_BASMALAH_ARABIC, arabicCaptionDisplay, arabicIndicNumber, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, cleanQuranArabicForDisplay, composeArabicCaptionText, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetCaptionTranslationSegment, resetTransitionSettings, resetTypography, resolveCaptionTranslationSegments, resizeCaptionWidth, smoothstep, splitCaptionSegment, translationDisplayText, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming, updateCaptionTranslationSegment, type CaptionSegment } from "../src/lib/editor/captions.ts";
 import { getVerse } from "../src/lib/quran/local.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
@@ -503,13 +503,13 @@ test("default transition settings use a restrained 225ms fade", () => {
   assert.notEqual(resetTransitionSettings(), DEFAULT_TRANSITION_SETTINGS);
 });
 
-test("fade interpolation is continuous across every segment phase", () => {
+test("fade interpolation uses deterministic smoothstep easing across every segment phase", () => {
   const segment = { startMs: 1_000, endMs: 2_000 };
   assert.equal(captionOpacityAtTime(segment, 1_000), 0);
-  assert.equal(captionOpacityAtTime(segment, 1_112), 112 / 225);
+  assert.equal(captionOpacityAtTime(segment, 1_112), smoothstep(112 / 225));
   assert.equal(captionOpacityAtTime(segment, 1_500), 1);
   assert.equal(captionOpacityAtTime(segment, 1_775), 1);
-  assert.equal(captionOpacityAtTime(segment, 1_887), 113 / 225);
+  assert.equal(captionOpacityAtTime(segment, 1_887), smoothstep(113 / 225));
   assert.equal(captionOpacityAtTime(segment, 2_000), 0);
   assert.equal(captionOpacityAtTime(segment, 999), 0);
   // A seek directly into the fade region is a pure calculation, not a timer.
@@ -525,9 +525,9 @@ test("transition interpolation handles zero-duration fades and smooth blur", () 
   assert.equal(captionTransitionAtTime(segment, 2_000, zero).opacity, 0);
   const blurred = { ...DEFAULT_TRANSITION_SETTINGS, blurFadeEnabled: true, blurFadeMaxPx: 12 };
   assert.equal(captionTransitionAtTime(segment, 1_000, blurred).blurPx, 12);
-  assert.equal(captionTransitionAtTime(segment, 1_112, blurred).blurPx, 12 * (1 - 112 / 225));
+  assert.equal(captionTransitionAtTime(segment, 1_112, blurred).blurPx, 12 * (1 - smoothstep(112 / 225)));
   assert.equal(captionTransitionAtTime(segment, 1_500, blurred).blurPx, 0);
-  assert.equal(captionTransitionAtTime(segment, 1_888, blurred).blurPx, 12 * (1 - 112 / 225));
+  assert.equal(captionTransitionAtTime(segment, 1_888, blurred).blurPx, 12 * (1 - smoothstep(112 / 225)));
 });
 
 test("none transition is fully opaque only inside the editable segment", () => {
@@ -539,7 +539,7 @@ test("none transition is fully opaque only inside the editable segment", () => {
   assert.equal(captionOpacityAtTime(segment, 2_000, none), 0);
 });
 
-test("preview and timeline use the same half-open editable CaptionSegment interval", () => {
+test("timeline stays half-open while preview crossfades adjacent captions without a blank", () => {
   const first = { id: "a", startMs: 0, endMs: 1_000 };
   const second = { id: "b", startMs: 1_000, endMs: 2_000 };
   const segments = [first, second];
@@ -548,9 +548,26 @@ test("preview and timeline use the same half-open editable CaptionSegment interv
   ];
   for (const [timeMs, id] of expected) {
     assert.equal(captionForPlaybackTime(segments, timeMs)?.id, id, `timeline at ${timeMs}`);
-    assert.deepEqual(captionVisualStatesAtTime(segments, timeMs, DEFAULT_TRANSITION_SETTINGS).map((state) => state.segment.id), id ? [id] : [], `preview at ${timeMs}`);
+    const visual = captionVisualStatesAtTime(segments, timeMs, DEFAULT_TRANSITION_SETTINGS);
+    if (timeMs === 999) assert.deepEqual(visual.map((state) => state.segment.id), ["a", "b"], "visual overlap does not change timeline ownership");
+    else assert.deepEqual(visual.map((state) => state.segment.id), id ? [id] : [], `preview at ${timeMs}`);
   }
   assert.equal(first.endMs, second.startMs, "editable intervals remain adjacent but never overlap");
+  const start = captionVisualStatesAtTime(segments, 775, DEFAULT_TRANSITION_SETTINGS);
+  const middle = captionVisualStatesAtTime(segments, 887.5, DEFAULT_TRANSITION_SETTINGS);
+  const end = captionVisualStatesAtTime(segments, 1_000, DEFAULT_TRANSITION_SETTINGS);
+  assert.deepEqual(start.map((state) => state.opacity), [1, 0]);
+  assert.deepEqual(middle.map((state) => state.opacity), [0.5, 0.5]);
+  assert.deepEqual(end.map((state) => [state.segment.id, state.opacity]), [["b", 1]]);
+  assert.equal(middle.reduce((sum, state) => sum + state.opacity, 0), 1, "complementary opacity prevents a blank interval");
+});
+
+test("zero-duration adjacent captions switch instantly without changing their timing", () => {
+  const segments = [{ id: "a", startMs: 0, endMs: 1_000 }, { id: "b", startMs: 1_000, endMs: 2_000 }];
+  const zero = { ...DEFAULT_TRANSITION_SETTINGS, fadeInMs: 0, fadeOutMs: 0 };
+  assert.deepEqual(captionVisualStatesAtTime(segments, 999, zero).map((state) => [state.segment.id, state.opacity]), [["a", 1]]);
+  assert.deepEqual(captionVisualStatesAtTime(segments, 1_000, zero).map((state) => [state.segment.id, state.opacity]), [["b", 1]]);
+  assert.deepEqual(segments.map(({ startMs, endMs }) => [startMs, endMs]), [[0, 1_000], [1_000, 2_000]]);
 });
 
 test("caption background shares the animated caption layer opacity", () => {

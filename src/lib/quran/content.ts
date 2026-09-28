@@ -3,6 +3,8 @@ export const TRANSLITERATION_ID = 57;
 export const DEFAULT_TRANSLATION_KEY = "english_saheeh";
 /** Canonical Hafs display representation for a selected opening basmalah. */
 export const CANONICAL_BASMALAH_ARABIC = "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ";
+/** Established English display wording for the canonical basmalah sample. */
+export const CANONICAL_BASMALAH_TRANSLATION = "In the name of Allah, the Entirely Merciful, the Especially Merciful.";
 
 export const quranScriptValues = [
   "uthmani",
