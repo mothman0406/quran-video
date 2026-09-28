@@ -1,3 +1,4 @@
+import { DEFAULT_TRANSITION_SETTINGS } from "./editor/captions.ts";
 import { SavedProjectSchema, type SavedProject } from "./schemas/project.ts";
 
 export const PROJECT_DATABASE_NAME = "quran-video-projects";
@@ -95,6 +96,9 @@ function migrateSavedProject(value: unknown): unknown {
     ...(typeof project.showVerseNumber === "boolean" ? {} : { showVerseNumber: true }),
     // Playback rate is presentation-only. Legacy projects retain neutral playback.
     ...("playbackRate" in project ? {} : { playbackRate: 1 }),
+    // Projects with no saved transition choice adopt the current polished
+    // default. Explicitly stored fade/none settings remain untouched.
+    ...("transitionSettings" in project ? {} : { transitionSettings: { ...DEFAULT_TRANSITION_SETTINGS } }),
     verseAlignments: project.verseAlignments.map((alignment) => {
       if (!alignment || typeof alignment !== "object" || Array.isArray(alignment)) return alignment;
       const current = alignment as Record<string, unknown>;

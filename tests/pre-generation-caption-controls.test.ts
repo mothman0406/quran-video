@@ -46,6 +46,8 @@ test("presentation defaults are complete, clean, and preserve the existing creat
   assert.equal(value.showVerseNumber, false);
   assert.deepEqual(value.captionEffects, DEFAULT_CAPTION_EFFECTS);
   assert.equal(value.transitionSettings.fadeInMs, 225);
+  assert.equal(value.transitionSettings.type, "blur-fade");
+  assert.equal(value.transitionSettings.blurFadeMaxPx, 4);
   assert.equal(FULL_AYAH_DISPLAY_INHERENT, true);
 });
 

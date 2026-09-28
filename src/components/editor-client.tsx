@@ -4220,16 +4220,18 @@ export default function Home() {
                         aria-label="Transition type"
                         className="mt-1 w-full rounded-lg border px-2 py-1"
                         value={transitionSettings.type}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const type = event.target.value as TransitionSettings["type"];
                           setTransitionSettings((current) => ({
                             ...current,
-                            type: event.target
-                              .value as TransitionSettings["type"],
-                          }))
-                        }
+                            type,
+                            blurFadeEnabled: type === "blur-fade",
+                          }));
+                        }}
                       >
                         <option value="none">None</option>
                         <option value="fade">Fade</option>
+                        <option value="blur-fade">Blur fade</option>
                       </select>
                     </label>
                     <div className="mt-2 grid grid-cols-2 gap-2">
@@ -4268,38 +4270,6 @@ export default function Home() {
                         />
                       </label>
                     </div>
-                    <label className="mt-2 flex items-center gap-2 text-sm">
-                      <input
-                        checked={transitionSettings.blurFadeEnabled}
-                        type="checkbox"
-                        onChange={(event) =>
-                          setTransitionSettings((current) => ({
-                            ...current,
-                            blurFadeEnabled: event.target.checked,
-                          }))
-                        }
-                      />{" "}
-                      Blur fade
-                    </label>
-                    {transitionSettings.blurFadeEnabled && (
-                      <label className="mt-2 block text-xs">
-                        Maximum blur (px)
-                        <input
-                          aria-label="Maximum blur"
-                          className="mt-1 w-full rounded-lg border px-2 py-1"
-                          type="number"
-                          min="0"
-                          step="1"
-                          value={transitionSettings.blurFadeMaxPx}
-                          onChange={(event) =>
-                            setTransitionSettings((current) => ({
-                              ...current,
-                              blurFadeMaxPx: Number(event.target.value),
-                            }))
-                          }
-                        />
-                      </label>
-                    )}
                     <button
                       className="mt-2 w-full rounded-full border border-[#c8d4cc] px-4 py-2 text-xs font-semibold text-[#35604f]"
                       type="button"

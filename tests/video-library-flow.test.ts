@@ -45,6 +45,10 @@ test("watch composes source media with saved CaptionSegments rather than requiri
   assert.match(composed, /segments=\{project\.captionSegments as CaptionSegment\[\]\}/);
   assert.match(composed, /typography=\{project\.typography\}/);
   assert.match(composed, /positioning=\{project\.positioning\}/);
+  assert.match(composed, /new MediaPlaybackClock/);
+  assert.match(composed, /playbackClock=\{playbackClock\}/);
+  assert.match(composed, /clockRef\.current\?\.start\(event\.currentTarget\)/);
+  assert.doesNotMatch(composed, /playbackClock=\{null\}/);
   assert.doesNotMatch(composed, /renderedMp4|finishedMp4|exportVideo/i);
 });
 
