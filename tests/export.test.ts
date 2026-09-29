@@ -3,7 +3,7 @@ import test from "node:test";
 import { createLocalExportConfiguration, snapshotLocalExportConfiguration } from "../src/lib/export/config.ts";
 import { drawExportCaptions } from "../src/lib/export/caption-canvas.ts";
 import type { LocalExportRequest } from "../src/lib/export/types.ts";
-import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, arabicCaptionPresentationWords, captionVisualStatesAtTime, smoothstep } from "../src/lib/editor/captions.ts";
+import { DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, arabicCaptionPresentationWords, captionVisualStatesAtTime } from "../src/lib/editor/captions.ts";
 import { DEFAULT_PROJECT_FORMAT, PROJECT_FORMATS, SAFE_AREA_OVERLAY_METADATA, mediabunnyVideoTransform, sourceVideoFitForMediabunny, sourceVideoFitForPreview } from "../src/lib/editor/formats.ts";
 import { audioOutputIsValid, selectOutputProfile, sourceAudioRequiresOutput } from "../src/lib/export/output.ts";
 import { DEFAULT_LOCAL_RENDERER_ID } from "../src/lib/export/offline-webcodecs.ts";
@@ -73,7 +73,7 @@ test("preview media rate changes preserve source currentTime and pitch where sup
 test("export reuses the preview transition interpolation without a second timing model", () => {
   const value = config();
   assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings), captionVisualStatesAtTime([segment], 1_112, DEFAULT_TRANSITION_SETTINGS));
-  assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings).map(({ opacity, blurPx }) => ({ opacity, blurPx })), [{ opacity: smoothstep(112 / 225), blurPx: 4 * (1 - smoothstep(112 / 225)) }]);
+  assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings).map(({ opacity, blurPx }) => ({ opacity, blurPx })), [{ opacity: 1, blurPx: 0 }]);
 });
 
 test("Canvas renderer crossfades each translation with its Arabic ayah using the shared opacity", () => {
@@ -125,9 +125,11 @@ test("Canvas word opacity composes beneath the caption-layer envelope", () => {
   } as unknown as CanvasRenderingContext2D;
   drawExportCaptions(context, value as unknown as LocalExportRequest, 1_112.5, "UthmanicHafs");
   const arabic = samples.find((sample) => sample.text === segment.arabic);
-  assert.equal(arabic?.layerOpacity, 0.5);
-  assert.equal(arabic?.fill, "#ffffff52", "unread 0.32 opacity remains separate from the 0.5 caption layer");
-  assert.equal(0.32 * (arabic?.layerOpacity ?? 0), 0.16);
+  const translation = samples.find((sample) => sample.text === segment.translation);
+  assert.equal(arabic?.layerOpacity, 1, "the first caption is fully visible at its outer edge");
+  assert.equal(translation?.layerOpacity, 1, "translation shares the outer caption layer behavior");
+  assert.equal(arabic?.fill, "#ffffff52", "unread 0.32 word opacity remains separate from the caption layer");
+  assert.equal(0.32 * (arabic?.layerOpacity ?? 0), 0.32, "word highlighting composes unchanged beneath the opaque outer layer");
 });
 
 test("preview and export retain the same highlight-capable basmalah segment", () => {

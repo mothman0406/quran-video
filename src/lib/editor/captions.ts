@@ -543,9 +543,9 @@ export type CaptionVisualState<T extends { startMs: number; endMs: number }> = {
 };
 
 /**
- * Computes preview layers directly from the editable segment intervals. A
- * transition only interpolates opacity inside its own interval, so a caption
- * can never appear before `startMs` or persist at/after `endMs`.
+ * Computes preview layers directly from the editable segment intervals.
+ * Blur-fades exist only between adjacent captions: outer edges stay fully
+ * visible inside their half-open segment interval and never fade to empty.
  */
 export function captionVisualStatesAtTime<T extends { startMs: number; endMs: number }>(
   segments: readonly T[],
@@ -570,18 +570,7 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
   }
   const active = getActiveCaptionSegment(segments, timeMs);
   if (!active) return [];
-  const activeIndex = segments.indexOf(active);
-  const previous = activeIndex > 0 ? segments[activeIndex - 1] : undefined;
-  const next = activeIndex >= 0 ? segments[activeIndex + 1] : undefined;
-  const hasAdjacentPrevious = previous?.endMs === active.startMs;
-  const hasAdjacentNext = next?.startMs === active.endMs;
-  if (settings.type !== "none" && (hasAdjacentPrevious || hasAdjacentNext)) {
-    const fadeIn = hasAdjacentPrevious || settings.fadeInMs <= 0 ? 1 : smoothstep((timeMs - active.startMs) / settings.fadeInMs);
-    const fadeOut = hasAdjacentNext || settings.fadeOutMs <= 0 ? 1 : smoothstep((active.endMs - timeMs) / settings.fadeOutMs);
-    const opacity = Math.min(fadeIn, fadeOut);
-    return [{ segment: active, opacity, blurPx: blurAtOpacity(opacity, settings) }];
-  }
-  return [{ segment: active, ...captionTransitionAtTime(active, timeMs, settings) }];
+  return [{ segment: active, opacity: 1, blurPx: 0 }];
 }
 
 // Legacy values remain readable for saved projects; new recognition writes the
