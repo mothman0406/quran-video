@@ -576,6 +576,46 @@ test("timeline stays half-open while preview crossfades adjacent captions withou
   assert.equal(middle.reduce((sum, state) => sum + state.opacity, 0), 1, "complementary opacity prevents a blank interval");
 });
 
+test("caption timeline keeps outer edges visible while preserving the exact interior blur crossfade", () => {
+  const segments = [
+    { id: "first", startMs: 100, endMs: 1_000, wordTimings: [{ startMs: 120, endMs: 400 }] },
+    { id: "middle", startMs: 1_000, endMs: 2_000, wordTimings: [{ startMs: 1_100, endMs: 1_700 }] },
+    { id: "final", startMs: 2_000, endMs: 3_000, wordTimings: [{ startMs: 2_100, endMs: 2_900 }] },
+  ];
+  const originalTimings = structuredClone(segments);
+
+  assert.deepEqual(captionVisualStatesAtTime(segments, 100), [
+    { segment: segments[0], opacity: 1, blurPx: 0 },
+  ], "the first caption is fully visible and sharp at its start");
+  assert.deepEqual(captionVisualStatesAtTime(segments, 2_999.999), [
+    { segment: segments[2], opacity: 1, blurPx: 0 },
+  ], "the final caption stays fully visible and sharp immediately before its end");
+  assert.deepEqual(captionVisualStatesAtTime(segments, 3_000), [], "the final caption remains half-open without timing extension");
+
+  const firstBoundaryStart = captionVisualStatesAtTime(segments, 775);
+  const firstBoundaryQuarter = captionVisualStatesAtTime(segments, 831.25);
+  const firstBoundaryMiddle = captionVisualStatesAtTime(segments, 887.5);
+  assert.deepEqual(firstBoundaryStart.map(({ opacity, blurPx }) => ({ opacity, blurPx })), [
+    { opacity: 1, blurPx: 0 }, { opacity: 0, blurPx: 4 },
+  ], "the unchanged transition begins exactly 225 ms before the boundary");
+  assert.deepEqual(firstBoundaryQuarter.map(({ opacity, blurPx }) => ({ opacity, blurPx })), [
+    { opacity: 1 - smoothstep(0.25), blurPx: 4 * smoothstep(0.25) },
+    { opacity: smoothstep(0.25), blurPx: 4 * (1 - smoothstep(0.25)) },
+  ], "interior easing remains smoothstep");
+  assert.deepEqual(firstBoundaryMiddle.map(({ segment, opacity, blurPx }) => ({ id: segment.id, opacity, blurPx })), [
+    { id: "first", opacity: 0.5, blurPx: 2 },
+    { id: "middle", opacity: 0.5, blurPx: 2 },
+  ], "a caption with a real previous segment still crossfades in normally");
+  assert.equal(firstBoundaryMiddle.reduce((sum, state) => sum + state.opacity, 0), 1, "interior midpoint opacity remains complementary");
+
+  const secondBoundaryMiddle = captionVisualStatesAtTime(segments, 1_887.5);
+  assert.deepEqual(secondBoundaryMiddle.map(({ segment, opacity, blurPx }) => ({ id: segment.id, opacity, blurPx })), [
+    { id: "middle", opacity: 0.5, blurPx: 2 },
+    { id: "final", opacity: 0.5, blurPx: 2 },
+  ], "a caption with a real next segment still crossfades out normally");
+  assert.deepEqual(segments, originalTimings, "presentation lookup does not mutate raw, word, or manually edited timings");
+});
+
 test("zero-duration adjacent captions switch instantly without changing their timing", () => {
   const segments = [{ id: "a", startMs: 0, endMs: 1_000 }, { id: "b", startMs: 1_000, endMs: 2_000 }];
   const zero = { ...DEFAULT_TRANSITION_SETTINGS, fadeInMs: 0, fadeOutMs: 0 };
@@ -584,9 +624,9 @@ test("zero-duration adjacent captions switch instantly without changing their ti
   assert.deepEqual(segments.map(({ startMs, endMs }) => [startMs, endMs]), [[0, 1_000], [1_000, 2_000]]);
 });
 
-test("caption background shares the animated caption layer opacity", () => {
+test("caption background and translation share the opaque outer caption layer", () => {
   const segment = { id: "caption", startMs: 0, endMs: 1_000 };
   const state = captionVisualStatesAtTime([segment], 112, DEFAULT_TRANSITION_SETTINGS)[0];
-  assert.equal(state.opacity, captionOpacityAtTime(segment, 112));
+  assert.deepEqual(state, { segment, opacity: 1, blurPx: 0 });
   assert.equal(DEFAULT_CAPTION_BACKGROUND.enabled, false);
 });

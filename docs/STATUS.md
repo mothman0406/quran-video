@@ -1,5 +1,34 @@
 # Status
 
+## Current milestone: Outer caption edge visibility
+
+Complete in implementation, automated validation, and generated-video Watch QA:
+
+- Blur crossfades now occur only between adjacent CaptionSegments. An active
+  first caption is fully opaque and sharp at its exact start, and an active
+  final caption remains fully opaque and sharp until its half-open end.
+- Interior transitions retain the same complementary smoothstep envelope,
+  225 ms duration, and 4 px logical maximum blur. Raw caption, word, ayah, and
+  manual timing data are not changed.
+- Editor, generated-video Watch, and Canvas/MP4 export continue to use the
+  shared `captionVisualStatesAtTime` presentation selector. The `/create`
+  sample has no generated caption timeline; completed generation opens the
+  Videos/Watch path. Arabic, translation, background, and word-highlight
+  composition remain one layer.
+- Real Chrome QA generated Case A as `20:100-103` and opened it from Videos to
+  Watch. At 0.384 seconds, `20:100` was visible at opacity 1 with no blur. At
+  32.927 seconds, `20:103` was visible at opacity 1 with no blur; at 32.928 it
+  was inactive. All three interior ayah boundaries retained two blurred layers
+  with complementary opacity.
+- The generated guest video could not be reopened with source media in the
+  advanced editor after route navigation, and a fresh MP4 download reached the
+  expected sign-in gate. Editor/Watch parity and export behavior are therefore
+  additionally covered by the shared-path and Canvas renderer tests.
+- Focused transition/export coverage passes 75/75; the full suite passes
+  595/595. Strict TypeScript, quiet lint, the production build, and whitespace
+  validation pass. The build retains only the established ONNX/Transformers
+  warnings.
+
 ## Current milestone: Quran boundary localization architecture fix
 
 Complete in implementation and real-fixture/frozen validation:
