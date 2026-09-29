@@ -5,6 +5,7 @@ import type { FastConformerIdentificationResult, IdentificationWindowResult, Qur
 import { completeBoundedEdges, type EdgeAcousticEvidence } from "../src/lib/recognition/quran-edge-completion.ts";
 import { canonicalSpanFromExactRange, resolveQuranCore, versesForExactRange } from "../src/lib/recognition/quran-complete-range.ts";
 import { reconstructCanonicalPassage as productionReconstruct } from "../src/lib/recognition/canonical-passage-reconstruction.ts";
+import { selectFeasibleBoundaryTarget } from "../src/lib/recognition/quran-core-boundary-localizer.ts";
 import { reconstructCanonicalPassage as offlineReconstruct } from "../tools/regression/canonical-passage-reconstruction.ts";
 
 function candidate(surah: number, startAyah: number, endAyah: number, startWord: number, endWord: number): QuranPassageCandidate {
@@ -123,6 +124,25 @@ test("exact-range expansion supplies every canonical ayah once to the final targ
   assert.deepEqual(verses.map((verse) => verse.verseKey), Array.from({ length: 12 }, (_, index) => `86:${index + 1}`));
   assert.deepEqual(span?.coveredVerseKeys, verses.map((verse) => verse.verseKey));
   assert.equal(new Set(span?.coveredVerseKeys).size, 12);
+});
+
+test("truncating a localization target cannot redefine canonical range identity", () => {
+  const range = { surah: 2, startAyah: 258, endAyah: 259 };
+  const words = Array.from({ length: 200 }, (_, index) => ({
+    verseKey: index < 100 ? "2:258" : "2:259",
+    canonicalWordIndex: index % 100 + 1,
+    globalWordIndex: index + 1,
+    canonicalArabic: `w${index + 1}`,
+    alignmentText: `w${index + 1}`,
+  }));
+  const tokens = words.map((word, index) => ({ tokenId: index % 5 + 1, token: `t${index + 1}`, globalWordIndex: word.globalWordIndex, owner: "canonical" as const }));
+  const start = selectFeasibleBoundaryTarget({ edge: "start", availableFrames: 40, canonicalWords: words, targetTokens: tokens });
+  const end = selectFeasibleBoundaryTarget({ edge: "end", availableFrames: 40, canonicalWords: words, targetTokens: tokens });
+  assert.equal(start.representation.status, "bounded");
+  assert.equal(end.representation.status, "bounded");
+  assert.equal(start.canonicalWords[0]?.verseKey, "2:258");
+  assert.equal(end.canonicalWords.at(-1)?.verseKey, "2:259");
+  assert.deepEqual(versesForExactRange(range).map((verse) => verse.verseKey), ["2:258", "2:259"]);
 });
 
 test("production uses one global identification and the reused final forced alignment", () => {

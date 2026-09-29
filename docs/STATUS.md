@@ -1,5 +1,45 @@
 # Status
 
+## Current milestone: Quran boundary localization architecture fix
+
+Complete in implementation and real-fixture/frozen validation:
+
+- Added explicit CTC topology feasibility, including mandatory blank frames
+  between repeated labels. Boundary target infeasibility is now distinct from
+  absent acoustic evidence.
+- Replaced impossible whole-edge targets with frame-derived contiguous
+  canonical prefixes/suffixes used only for temporal localization. Canonical
+  reconstruction remains authoritative for range identity.
+- Added bounded outer-evidence preservation: ordered canonical emissions,
+  complete local alignment, and a strict canonical-over-blank win are required
+  before an interior likelihood anchor may move outward. VAD alone cannot
+  expand a boundary; trailing blank completion is accepted only adjacent to a
+  proven suffix inside the same voiced region.
+- Case A remains `20:100-103` and moves from 4.104–26.968 seconds to
+  0.384–32.928 seconds. Final alignment covers 20:100 at 0.399–8.944,
+  20:101 at 8.944–16.929, 20:102 at 16.929–26.192, and 20:103 through 32.928.
+- Case B now completes exactly as `2:258-259`. Its old 248-label/150-frame
+  targets are explicitly infeasible; frame-derived start/end representations
+  are 75 labels each, whole-core proof is 248/248, both adjacent ayahs remain
+  excluded, and final alignment completes 2/2 ayat.
+- Protected configuration assertions prove recognition thresholds, VAD,
+  window/hop, continuation/reconstruction/integrity/edge rules,
+  forced-alignment constants, caption padding, and the 225 ms transition are
+  unchanged.
+- Frozen evaluation remains H `91:1-15`, K `92:1-14`, Positive B
+  `101:1-11`, Negative A rejected, historical genuine 20/20, historical
+  adversarial 23/23, and final validation 2/2 exact plus 2/2 rejected.
+- Built production `/create` QA passed for both real fixtures. Case A saved
+  exact `20:100-103` CaptionSegments from 0.384 through 32.928 seconds. Case B
+  retained the primary CTC abstention, recovered exact `2:258-259`, and
+  completed final alignment. Both used native-safe media preparation, one
+  global Quran search, and one retained FastConformer session.
+- Final gates pass: focused boundary/constant coverage 27/27, full suite
+  594/594, strict TypeScript, quiet lint, production build, and whitespace
+  validation. The build has only its established ONNX/Transformers warnings.
+
+Details: `docs/QURAN_BOUNDARY_LOCALIZATION_FIX.md`.
+
 ## Current milestone: Caption transition and render parity
 
 Complete in implementation and automated validation:
