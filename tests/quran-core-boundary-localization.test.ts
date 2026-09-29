@@ -4,8 +4,11 @@ import { promisify } from "node:util";
 import test from "node:test";
 import type { CtcCanonicalWord, CtcFrameLogits, CtcTargetToken } from "../src/lib/recognition/ctc-forced-alignment.ts";
 import {
+  boundaryLocalizationFrameRequirement,
   FROZEN_CORE_BOUNDARY_RULE,
   locateCoreBoundary,
+  minimumCtcFramesRequired,
+  selectFeasibleBoundaryTarget,
   selectApplicableCoreBoundaries,
   sliceCtcLogits,
 } from "../tools/regression/quran-core-boundary-localizer.ts";
@@ -35,6 +38,57 @@ function logits(events: Readonly<Record<number, number>>, frames = 200): CtcFram
   return { values, frames, vocabularySize };
 }
 
+function longTarget(length: number) {
+  const words: CtcCanonicalWord[] = [];
+  const tokens: CtcTargetToken[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const globalWordIndex = index + 1;
+    words.push({ verseKey: "1:1", canonicalWordIndex: globalWordIndex, globalWordIndex, canonicalArabic: `w${globalWordIndex}`, alignmentText: `w${globalWordIndex}` });
+    tokens.push({ tokenId: index % 3 + 1, token: `t${index}`, globalWordIndex, owner: "canonical" });
+  }
+  return { words, tokens };
+}
+
+test("CTC feasibility includes the mandatory blank between repeated labels", () => {
+  const repeated: CtcTargetToken[] = [
+    { tokenId: 1, token: "a", globalWordIndex: 1, owner: "canonical" },
+    { tokenId: 1, token: "a", globalWordIndex: 1, owner: "canonical" },
+    { tokenId: 2, token: "b", globalWordIndex: 2, owner: "canonical" },
+  ];
+  assert.equal(minimumCtcFramesRequired(repeated), 4);
+  assert.equal(boundaryLocalizationFrameRequirement(repeated), 7);
+});
+
+test("long boundary targets become frame-derived canonical prefixes and suffixes", () => {
+  const source = longTarget(100);
+  const start = selectFeasibleBoundaryTarget({ edge: "start", availableFrames: 20, canonicalWords: source.words, targetTokens: source.tokens });
+  const end = selectFeasibleBoundaryTarget({ edge: "end", availableFrames: 20, canonicalWords: source.words, targetTokens: source.tokens });
+  for (const selected of [start, end]) {
+    assert.equal(selected.representation.sourceFeasibility, "target-representation-infeasible");
+    assert.equal(selected.representation.status, "bounded");
+    assert.ok(selected.targetTokens.length >= FROZEN_CORE_BOUNDARY_RULE.minimumTargetTokenCount);
+    assert.ok(boundaryLocalizationFrameRequirement(selected.targetTokens) <= selected.representation.availableFrames);
+  }
+  assert.deepEqual(start.targetTokens.map((token) => token.globalWordIndex), Array.from({ length: 10 }, (_, index) => index + 1));
+  assert.deepEqual(end.targetTokens.map((token) => token.globalWordIndex), Array.from({ length: 10 }, (_, index) => index + 91));
+});
+
+test("short boundary targets remain byte-for-byte complete", () => {
+  const start = selectFeasibleBoundaryTarget({ edge: "start", availableFrames: 20, canonicalWords: WORDS, targetTokens: TARGETS });
+  const end = selectFeasibleBoundaryTarget({ edge: "end", availableFrames: 20, canonicalWords: WORDS, targetTokens: TARGETS });
+  assert.equal(start.representation.status, "full");
+  assert.equal(end.representation.status, "full");
+  assert.deepEqual(start.targetTokens, TARGETS);
+  assert.deepEqual(end.targetTokens, TARGETS);
+});
+
+test("a target too small for the existing minimum proof remains infeasible rather than accepted", () => {
+  const source = longTarget(10);
+  const selected = selectFeasibleBoundaryTarget({ edge: "start", availableFrames: 3, canonicalWords: source.words, targetTokens: source.tokens });
+  assert.equal(selected.representation.status, "infeasible");
+  assert.deepEqual(selected.targetTokens, []);
+});
+
 test("leading arbitrary speech remains outside the independently located core start", () => {
   const result = locateCoreBoundary({
     edge: "start", audioStartMs: 0, audioEndMs: 20_000, firstSpeechMs: 0, finalSpeechMs: 20_000,
@@ -56,6 +110,59 @@ test("the core end locator excludes incompatible trailing speech", () => {
   assert.ok((result.selected?.cutMs ?? 0) >= 13_000 && (result.selected?.cutMs ?? 0) <= 13_200);
   assert.ok(result.selected.cutMs < 16_000);
   assert.equal(result.selected.temporalConsistency, true);
+});
+
+test("strict canonical prefix evidence retains an earlier supported boundary", () => {
+  const result = locateCoreBoundary({
+    edge: "start", audioStartMs: 0, audioEndMs: 20_000, firstSpeechMs: 0, finalSpeechMs: 20_000,
+    logits: logits({ 5: 1, 7: 2, 30: 1, 32: 2 }), canonicalWords: WORDS, targetTokens: TARGETS, blankTokenId: BLANK,
+    speechRegions: [{ startMs: 0, endMs: 20_000, durationMs: 20_000, confidence: 1 }],
+  });
+  assert.ok(result.selected?.outerEvidence);
+  assert.ok((result.selected?.anchorCutMs ?? 0) >= 2_760 && (result.selected?.anchorCutMs ?? 0) <= 3_000);
+  assert.ok((result.selected?.cutMs ?? Infinity) <= 500);
+  assert.ok((result.selected?.outerEvidence?.likelihoodDifference ?? 0) > 0);
+});
+
+test("VAD alone cannot expand a boundary without a strict canonical-over-blank win", () => {
+  const result = locateCoreBoundary({
+    edge: "start", audioStartMs: 0, audioEndMs: 20_000, firstSpeechMs: 0, finalSpeechMs: 20_000,
+    logits: logits({ 30: 1, 32: 2 }), canonicalWords: WORDS, targetTokens: TARGETS, blankTokenId: BLANK,
+    speechRegions: [{ startMs: 0, endMs: 20_000, durationMs: 20_000, confidence: 1 }],
+  });
+  assert.equal(result.selected?.outerEvidence, undefined);
+  assert.ok((result.selected?.cutMs ?? 0) >= 2_760);
+});
+
+test("unrelated voiced logits cannot expand the accepted canonical boundary", () => {
+  const result = locateCoreBoundary({
+    edge: "start", audioStartMs: 0, audioEndMs: 20_000, firstSpeechMs: 0, finalSpeechMs: 20_000,
+    logits: logits({ 5: 3, 7: 3, 30: 1, 32: 2 }), canonicalWords: WORDS, targetTokens: TARGETS, blankTokenId: BLANK,
+    speechRegions: [{ startMs: 0, endMs: 20_000, durationMs: 20_000, confidence: 1 }],
+  });
+  assert.equal(result.selected?.outerEvidence, undefined);
+  assert.ok((result.selected?.cutMs ?? 0) >= 2_760);
+});
+
+test("wrong-order adjacent Quran tokens cannot expand the accepted core", () => {
+  const result = locateCoreBoundary({
+    edge: "start", audioStartMs: 0, audioEndMs: 20_000, firstSpeechMs: 0, finalSpeechMs: 20_000,
+    logits: logits({ 5: 2, 7: 1, 30: 1, 32: 2 }), canonicalWords: WORDS, targetTokens: TARGETS, blankTokenId: BLANK,
+    speechRegions: [{ startMs: 0, endMs: 20_000, durationMs: 20_000, confidence: 1 }],
+  });
+  assert.equal(result.selected?.outerEvidence, undefined);
+  assert.ok((result.selected?.cutMs ?? 0) >= 2_760);
+});
+
+test("strict canonical suffix evidence retains a later supported completion", () => {
+  const result = locateCoreBoundary({
+    edge: "end", audioStartMs: 0, audioEndMs: 20_000, firstSpeechMs: 0, finalSpeechMs: 16_000,
+    logits: logits({ 128: 1, 130: 2, 145: 1, 147: 2 }), canonicalWords: WORDS, targetTokens: TARGETS, blankTokenId: BLANK,
+    speechRegions: [{ startMs: 0, endMs: 16_000, durationMs: 16_000, confidence: 1 }],
+  });
+  assert.equal(result.selected?.cutMs, 16_000);
+  assert.ok(result.selected?.outerEvidence);
+  assert.equal(result.selected?.outerEvidence?.blankCompletionApplied, true);
 });
 
 test("candidate offsets use equal acoustic durations and per-frame normalization", () => {

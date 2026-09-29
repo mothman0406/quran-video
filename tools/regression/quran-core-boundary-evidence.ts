@@ -5,10 +5,13 @@ export const CORE_BOUNDARY_EVIDENCE_SCHEMA_VERSION = 1 as const;
 export type CoreBoundarySummary = Pick<CoreBoundaryLocation,
   "edge" | "searchStartMs" | "searchEndMs" | "coarseEvaluationCount" | "fineEvaluationCount"> & {
     selectedCutMs: number | null;
+    selectedAnchorCutMs: number | null;
     selectedTargetLogLikelihoodPerFrame: number | null;
     selectedTargetCoverage: number;
     selectedAlignmentComplete: boolean;
     selectedTemporalConsistency: boolean;
+    targetRepresentation: CoreBoundaryLocation["targetRepresentation"] | null;
+    outerEvidence: NonNullable<CoreBoundaryLocation["selected"]>["outerEvidence"] | null;
   };
 
 export type PrivacySafeCoreBoundaryFixture = {
@@ -61,10 +64,12 @@ export function summarizeCoreBoundary(location: CoreBoundaryLocation): CoreBound
     coarseEvaluationCount: location.coarseEvaluationCount,
     fineEvaluationCount: location.fineEvaluationCount,
     selectedCutMs: location.selected?.cutMs ?? null,
+    selectedAnchorCutMs: location.selected?.anchorCutMs ?? location.selected?.cutMs ?? null,
     selectedTargetLogLikelihoodPerFrame: location.selected?.normalizedTargetLogLikelihood ?? null,
     selectedTargetCoverage: location.selected?.targetCoverage ?? 0,
     selectedAlignmentComplete: location.selected?.alignmentComplete ?? false,
     selectedTemporalConsistency: location.selected?.temporalConsistency ?? false,
+    targetRepresentation: location.targetRepresentation ?? null,
+    outerEvidence: location.selected?.outerEvidence ?? null,
   };
 }
-

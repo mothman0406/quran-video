@@ -364,11 +364,11 @@ async function runCompleteRangeFinalValidation(id: string) {
   const endEncoded = encodeFastConformerWords(canonicalCtcWords(endAnchorVerses), tokenTable, vocabulary, tilawaText);
   const startLocation = locateCoreBoundary({
     edge: "start", audioStartMs: 0, audioEndMs: durationMs, firstSpeechMs: firstSpeech, finalSpeechMs: finalSpeech,
-    logits: fullLogits, canonicalWords: startEncoded.canonicalWords, targetTokens: startEncoded.targetTokens, blankTokenId: BLANK_TOKEN_ID,
+    logits: fullLogits, canonicalWords: startEncoded.canonicalWords, targetTokens: startEncoded.targetTokens, blankTokenId: BLANK_TOKEN_ID, speechRegions,
   });
   const endLocation = locateCoreBoundary({
     edge: "end", audioStartMs: 0, audioEndMs: durationMs, firstSpeechMs: firstSpeech, finalSpeechMs: finalSpeech,
-    logits: fullLogits, canonicalWords: endEncoded.canonicalWords, targetTokens: endEncoded.targetTokens, blankTokenId: BLANK_TOKEN_ID,
+    logits: fullLogits, canonicalWords: endEncoded.canonicalWords, targetTokens: endEncoded.targetTokens, blankTokenId: BLANK_TOKEN_ID, speechRegions,
   });
   const surahAyahCount = hafsVerses.filter((verse) => verse.verseKey.startsWith(`${core.surah}:`)).length;
   const applicable = selectApplicableCoreBoundaries({
@@ -433,6 +433,11 @@ async function runCompleteRangeFinalValidation(id: string) {
       startAyah: finalRange?.startAyah ?? null,
       endAyah: finalRange?.endAyah ?? null,
       ayahTimingCount: finalAlignment?.status === "complete" ? finalAlignment.verses.length : 0,
+      firstAlignedTokenMs: finalAlignment?.status === "complete" ? finalAlignment.words[0]?.startMs ?? null : null,
+      finalAlignedTokenMs: finalAlignment?.status === "complete" ? finalAlignment.words.at(-1)?.endMs ?? null : null,
+      ayahTimings: finalAlignment?.status === "complete"
+        ? finalAlignment.verses.map((verse) => ({ verseKey: verse.verseKey, startMs: verse.startMs, endMs: verse.endMs }))
+        : [],
     },
     fastConformerPasses: identifiedWindows.length + 1 + Number(startCapture !== null) + Number(endCapture !== null),
     boundarySearchEvaluations: startLocation.coarseEvaluationCount + startLocation.fineEvaluationCount

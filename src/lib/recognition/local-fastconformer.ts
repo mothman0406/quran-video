@@ -1050,11 +1050,11 @@ export function createCompleteRangeFastConformerRunner(
       const endEncoded = encodeFastConformerWords(canonicalCtcWords(endAnchor), loaded.assets.tokenTable, loaded.assets.vocabulary, loaded.assets.quranText);
       const startLocation = core.startAyah > 1 ? locateCoreBoundary({
         edge: "start", audioStartMs: 0, audioEndMs: durationMs, firstSpeechMs, finalSpeechMs,
-        logits: fullLogits, canonicalWords: startEncoded.canonicalWords, targetTokens: startEncoded.targetTokens, blankTokenId: BLANK_TOKEN_ID,
+        logits: fullLogits, canonicalWords: startEncoded.canonicalWords, targetTokens: startEncoded.targetTokens, blankTokenId: BLANK_TOKEN_ID, speechRegions,
       }) : emptyBoundaryLocation("start", establishedStartMs ?? firstSpeechMs);
       const endLocation = core.endAyah < surahAyahCount ? locateCoreBoundary({
         edge: "end", audioStartMs: 0, audioEndMs: durationMs, firstSpeechMs, finalSpeechMs,
-        logits: fullLogits, canonicalWords: endEncoded.canonicalWords, targetTokens: endEncoded.targetTokens, blankTokenId: BLANK_TOKEN_ID,
+        logits: fullLogits, canonicalWords: endEncoded.canonicalWords, targetTokens: endEncoded.targetTokens, blankTokenId: BLANK_TOKEN_ID, speechRegions,
       }) : emptyBoundaryLocation("end", establishedEndMs ?? finalSpeechMs);
       const applicable = selectApplicableCoreBoundaries({ core, surahAyahCount, establishedStartMs, establishedEndMs, startLocation, endLocation });
       const coreStartMs = applicable.startMs;
