@@ -295,11 +295,11 @@ export const DEFAULT_CAPTION_BACKGROUND: CaptionBackground = {
 };
 
 export const DEFAULT_TRANSITION_SETTINGS: TransitionSettings = {
-  type: "fade",
+  type: "blur-fade",
   fadeInMs: 225,
   fadeOutMs: 225,
-  blurFadeEnabled: false,
-  blurFadeMaxPx: 12,
+  blurFadeEnabled: true,
+  blurFadeMaxPx: 4,
 };
 
 export const DEFAULT_CAPTION_EFFECTS: CaptionEffects = {
@@ -465,6 +465,13 @@ export type CaptionTransitionState = {
   blurPx: number;
 };
 
+export type CaptionTransitionEnvelope = {
+  outgoingOpacity: number;
+  outgoingBlurPx: number;
+  incomingOpacity: number;
+  incomingBlurPx: number;
+};
+
 /** The one authoritative half-open interval lookup used by preview and timeline. */
 export function getActiveCaptionSegment<T extends { startMs: number; endMs: number }>(
   segments: readonly T[],
@@ -474,8 +481,32 @@ export function getActiveCaptionSegment<T extends { startMs: number; endMs: numb
   return segments.find((segment) => segment.startMs <= currentTimeMs && currentTimeMs < segment.endMs) ?? null;
 }
 
+function usesBlurFade(settings: TransitionSettings): boolean {
+  // `blurFadeEnabled` preserves explicitly saved projects from the earlier
+  // two-field model. New projects express the behavior through `type`.
+  return settings.type === "blur-fade" || (settings.type === "fade" && settings.blurFadeEnabled);
+}
+
 function blurAtOpacity(opacity: number, settings: TransitionSettings): number {
-  return settings.blurFadeEnabled ? settings.blurFadeMaxPx * (1 - opacity) : 0;
+  return usesBlurFade(settings) ? settings.blurFadeMaxPx * (1 - opacity) : 0;
+}
+
+/** One complementary smoothstep envelope for DOM preview, Watch, and Canvas. */
+export function captionTransitionEnvelope(
+  progress: number,
+  settings: TransitionSettings = DEFAULT_TRANSITION_SETTINGS,
+): CaptionTransitionEnvelope {
+  if (settings.type === "none" || settings.fadeInMs === 0 || settings.fadeOutMs === 0) {
+    return { outgoingOpacity: 0, outgoingBlurPx: 0, incomingOpacity: 1, incomingBlurPx: 0 };
+  }
+  const incomingOpacity = smoothstep(progress);
+  const outgoingOpacity = 1 - incomingOpacity;
+  return {
+    outgoingOpacity,
+    outgoingBlurPx: blurAtOpacity(outgoingOpacity, settings),
+    incomingOpacity,
+    incomingBlurPx: blurAtOpacity(incomingOpacity, settings),
+  };
 }
 
 /** Pure visual interpolation tied to absolute video time. */
@@ -522,7 +553,7 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
   settings: TransitionSettings = DEFAULT_TRANSITION_SETTINGS,
 ): CaptionVisualState<T>[] {
   if (!Number.isFinite(timeMs)) return [];
-  if (settings.type === "fade" && settings.fadeInMs > 0) {
+  if (settings.type !== "none" && settings.fadeInMs > 0 && settings.fadeOutMs > 0) {
     for (let index = 0; index < segments.length - 1; index += 1) {
       const outgoing = segments[index]!;
       const incoming = segments[index + 1]!;
@@ -530,11 +561,10 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
       const duration = Math.min(settings.fadeInMs, settings.fadeOutMs, outgoing.endMs - outgoing.startMs, incoming.endMs - incoming.startMs);
       const startMs = outgoing.endMs - duration;
       if (duration <= 0 || timeMs < startMs || timeMs >= outgoing.endMs) continue;
-      const incomingOpacity = smoothstep((timeMs - startMs) / duration);
-      const outgoingOpacity = 1 - incomingOpacity;
+      const envelope = captionTransitionEnvelope((timeMs - startMs) / duration, settings);
       return [
-        { segment: outgoing, opacity: outgoingOpacity, blurPx: blurAtOpacity(outgoingOpacity, settings) },
-        { segment: incoming, opacity: incomingOpacity, blurPx: blurAtOpacity(incomingOpacity, settings) },
+        { segment: outgoing, opacity: envelope.outgoingOpacity, blurPx: envelope.outgoingBlurPx },
+        { segment: incoming, opacity: envelope.incomingOpacity, blurPx: envelope.incomingBlurPx },
       ];
     }
   }
@@ -545,7 +575,7 @@ export function captionVisualStatesAtTime<T extends { startMs: number; endMs: nu
   const next = activeIndex >= 0 ? segments[activeIndex + 1] : undefined;
   const hasAdjacentPrevious = previous?.endMs === active.startMs;
   const hasAdjacentNext = next?.startMs === active.endMs;
-  if (settings.type === "fade" && (hasAdjacentPrevious || hasAdjacentNext)) {
+  if (settings.type !== "none" && (hasAdjacentPrevious || hasAdjacentNext)) {
     const fadeIn = hasAdjacentPrevious || settings.fadeInMs <= 0 ? 1 : smoothstep((timeMs - active.startMs) / settings.fadeInMs);
     const fadeOut = hasAdjacentNext || settings.fadeOutMs <= 0 ? 1 : smoothstep((active.endMs - timeMs) / settings.fadeOutMs);
     const opacity = Math.min(fadeIn, fadeOut);

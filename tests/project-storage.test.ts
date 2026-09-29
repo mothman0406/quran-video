@@ -151,6 +151,12 @@ test("pre-generation presentation survives persistence and legacy projects recei
   assert.deepEqual(migrated.captionEffects, DEFAULT_CAPTION_EFFECTS);
   assert.equal(migrated.typography.translationFontWeight, "400");
   assert.equal(migrated.typography.translationItalic, false);
+
+  const withoutTransition = { ...project() } as Record<string, unknown>;
+  delete withoutTransition.transitionSettings;
+  assert.deepEqual(loadSavedProject(withoutTransition).transitionSettings, DEFAULT_TRANSITION_SETTINGS);
+  const explicitFade = { ...project(), transitionSettings: { ...DEFAULT_TRANSITION_SETTINGS, type: "fade", blurFadeEnabled: false, fadeInMs: 350, fadeOutMs: 350 } };
+  assert.deepEqual(loadSavedProject(explicitFade).transitionSettings, explicitFade.transitionSettings);
 });
 
 test("source verification accepts matching metadata and reports mismatch without attaching it silently", () => {

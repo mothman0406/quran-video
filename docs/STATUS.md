@@ -1,5 +1,40 @@
 # Status
 
+## Current milestone: Caption transition and render parity
+
+Complete in implementation and automated validation:
+
+- Traced all caption surfaces. Videos cards are posters; Watch reconstructs
+  saved captions over source media rather than playing a rendered MP4.
+- Fixed the editor/Watch mismatch: Watch formerly relied on sparse native
+  `timeupdate` events, which undersampled a 225 ms transition. It now uses the
+  same animation-frame `MediaPlaybackClock` and `CaptionPreview` path as the
+  advanced editor.
+- Added the first-class `blur-fade` transition style as the new-project and
+  missing-legacy default. Duration remains 225 ms and fixed logical maximum
+  blur is 4 px. Explicit saved `fade` and `none` settings remain respected.
+- One shared smoothstep envelope drives complementary outgoing/incoming
+  opacity and blur for editor, Watch, and deterministic Canvas export. Arabic,
+  translation, linked background, and word-highlight composition remain one
+  caption layer.
+- Canvas blur is caption-scoped, reset explicitly, and never affects source
+  video. Download renders new MP4 frames from the saved presentation; already
+  downloaded MP4 files are immutable and are not retroactively updated.
+- Real Chrome QA passed on the 22-second Surah 74 fixture. Generate produced
+  nine ayat. Watch and editor each captured 13 distinct overlapping states at
+  the 74:1 → 74:2 boundary, all blurred and complementary. A real one-second
+  H.264/AAC export rendered all 30/30 expected frames; four extracted boundary
+  frames visibly confirmed outgoing blur/fade, incoming sharpen/fade, overlap,
+  and no blank or hard replacement.
+- Focused transition/export/Watch coverage passes, the full suite is 583/583,
+  strict TypeScript and quiet lint pass, the production build succeeds with
+  its pre-existing ONNX/Transformers warnings, and whitespace validation
+  passes.
+- Quran recognition, alignment, media preparation, generated caption timing,
+  and manual timing logic were not changed.
+
+Details: `docs/CAPTION_TRANSITION_PARITY.md`.
+
 ## Current milestone: Deterministic media preparation hardening
 
 Complete:

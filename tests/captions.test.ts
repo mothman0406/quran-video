@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { captionForPlaybackTime } from "../src/lib/editor/recognition.ts";
-import { CANONICAL_BASMALAH_ARABIC, arabicCaptionDisplay, arabicIndicNumber, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, cleanQuranArabicForDisplay, composeArabicCaptionText, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetCaptionTranslationSegment, resetTransitionSettings, resetTypography, resolveCaptionTranslationSegments, resizeCaptionWidth, smoothstep, splitCaptionSegment, translationDisplayText, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming, updateCaptionTranslationSegment, type CaptionSegment } from "../src/lib/editor/captions.ts";
+import { CANONICAL_BASMALAH_ARABIC, arabicCaptionDisplay, arabicIndicNumber, captionBackgroundStyle, captionOpacityAtTime, captionSegmentLabel, captionTransitionAtTime, captionTransitionEnvelope, captionVisualStatesAtTime, captionVerseNumberLabel, clampNormalizedPosition, cleanQuranArabicForDisplay, composeArabicCaptionText, createCaptionSegments, createCaptionSegmentsFromVerseBoundaries, DEFAULT_CAPTION_BACKGROUND, DEFAULT_CAPTION_POSITIONING, DEFAULT_CAPTION_PRESENTATION, DEFAULT_TRANSITION_SETTINGS, DEFAULT_TYPOGRAPHY, getActiveCaptionSegment, mergeCaptionWithNext, mergeCaptionWithPrevious, resetAllCaptionSegmentTiming, resetCaptionBackground, resetCaptionSegmentTiming, resetCaptionTranslationSegment, resetTransitionSettings, resetTypography, resolveCaptionTranslationSegments, resizeCaptionWidth, smoothstep, splitCaptionSegment, translationDisplayText, translationForCaptionSegment, updateCaptionPosition, updateCaptionSegmentTiming, updateCaptionTranslationSegment, type CaptionSegment } from "../src/lib/editor/captions.ts";
 import { getVerse } from "../src/lib/quran/local.ts";
 import type { QuranVerseContent } from "../src/lib/quran/content.ts";
 
@@ -497,10 +497,22 @@ test("split and merge remain valid after manual timing edits", () => {
   assert.equal(merged[0].endMs, 900);
 });
 
-test("default transition settings use a restrained 225ms fade", () => {
-  assert.deepEqual(DEFAULT_TRANSITION_SETTINGS, { type: "fade", fadeInMs: 225, fadeOutMs: 225, blurFadeEnabled: false, blurFadeMaxPx: 12 });
+test("default transition settings use a restrained 225ms blur-fade", () => {
+  assert.deepEqual(DEFAULT_TRANSITION_SETTINGS, { type: "blur-fade", fadeInMs: 225, fadeOutMs: 225, blurFadeEnabled: true, blurFadeMaxPx: 4 });
   assert.deepEqual(resetTransitionSettings(), DEFAULT_TRANSITION_SETTINGS);
   assert.notEqual(resetTransitionSettings(), DEFAULT_TRANSITION_SETTINGS);
+});
+
+test("shared blur-fade envelope uses complementary smoothstep opacity and blur", () => {
+  assert.deepEqual(captionTransitionEnvelope(0), { outgoingOpacity: 1, outgoingBlurPx: 0, incomingOpacity: 0, incomingBlurPx: 4 });
+  assert.deepEqual(captionTransitionEnvelope(0.5), { outgoingOpacity: 0.5, outgoingBlurPx: 2, incomingOpacity: 0.5, incomingBlurPx: 2 });
+  assert.deepEqual(captionTransitionEnvelope(1), { outgoingOpacity: 0, outgoingBlurPx: 4, incomingOpacity: 1, incomingBlurPx: 0 });
+  assert.equal(captionTransitionEnvelope(0.25).incomingOpacity, smoothstep(0.25));
+  for (const progress of [0, 0.25, 0.5, 0.75, 1]) {
+    const state = captionTransitionEnvelope(progress);
+    assert.equal(state.outgoingOpacity + state.incomingOpacity, 1, `no blank gap at ${progress}`);
+    assert.equal(state.outgoingOpacity === 1 && state.incomingOpacity === 1, false, `never two full layers at ${progress}`);
+  }
 });
 
 test("fade interpolation uses deterministic smoothstep easing across every segment phase", () => {
@@ -523,11 +535,12 @@ test("transition interpolation handles zero-duration fades and smooth blur", () 
   assert.equal(captionTransitionAtTime(segment, 1_000, zero).opacity, 1);
   assert.equal(captionTransitionAtTime(segment, 1_999, zero).opacity, 1);
   assert.equal(captionTransitionAtTime(segment, 2_000, zero).opacity, 0);
-  const blurred = { ...DEFAULT_TRANSITION_SETTINGS, blurFadeEnabled: true, blurFadeMaxPx: 12 };
-  assert.equal(captionTransitionAtTime(segment, 1_000, blurred).blurPx, 12);
-  assert.equal(captionTransitionAtTime(segment, 1_112, blurred).blurPx, 12 * (1 - smoothstep(112 / 225)));
+  const blurred = { ...DEFAULT_TRANSITION_SETTINGS, blurFadeMaxPx: 4 };
+  assert.equal(captionTransitionAtTime(segment, 1_000, blurred).blurPx, 4);
+  assert.equal(captionTransitionAtTime(segment, 1_112, blurred).blurPx, 4 * (1 - smoothstep(112 / 225)));
   assert.equal(captionTransitionAtTime(segment, 1_500, blurred).blurPx, 0);
-  assert.equal(captionTransitionAtTime(segment, 1_888, blurred).blurPx, 12 * (1 - smoothstep(112 / 225)));
+  assert.equal(captionTransitionAtTime(segment, 1_888, blurred).blurPx, 4 * (1 - smoothstep(112 / 225)));
+  assert.deepEqual(captionTransitionEnvelope(0.5, { ...blurred, fadeInMs: 0, fadeOutMs: 0 }), { outgoingOpacity: 0, outgoingBlurPx: 0, incomingOpacity: 1, incomingBlurPx: 0 });
 });
 
 test("none transition is fully opaque only inside the editable segment", () => {
@@ -558,6 +571,7 @@ test("timeline stays half-open while preview crossfades adjacent captions withou
   const end = captionVisualStatesAtTime(segments, 1_000, DEFAULT_TRANSITION_SETTINGS);
   assert.deepEqual(start.map((state) => state.opacity), [1, 0]);
   assert.deepEqual(middle.map((state) => state.opacity), [0.5, 0.5]);
+  assert.deepEqual(middle.map((state) => state.blurPx), [2, 2]);
   assert.deepEqual(end.map((state) => [state.segment.id, state.opacity]), [["b", 1]]);
   assert.equal(middle.reduce((sum, state) => sum + state.opacity, 0), 1, "complementary opacity prevents a blank interval");
 });

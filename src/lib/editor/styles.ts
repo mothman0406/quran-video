@@ -50,7 +50,7 @@ export const BUILT_IN_STYLES: Record<BuiltInStyleName, CaptionStyle> = {
     translationShadowBlur: 4,
     translationShadowStrength: 0.4,
     translationOpacity: 0.76,
-  }, { y: 0.72, translationY: 0.84 }, {}, { type: "fade", fadeInMs: 200, fadeOutMs: 200 }),
+  }, { y: 0.72, translationY: 0.84 }, {}, { type: "blur-fade", fadeInMs: 200, fadeOutMs: 200 }),
   "Classic Mushaf": style({
     quranStyle: "uthmani",
     arabicFontSize: 40,
@@ -64,7 +64,7 @@ export const BUILT_IN_STYLES: Record<BuiltInStyleName, CaptionStyle> = {
     translationOpacity: 0.8,
     textAlign: "center",
     translationTextAlign: "center",
-  }, { anchor: "center", x: 0.5, y: 0.5, translationX: 0.5, translationY: 0.66 }, {}, { type: "fade", fadeInMs: 225, fadeOutMs: 225 }),
+  }, { anchor: "center", x: 0.5, y: 0.5, translationX: 0.5, translationY: 0.66 }, {}, { type: "blur-fade", fadeInMs: 225, fadeOutMs: 225 }),
   Cinematic: style({
     arabicFontSize: 46,
     translationFontSize: 17,
@@ -76,7 +76,7 @@ export const BUILT_IN_STYLES: Record<BuiltInStyleName, CaptionStyle> = {
     translationShadowStrength: 0.7,
     translationOpacity: 0.9,
     arabicLineSpacing: 1.4,
-  }, { y: 0.68, translationY: 0.82 }, { enabled: true, color: "#10221d", opacity: 0.56, cornerRadius: 18, horizontalPadding: 24, verticalPadding: 18 }, { type: "fade", fadeInMs: 350, fadeOutMs: 350 }),
+  }, { y: 0.68, translationY: 0.82 }, { enabled: true, color: "#10221d", opacity: 0.56, cornerRadius: 18, horizontalPadding: 24, verticalPadding: 18 }, { type: "blur-fade", fadeInMs: 350, fadeOutMs: 350 }),
   Social: style({
     arabicFontSize: 44,
     translationFontSize: 18,
@@ -93,7 +93,7 @@ export const BUILT_IN_STYLES: Record<BuiltInStyleName, CaptionStyle> = {
     translationShadowBlur: 6,
     translationShadowStrength: 0.75,
     translationOpacity: 0.95,
-  }, { anchor: "bottom", y: 0.64, translationY: 0.8, maxWidthPercent: 0.92 }, { enabled: true, color: "#08100c", opacity: 0.68, cornerRadius: 14, horizontalPadding: 18, verticalPadding: 14 }, { type: "fade", fadeInMs: 180, fadeOutMs: 180 }),
+  }, { anchor: "bottom", y: 0.64, translationY: 0.8, maxWidthPercent: 0.92 }, { enabled: true, color: "#08100c", opacity: 0.68, cornerRadius: 14, horizontalPadding: 18, verticalPadding: 14 }, { type: "blur-fade", fadeInMs: 180, fadeOutMs: 180 }),
 };
 
 export const DEFAULT_CAPTION_STYLE: CaptionStyle = style();

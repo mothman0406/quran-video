@@ -192,11 +192,13 @@ export const TypographySchema = z.strictObject({
 });
 
 export const TransitionSettingsSchema = z.strictObject({
-  type: z.enum(["none", "fade"]),
+  /** Missing style values inherit the polished default during legacy hydration. */
+  type: z.enum(["none", "fade", "blur-fade"]).default("blur-fade"),
   fadeInMs: z.number().int().nonnegative(),
   fadeOutMs: z.number().int().nonnegative(),
+  /** Retained only so explicitly saved pre-style blur projects remain readable. */
   blurFadeEnabled: z.boolean().default(false),
-  blurFadeMaxPx: z.number().finite().nonnegative().default(12),
+  blurFadeMaxPx: z.number().finite().nonnegative().default(4),
 });
 
 export const CaptionEffectsSchema = z.strictObject({
@@ -233,7 +235,7 @@ const CaptionStyleOverrideSchema = z.strictObject({
     enabled: z.boolean().optional(), color: z.string().min(1).optional(), opacity: z.number().finite().min(0).max(1).optional(), cornerRadius: z.number().finite().nonnegative().optional(), horizontalPadding: z.number().finite().nonnegative().optional(), verticalPadding: z.number().finite().nonnegative().optional(),
   }).optional(),
   transitionSettings: z.strictObject({
-    type: z.enum(["none", "fade"]).optional(), fadeInMs: z.number().int().nonnegative().optional(), fadeOutMs: z.number().int().nonnegative().optional(), blurFadeEnabled: z.boolean().optional(), blurFadeMaxPx: z.number().finite().nonnegative().optional(),
+    type: z.enum(["none", "fade", "blur-fade"]).optional(), fadeInMs: z.number().int().nonnegative().optional(), fadeOutMs: z.number().int().nonnegative().optional(), blurFadeEnabled: z.boolean().optional(), blurFadeMaxPx: z.number().finite().nonnegative().optional(),
   }).optional(),
 });
 

@@ -73,7 +73,7 @@ test("preview media rate changes preserve source currentTime and pitch where sup
 test("export reuses the preview transition interpolation without a second timing model", () => {
   const value = config();
   assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings), captionVisualStatesAtTime([segment], 1_112, DEFAULT_TRANSITION_SETTINGS));
-  assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings).map(({ opacity, blurPx }) => ({ opacity, blurPx })), [{ opacity: smoothstep(112 / 225), blurPx: 0 }]);
+  assert.deepEqual(captionVisualStatesAtTime(value.segments, 1_112, value.transitionSettings).map(({ opacity, blurPx }) => ({ opacity, blurPx })), [{ opacity: smoothstep(112 / 225), blurPx: 4 * (1 - smoothstep(112 / 225)) }]);
 });
 
 test("Canvas renderer crossfades each translation with its Arabic ayah using the shared opacity", () => {
@@ -82,12 +82,17 @@ test("Canvas renderer crossfades each translation with its Arabic ayah using the
   const value = config({ segments: [first, second] });
   const drawn: Array<{ text: string; opacity: number }> = [];
   const alphaStack: number[] = [];
+  const filterStack: string[] = [];
+  const filters: string[] = [];
   let alpha = 1;
+  let filter = "none";
   const context = {
     get globalAlpha() { return alpha; },
     set globalAlpha(value: number) { alpha = value; },
-    save() { alphaStack.push(alpha); },
-    restore() { alpha = alphaStack.pop() ?? 1; },
+    get filter() { return filter; },
+    set filter(value: string) { filter = value; filters.push(value); },
+    save() { alphaStack.push(alpha); filterStack.push(filter); },
+    restore() { alpha = alphaStack.pop() ?? 1; filter = filterStack.pop() ?? "none"; },
     measureText(text: string) { return { width: text.length * 10 }; },
     fillText(text: string) { drawn.push({ text, opacity: alpha }); },
     strokeText() {}, beginPath() {}, roundRect() {}, fill() {},
@@ -97,6 +102,32 @@ test("Canvas renderer crossfades each translation with its Arabic ayah using the
     { text: "By the morning brightness", opacity: 0.5 },
     { text: "And by the night", opacity: 0.5 },
   ]);
+  assert.ok(filters.includes("blur(6px)"), "4px logical midpoint blur scales to the 1080px export canvas");
+  assert.equal(filter, "none", "caption blur is reset before returning to video rendering");
+});
+
+test("Canvas word opacity composes beneath the caption-layer envelope", () => {
+  const timed = { ...segment, wordTimings: [{ canonicalWordIndex: 1, sourceWordStart: 0, sourceWordEnd: 1, startMs: 1_300, endMs: 1_800 }] };
+  const value = config({ segments: [timed] });
+  const samples: Array<{ text: string; layerOpacity: number; fill: string }> = [];
+  let alpha = 1;
+  let fillStyle = "";
+  let filter = "none";
+  const alphaStack: number[] = [];
+  const context = {
+    get globalAlpha() { return alpha; }, set globalAlpha(value: number) { alpha = value; },
+    get fillStyle() { return fillStyle; }, set fillStyle(value: string | CanvasGradient | CanvasPattern) { fillStyle = String(value); },
+    get filter() { return filter; }, set filter(value: string) { filter = value; },
+    save() { alphaStack.push(alpha); }, restore() { alpha = alphaStack.pop() ?? 1; },
+    measureText(text: string) { return { width: text.length * 10 }; },
+    fillText(text: string) { samples.push({ text, layerOpacity: alpha, fill: fillStyle }); },
+    strokeText() {}, beginPath() {}, roundRect() {}, fill() {},
+  } as unknown as CanvasRenderingContext2D;
+  drawExportCaptions(context, value as unknown as LocalExportRequest, 1_112.5, "UthmanicHafs");
+  const arabic = samples.find((sample) => sample.text === segment.arabic);
+  assert.equal(arabic?.layerOpacity, 0.5);
+  assert.equal(arabic?.fill, "#ffffff52", "unread 0.32 opacity remains separate from the 0.5 caption layer");
+  assert.equal(0.32 * (arabic?.layerOpacity ?? 0), 0.16);
 });
 
 test("preview and export retain the same highlight-capable basmalah segment", () => {
