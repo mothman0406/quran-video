@@ -43,6 +43,13 @@ test("export mapping preserves manual timings, translation visibility, and verse
   assert.equal(value.showVerseNumber, true);
 });
 
+test("persisted Quran size reaches the immutable export snapshot without a legacy-size fallback", () => {
+  for (const arabicFontSize of [38, 30, 25]) {
+    const value = snapshotLocalExportConfiguration({ format: DEFAULT_PROJECT_FORMAT, segments: [segment], typography: { ...DEFAULT_TYPOGRAPHY, arabicFontSize }, captionBackground: DEFAULT_CAPTION_BACKGROUND, positioning: DEFAULT_CAPTION_POSITIONING, transitionSettings: DEFAULT_TRANSITION_SETTINGS, showVerseNumber: false, watermarkRequired: false });
+    assert.equal(value.typography.arabicFontSize, arabicFontSize);
+  }
+});
+
 test("speed maps output time back to source time without changing caption or word timing", () => {
   const timed = { ...segment, wordTimings: [{ canonicalWordIndex: 1, sourceWordStart: 0, sourceWordEnd: 1, startMs: 1_200, endMs: 1_800 }] };
   const value = config({ segments: [timed], playbackRate: 2, mediaTrim: { startMs: 10_000, endMs: 40_000 } });
