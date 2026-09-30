@@ -1,5 +1,44 @@
 # Status
 
+## Current milestone: Quran outer timing refinement
+
+Complete in implementation, focused safety coverage, both real fixtures,
+Videos/Watch QA, and frozen identity validation:
+
+- Added a post-identity, timing-only refinement between safe localization and
+  final forced alignment. It reuses accepted canonical tokens, PCM, VAD,
+  logits, and the loaded model; it cannot mutate the accepted range and adds
+  no global search or model initialization.
+- Expansion stays inside the same continuous VAD region and existing six-
+  second boundary neighborhood, but VAD alone is insufficient. A complete
+  accepted canonical prefix/suffix and strict canonical-over-blank win are
+  mandatory; unrelated emissions block optional blank/repeat continuation.
+- Case B remains exactly `2:258-259`. The old 5.184-109.016 second interval
+  and 5.344-108.240 saved captions become a refined 1.344-114.240 interval
+  and matching first/final CaptionSegments. The first word remains at 1.424
+  seconds, while the final seven words advance naturally through 114.240
+  instead of being compressed at the old cutoff.
+- Case B Watch shows no caption at 1.343, full-opacity/no-blur caption at
+  1.344, natural final-word progress, the final caption at 114.239, and no
+  caption at 114.241.
+- Case A remains exactly `20:100-103` at 0.384-32.928 seconds. Both refiner
+  edges report `already-at-evidence-limit`; Watch retains exact opaque outer
+  visibility and the former 4.104/26.968 truncation does not return.
+- Focused coverage proves earlier/later canonical refinement, no VAD-only,
+  silence, unrelated-speech, noise/music, or adjacent-ayah absorption, no
+  contraction or identity mutation, long boundary ayat, stable internal word
+  timing, decompressed final words, protected constants, and unchanged manual
+  timing.
+- Frozen validation remains H `91:1-15`, K `92:1-14`, Positive B
+  `101:1-11`, Negative A rejected, historical genuine 20/20, historical
+  adversarial 23/23, and final validation 2/2 exact plus 2/2 rejected.
+- The FastConformer model, recognition thresholds, VAD, window/hop,
+  continuation/anchors, reconstruction/integrity, long-ayah feasibility,
+  edge and forced-alignment constants, Quran data/normalization, Whisper,
+  media preparation, presentation, and manual timing are unchanged.
+
+Details: `docs/QURAN_OUTER_TIMING_REFINEMENT.md`.
+
 ## Current milestone: Outer caption edge visibility
 
 Complete in implementation, automated validation, and generated-video Watch QA:

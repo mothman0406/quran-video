@@ -110,6 +110,7 @@ test("complete-range resolution is one retained-worker request after identificat
       canonicalSpan: null,
       boundaryLocalization: null,
       edgeVerification: null,
+      outerTimingRefinement: null,
       alignment: null,
       reuse: { pcmReused: true, vadReused: true, modelSessionReused: true, fullRecordingLogitsReused: false, globalQuranSearches: 1, edgeInferenceCount: 0 },
     },
