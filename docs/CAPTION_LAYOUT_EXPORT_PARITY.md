@@ -56,6 +56,12 @@ The default maximum width remains 90% of the logical/output width. A user-edited
 width remains a normalized percentage and therefore has identical meaning at
 all resolutions and aspect ratios.
 
+Quick Create exposes that existing normalized setting in its Layout controls at
+70%–96%. The live sample and generated project use the same
+`positioning.maxWidthPercent` value consumed by the editor, Watch, and export;
+linked translation width follows the selected caption width. Legacy projects
+without an explicit maximum width hydrate to the unchanged 90% default.
+
 ## Font loading
 
 The Quran font remains `UthmanicHafs`, sourced from Quran Foundation's

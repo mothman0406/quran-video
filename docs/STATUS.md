@@ -3267,3 +3267,29 @@ Complete:
 - Recognition, Quran identity, boundary localization, outer timing refinement, caption timing, transitions, highlighting, and media ingestion were not changed.
 
 Verification: focused layout metrics, wrapping, aspect-ratio, font-gate, and responsive-stage tests; real browser preview measurements; three fresh MP4 exports with decoded-frame QA; full test/typecheck/lint/build/diff checks at handoff.
+
+## Current milestone: Pre-generation caption width control
+
+Complete:
+
+- Quick Create's Layout section now exposes the existing normalized caption
+  width setting as a 70%–96% slider with the unchanged 90% default. The live
+  sample and generated project receive the same `positioning.maxWidthPercent`
+  value already consumed by the advanced editor, Watch, and export; linked
+  translation width follows the selection without a duplicate state field.
+- Project serialization and hydration preserve non-default widths. Legacy
+  projects missing an explicit maximum width adopt the established 90% default.
+- The shared 360px logical layout, frame-safe width maximum, bottom safe margin,
+  position behavior, caption timing, recognition, and media ingestion remain
+  unchanged.
+- Production-font browser measurement of the 1920×1080 Ar-Rahman fixture at
+  Quran size 30, position 82%, and translation on found 55:7 at one Arabic line
+  for 90%, 92%, 94%, and 96%. Ayah 55:9 remains two Arabic and two translation
+  lines through the safe 96% maximum, with its linked block at 340.5–1015.2px,
+  so no legitimate width clears the reciter's face. Preview and export use the
+  same measured line grouping.
+
+Verification: focused Create/default/range/state-flow, persistence/hydration,
+legacy fallback, editor/Watch/export, aspect-ratio, responsive wrapping, and
+timing/recognition invariance tests; Chrome 154 fixture preparation/playback;
+full test/typecheck/lint/build/diff checks at handoff.

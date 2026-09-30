@@ -1,4 +1,4 @@
-import { DEFAULT_TRANSITION_SETTINGS } from "./editor/captions.ts";
+import { DEFAULT_CAPTION_POSITIONING, DEFAULT_TRANSITION_SETTINGS } from "./editor/captions.ts";
 import { SavedProjectSchema, type SavedProject } from "./schemas/project.ts";
 
 export const PROJECT_DATABASE_NAME = "quran-video-projects";
@@ -82,6 +82,9 @@ function migrateSavedProject(value: unknown): unknown {
   const sourceDurationMs = resolvedSource && typeof resolvedSource === "object" && !Array.isArray(resolvedSource) && typeof (resolvedSource as Record<string, unknown>).durationMs === "number"
     ? Math.max(0, Math.round((resolvedSource as Record<string, number>).durationMs))
     : 0;
+  const positioning = project.positioning && typeof project.positioning === "object" && !Array.isArray(project.positioning)
+    ? project.positioning as Record<string, unknown>
+    : null;
   return {
     ...withoutLegacySource,
     ...("format" in project ? { format: normalizePersistedProjectFormat(project.format) } : {}),
@@ -91,6 +94,11 @@ function migrateSavedProject(value: unknown): unknown {
     // Source-time trim was introduced after persisted media metadata. Old
     // projects retain their full original source range.
     ...("mediaTrim" in project ? {} : { mediaTrim: { startMs: 0, endMs: sourceDurationMs } }),
+    // Caption width predates explicit persistence in some legacy projects.
+    // Missing width keeps the established 90% presentation default.
+    ...(positioning && !("maxWidthPercent" in positioning)
+      ? { positioning: { ...positioning, maxWidthPercent: DEFAULT_CAPTION_POSITIONING.maxWidthPercent } }
+      : {}),
     // Projects created before inline ayah numbers had no explicit preference.
     // Preserve saved false, but give missing legacy state the new default.
     ...(typeof project.showVerseNumber === "boolean" ? {} : { showVerseNumber: true }),
