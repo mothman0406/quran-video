@@ -17,6 +17,7 @@ import {
   canEncodeVideo,
 } from "mediabunny";
 import { quranFontDefinitions } from "../quran/content.ts";
+import { ensurePresentationFontsLoaded } from "../quran/font-loading.ts";
 import { mediabunnyVideoTransform, sourceVideoFitForMediabunny } from "../editor/formats.ts";
 import { drawExportCaptions } from "./caption-canvas.ts";
 import { videoDimOpacity } from "../editor/presentation-settings.ts";
@@ -40,14 +41,14 @@ function ensureNotAborted(signal?: AbortSignal) { if (signal?.aborted) throw abo
 async function loadArabicFont(request: LocalExportRequest): Promise<string> {
   const font = quranFontDefinitions[request.typography.quranStyle];
   if (font.source.includes("{page}")) throw new Error("The selected Madinah/QCF font is page-specific and cannot be safely rendered in an export. Choose Uthmani, IndoPak, or KFGQPC style.");
-  const fontSpec = `${request.typography.arabicFontSize}px "${font.family}"`;
-  if (!document.fonts.check(fontSpec)) {
-    const face = new FontFace(font.family, `url(${font.source}) format('woff2')`);
-    document.fonts.add(await face.load());
-  }
-  await document.fonts.load(fontSpec, "اَلْحَمْدُ لِلَّهِ");
-  if (!document.fonts.check(fontSpec, "اَلْحَمْدُ لِلَّهِ")) throw new Error(`The selected Quran font (${font.family}) did not finish loading. Export was not started to prevent fallback glyphs.`);
-  return font.family;
+  return ensurePresentationFontsLoaded({
+    quranStyle: request.typography.quranStyle,
+    arabicFontSize: request.typography.arabicFontSize,
+    translationFont: request.typography.translationFontFamily,
+    translationFontSize: request.typography.translationFontSize,
+    transliterationFont: request.typography.transliterationFontFamily,
+    transliterationFontSize: request.typography.transliterationFontSize,
+  });
 }
 
 async function capabilities(width: number, height: number, bitrate: { videoBitrate: number; audioBitrate: number }) {

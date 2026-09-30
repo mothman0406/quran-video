@@ -1,13 +1,16 @@
 "use client";
 
-import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react";
-import { arabicCaptionPresentationWords, captionBackgroundStyle, captionVisualStatesAtTime, effectiveTranslationColor, linkedCaptionStackLayout, resolveWordHighlightPresentation, translationDisplayText, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from "react";
+import { arabicCaptionPresentationWords, captionBackgroundStyle, captionVisualStatesAtTime, effectiveTranslationColor, linkedCaptionStackLayout, resolveWordHighlightPresentation, translationDisplayText, type ArabicPresentationWord, type CaptionBackground, type CaptionPositioning, type CaptionSegment, type TransitionSettings, type Typography } from "@/lib/editor/captions";
 import type { QuranContentResponse } from "@/lib/quran/content";
 import { quranFontDefinitions } from "@/lib/quran/content";
 import type { ProjectFormat } from "@/lib/schemas/project";
 import { captionStyleFromState, resolveCaptionLayerStyle } from "@/lib/editor/styles";
 import type { CaptionCanvasBounds } from "@/lib/editor/social-platform-guides";
 import type { MediaPlaybackClock } from "@/lib/editor/playback-clock";
+import CaptionLogicalStage from "@/components/caption-logical-stage";
+import { captionLogicalFormat, measureCaptionLayout } from "@/lib/editor/caption-layout";
+import { ensurePresentationFontsLoaded } from "@/lib/quran/font-loading";
 
 export type CaptionObject = "arabic" | "translation" | "transliteration";
 export type CaptionResizeEdge = "left" | "right";
@@ -54,8 +57,7 @@ function CaptionPreview({
   onCaptionBoundsChange,
 }: CaptionPreviewProps) {
   const layerRefs = useRef(new Map<string, HTMLDivElement>());
-  const linkedStackRefs = useRef(new Map<string, HTMLDivElement>());
-  const [linkedStackCenters, setLinkedStackCenters] = useState<Record<string, number>>({});
+  const [loadedQuranFont, setLoadedQuranFont] = useState<{ key: string; family: string } | null>(null);
   // The rest of the editor can follow ordinary media events. This focused
   // state is the only subtree that consumes every authoritative animation
   // frame, which keeps short word intervals visible without a synthetic clock.
@@ -64,10 +66,22 @@ function CaptionPreview({
     if (node) layerRefs.current.set(id, node);
     else layerRefs.current.delete(id);
   }, []);
-  const registerLinkedStack = useCallback((id: string) => (node: HTMLDivElement | null) => {
-    if (node) linkedStackRefs.current.set(id, node);
-    else linkedStackRefs.current.delete(id);
-  }, []);
+  const measurementContext = useMemo(() => typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d"), []);
+  const logicalFormat = captionLogicalFormat(format);
+  const fontLoadKey = [typography.quranStyle, typography.arabicFontSize, typography.translationFontFamily, typography.translationFontSize, typography.transliterationFontFamily, typography.transliterationFontSize].join(":");
+
+  useEffect(() => {
+    let active = true;
+    void ensurePresentationFontsLoaded({
+      quranStyle: typography.quranStyle,
+      arabicFontSize: typography.arabicFontSize,
+      translationFont: typography.translationFontFamily,
+      translationFontSize: typography.translationFontSize,
+      transliterationFont: typography.transliterationFontFamily,
+      transliterationFontSize: typography.transliterationFontSize,
+    }).then((family) => { if (active) setLoadedQuranFont({ key: fontLoadKey, family }); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [fontLoadKey, typography.arabicFontSize, typography.quranStyle, typography.translationFontFamily, typography.translationFontSize, typography.transliterationFontFamily, typography.transliterationFontSize]);
 
   useEffect(() => {
     if (!playbackClock) return;
@@ -76,29 +90,6 @@ function CaptionPreview({
     });
   }, [playbackClock]);
   const effectivePresentationTimeMs = playbackClock ? presentationTimeMs : currentTimeMs;
-
-  useLayoutEffect(() => {
-    if (!positioning.translationPositionLinked) return;
-    const measure = () => {
-      const next: Record<string, number> = {};
-      linkedStackRefs.current.forEach((stack, id) => {
-        const canvasHeight = stack.parentElement?.clientHeight ?? 0;
-        next[id] = linkedCaptionStackLayout(format, positioning.y, canvasHeight, stack.offsetHeight).centerY;
-      });
-      setLinkedStackCenters((current) => {
-        const unchanged = Object.keys(current).length === Object.keys(next).length
-          && Object.entries(next).every(([id, centerY]) => current[id] === centerY);
-        return unchanged ? current : next;
-      });
-    };
-    measure();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
-    linkedStackRefs.current.forEach((stack) => {
-      observer?.observe(stack);
-      if (stack.parentElement) observer?.observe(stack.parentElement);
-    });
-    return () => observer?.disconnect();
-  }, [captionBackground, format, positioning.translationPositionLinked, positioning.y, segments, typography]);
 
   useEffect(() => {
     const applyVisualState = () => {
@@ -173,7 +164,7 @@ function CaptionPreview({
     } as const;
   };
 
-  return <>
+  return <CaptionLogicalStage format={format}>
     {segments.map((segment) => {
       const arabicStyle = resolveCaptionLayerStyle(globalStyle, segment.styleOverrides, "arabic");
       const translationStyleState = resolveCaptionLayerStyle(globalStyle, segment.styleOverrides, "translation");
@@ -190,6 +181,18 @@ function CaptionPreview({
       const arabicWidth = `${segmentPositioning.maxWidthPercent * 100}%`;
       const translationWidth = `${(translationStyleState.positioning.translationMaxWidthPercent ?? translationStyleState.positioning.maxWidthPercent) * 100}%`;
       const translationStyle = { ...styleText("translation", translationStyleState.typography), color: effectiveTranslationColor(translationStyleState.typography), fontFamily: translationStyleState.typography.translationFontFamily, fontSize: translationStyleState.typography.translationFontSize, fontWeight: translationStyleState.typography.translationFontWeight, fontStyle: translationStyleState.typography.translationItalic ? "italic" : "normal", opacity: translationStyleState.typography.translationOpacity, margin: 0 };
+      const layout = loadedQuranFont?.key === fontLoadKey && measurementContext ? measureCaptionLayout({
+        context: measurementContext,
+        format: logicalFormat,
+        typography: segmentTypography,
+        positioning: segmentPositioning,
+        arabicFontFamily: loadedQuranFont.family,
+        arabicWords,
+        translation: hasTranslation ? translation : null,
+        translationTypography: translationStyleState.typography,
+        translationPositioning: translationStyleState.positioning,
+        transliteration: hasTransliteration ? segment.transliteration ?? null : null,
+      }) : null;
       const objectClass = (kind: CaptionObject) => `caption-object ${selectedSegmentId === segment.id && selectedObject === kind ? "caption-object-selected" : ""}`;
       const handles = (kind: CaptionObject) => selectedSegmentId === segment.id && selectedObject === kind ? <>
         <button aria-label={`Resize ${kind} text box from left`} className="caption-handle caption-handle-left" type="button" onPointerDown={(event) => onResizePointerDown(event, kind, "left")} onPointerMove={onPointerMove} onPointerUp={onPointerUp} />
@@ -208,13 +211,13 @@ function CaptionPreview({
         onPointerUp={onPointerUp}
         onClick={(event) => { event.stopPropagation(); onSelectObject(segment, "arabic"); }}
       >
-        <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic", segmentTypography), color: segmentTypography.textColor, fontFamily: quranFontDefinitions[segmentTypography.quranStyle].family, fontSize: segmentTypography.arabicFontSize, lineHeight: segmentTypography.arabicLineSpacing, opacity: segmentTypography.arabicOpacity }}><span data-caption-arabic-text>{arabicWords.map((word, index) => <Fragment key={`${segment.id}-${word.kind}-${index}`}>
+        <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic", segmentTypography), color: segmentTypography.textColor, fontFamily: quranFontDefinitions[segmentTypography.quranStyle].family, fontSize: segmentTypography.arabicFontSize, lineHeight: `${layout?.metrics.arabicLineHeight ?? segmentTypography.arabicFontSize * segmentTypography.arabicLineSpacing}px`, opacity: segmentTypography.arabicOpacity, visibility: layout ? "visible" : "hidden" }}><span data-caption-arabic-text>{layout?.arabicLines.map((line, lineIndex) => <span className="caption-text-line" data-caption-line={lineIndex} key={`${segment.id}-arabic-line-${lineIndex}`}>{line.words.map((word: ArabicPresentationWord, index: number) => <Fragment key={`${segment.id}-${word.kind}-${lineIndex}-${index}`}>
           {index > 0 && (word.kind === "verse-number" ? "\u00a0" : " ")}
           {(() => {
             const presentation = resolveWordHighlightPresentation({ baseTextColor: segmentTypography.textColor, highlightColor: segmentTypography.wordHighlightColor, intensity: segmentTypography.wordHighlightIntensity, isHighlighted: word.highlighted, state: word.state });
             return <span data-caption-quran-word={word.kind === "quran-word" ? "true" : undefined} data-caption-word-highlighted={word.highlighted ? "true" : "false"} data-caption-word-state={word.state} style={{ color: presentation.color, opacity: presentation.opacity, textShadow: presentation.glowBlurPx ? `0 0 ${presentation.glowBlurPx}px ${presentation.glowColor}` : undefined }}>{word.text}</span>;
           })()}
-        </Fragment>)}</span></p>
+        </Fragment>)}</span>)}</span></p>
         {handles("arabic")}
       </div>;
       const translationObject = (linked: boolean) => hasTranslation && <div
@@ -226,7 +229,7 @@ function CaptionPreview({
         onPointerUp={onPointerUp}
         onClick={(event) => { event.stopPropagation(); onSelectObject(segment, "translation"); }}
       >
-        <p className="pointer-events-none" style={translationStyle}>{translation}</p>
+        <p className="pointer-events-none" style={{ ...translationStyle, lineHeight: `${layout?.metrics.translationLineHeight ?? translationStyleState.typography.translationFontSize * 1.25}px`, visibility: layout ? "visible" : "hidden" }}>{layout?.translationLines.map((line, index) => <span className="caption-text-line" data-caption-line={index} key={`${segment.id}-translation-line-${index}`}>{line.text}</span>)}</p>
         {handles("translation")}
       </div>;
       const transliterationObject = (linked: boolean) => hasTransliteration && <div
@@ -234,13 +237,12 @@ function CaptionPreview({
         data-caption-object="transliteration"
         style={linked ? { width: "100%" } : { left: `${segmentPositioning.x * 100}%`, top: `${Math.min(0.94, segmentPositioning.y + 0.12) * 100}%`, width: arabicWidth }}
       >
-        <p className="pointer-events-none" style={{ color: segmentTypography.translationTextColor, fontFamily: segmentTypography.transliterationFontFamily, fontSize: segmentTypography.transliterationFontSize, lineHeight: 1.25, opacity: segmentTypography.translationOpacity, margin: 0 }}>{segment.transliteration}</p>
+        <p className="pointer-events-none" style={{ color: segmentTypography.translationTextColor, fontFamily: segmentTypography.transliterationFontFamily, fontSize: segmentTypography.transliterationFontSize, lineHeight: `${layout?.metrics.transliterationLineHeight ?? segmentTypography.transliterationFontSize * 1.25}px`, opacity: segmentTypography.translationOpacity, margin: 0, visibility: layout ? "visible" : "hidden" }}>{layout?.transliterationLines.map((line, index) => <span className="caption-text-line" data-caption-line={index} key={`${segment.id}-transliteration-line-${index}`}>{line.text}</span>)}</p>
       </div>;
       return <div key={segment.id} ref={registerLayer(segment.id)} className="absolute inset-0 pointer-events-none" data-caption-segment={segment.id} data-caption-opacity="0" style={{ opacity: 0, visibility: "hidden", willChange: "opacity, filter" }}>
-        {positioning.translationPositionLinked ? <div
-          ref={registerLinkedStack(segment.id)}
+        {segmentPositioning.translationPositionLinked ? <div
           className="caption-linked-stack"
-        style={{ ...background, left: `${segmentPositioning.x * 100}%`, top: `${(linkedStackCenters[segment.id] ?? segmentPositioning.y) * 100}%`, width: arabicWidth, gap: `${segmentTypography.translationSpacingBelowArabic}px` }}
+        style={{ ...background, left: `${segmentPositioning.x * 100}%`, top: `${layout ? linkedCaptionStackLayout(logicalFormat, segmentPositioning.y, logicalFormat.height, layout.totalHeight + (segmentBackground.enabled ? segmentBackground.verticalPadding * 2 : 0)).centerY * 100 : segmentPositioning.y * 100}%`, width: arabicWidth, gap: `${segmentTypography.translationSpacingBelowArabic}px` }}
         >
           {arabicObject(true)}
           {translationObject(true)}
@@ -252,7 +254,7 @@ function CaptionPreview({
         </>}
       </div>;
     })}
-  </>;
+  </CaptionLogicalStage>;
 }
 
 export default memo(CaptionPreview);

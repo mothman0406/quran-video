@@ -3254,3 +3254,16 @@ recorded at milestone handoff.
 - Replaced linear single-layer verse fades with complementary smoothstep crossfades for adjacent captions. The outgoing and incoming Arabic/translation layers overlap without a blank interval, zero duration remains instant, and the existing 225 ms setting/schema remains compatible.
 - Preview/watch and Canvas/MP4 export consume the same word-state, effective-color, and crossfade helpers. Recognition, canonical Quran reconstruction, word timing, and manual caption timing code were not changed.
 - Added focused coverage for defaults, word-state opacity/color, highlight-off behavior, Basmallah sample states, validated controls, linked-color restoration, persistence/legacy defaults, smoothstep endpoints, complementary no-gap crossfades, zero-duration switching, and preview/export parity.
+
+## Current milestone: Caption layout / export parity
+
+Complete:
+
+- Create, editor, Watch, and Canvas export now share a 360px-wide logical caption coordinate system. Responsive DOM previews scale the complete stage instead of recomputing typography and wrapping at viewport size.
+- Quran size, maximum width, Arabic and translation line heights, inter-layer spacing, complete-word wrapping, and linked-block Y anchoring come from one shared metric/layout module.
+- Preview and export wait for the exact selected Quran font before measuring. The default remains Quran Foundation Uthmanic Hafs; no substitute font or ayah-specific break was introduced.
+- Removed preview-only invisible padding/borders and arbitrary Unicode wrapping. Disabled backgrounds no longer alter preview geometry.
+- Real 1920×1080 Ar-Rahman 55:7/55:9 exports at sizes 38, 30, and 25 show monotonic glyph/line-box changes and matching preview/export line groups. Size 30 and 25 at position 78 still touch the reciter's lower face on 55:9; this is reported rather than hidden with auto-shrink.
+- Recognition, Quran identity, boundary localization, outer timing refinement, caption timing, transitions, highlighting, and media ingestion were not changed.
+
+Verification: focused layout metrics, wrapping, aspect-ratio, font-gate, and responsive-stage tests; real browser preview measurements; three fresh MP4 exports with decoded-frame QA; full test/typecheck/lint/build/diff checks at handoff.

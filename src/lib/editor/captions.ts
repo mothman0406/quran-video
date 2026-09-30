@@ -442,7 +442,7 @@ export function captionBackgroundStyle(background: CaptionBackground): {
   return {
     backgroundColor: background.enabled ? hexToRgba(background.color, background.opacity) : "transparent",
     borderRadius: `${background.cornerRadius}px`,
-    padding: `${background.verticalPadding}px ${background.horizontalPadding}px`,
+    padding: background.enabled ? `${background.verticalPadding}px ${background.horizontalPadding}px` : "0",
   };
 }
 

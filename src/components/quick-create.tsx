@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState, type ChangeEvent, type DragEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent, type PointerEvent } from "react";
 import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import DashboardShell from "@/components/dashboard-shell";
+import CaptionLogicalStage from "@/components/caption-logical-stage";
 import { captionPositionBounds, effectiveTranslationColor, resolveWordHighlightPresentation, type ArabicWordVisualState } from "@/lib/editor/captions";
 import { PROJECT_FORMATS, projectFormatForPreset } from "@/lib/editor/formats";
 import { DEFAULT_PRE_GENERATION_PRESENTATION_SECTION, FULL_AYAH_DISPLAY_INHERENT, PRE_GENERATION_PRESENTATION_SECTIONS, defaultCaptionPresentationSettings, presentationForFormat, videoDimOpacity, type CaptionPresentationSettings, type PreGenerationPresentationSection } from "@/lib/editor/presentation-settings";
@@ -19,6 +20,8 @@ import { LocalMediaPreparationProgressController, type LocalMediaPreparationProg
 import type { DecodedAudioChannels } from "@/lib/recognition/local-audio-decode";
 import type { ProjectFormatPreset, SavedProject } from "@/lib/schemas/project";
 import { videoJobManager } from "@/lib/video-jobs";
+import { captionLogicalFormat, measureCaptionLayout } from "@/lib/editor/caption-layout";
+import { ensurePresentationFontsLoaded } from "@/lib/quran/font-loading";
 
 type PreparedSelection = {
   originalSource: File;
@@ -64,6 +67,8 @@ export default function QuickCreate() {
   const [error, setError] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<PreGenerationPresentationSection>(DEFAULT_PRE_GENERATION_PRESENTATION_SECTION);
   const [presentation, setPresentation] = useState<CaptionPresentationSettings>(() => defaultCaptionPresentationSettings());
+  const [loadedQuranFont, setLoadedQuranFont] = useState<{ key: string; family: string } | null>(null);
+  const measurementContext = useMemo(() => typeof document === "undefined" ? null : document.createElement("canvas").getContext("2d"), []);
   const [session, setSession] = useState<Session | null>(null);
   const [entitlements, setEntitlements] = useState<AccountEntitlements>(() => accountEntitlementsForPlan("free"));
   const [cloudCount, setCloudCount] = useState(0);
@@ -76,6 +81,7 @@ export default function QuickCreate() {
   const previewRef = useRef<HTMLDivElement>(null);
   const format = presentation.projectFormat.preset;
   const { positioning, typography, transitionSettings, captionEffects, showVerseNumber } = presentation;
+  const fontLoadKey = [typography.quranStyle, typography.arabicFontSize, typography.translationFontFamily, typography.translationFontSize, typography.transliterationFontFamily, typography.transliterationFontSize].join(":");
 
   useEffect(() => {
     const supabase = getSupabaseClient();
@@ -92,13 +98,12 @@ export default function QuickCreate() {
   }, []);
 
   useEffect(() => {
-    const font = quranFontDefinitions[typography.quranStyle];
-    if (font.source.includes("{page}")) return;
-    const style = document.createElement("style");
-    style.textContent = `@font-face { font-family: "${font.family}"; src: url("${font.source}") format("woff2"); font-display: swap; }`;
-    document.head.appendChild(style);
-    return () => style.remove();
-  }, [typography.quranStyle]);
+    let active = true;
+    void ensurePresentationFontsLoaded({ quranStyle: typography.quranStyle, arabicFontSize: typography.arabicFontSize, translationFont: typography.translationFontFamily, translationFontSize: typography.translationFontSize, transliterationFont: typography.transliterationFontFamily, transliterationFontSize: typography.transliterationFontSize })
+      .then((family) => { if (active) setLoadedQuranFont({ key: fontLoadKey, family }); })
+      .catch(() => undefined);
+    return () => { active = false; };
+  }, [fontLoadKey, typography.arabicFontSize, typography.quranStyle, typography.translationFontFamily, typography.translationFontSize, typography.transliterationFontFamily, typography.transliterationFontSize]);
 
   useEffect(() => () => {
     abortRef.current?.abort();
@@ -287,6 +292,8 @@ export default function QuickCreate() {
   const outline = typography.arabicOutlineEnabled ? typography.arabicOutlineWidth : 0;
   const positionMaximum = captionPositionBounds(presentation.projectFormat).y[1];
   const quranFont = quranFontDefinitions[typography.quranStyle];
+  const sampleArabicWords = sampleWords.map((text, index) => ({ text, highlighted: sampleWordState(index) === "current", state: sampleWordState(index), kind: "quran-word" as const }));
+  const sampleLayout = loadedQuranFont?.key === fontLoadKey && measurementContext ? measureCaptionLayout({ context: measurementContext, format: captionLogicalFormat(presentation.projectFormat), typography, positioning, arabicFontFamily: loadedQuranFont.family, arabicWords: sampleArabicWords, translation: typography.translationVisible ? CANONICAL_BASMALAH_TRANSLATION : null, translationTypography: typography, translationPositioning: positioning, transliteration: null }) : null;
   const sectionLabel: Record<PreGenerationPresentationSection, string> = { layout: "Layout", quran: "Quran", translation: "Translation", effects: "Effects", toggles: "Toggles" };
 
   return <DashboardShell current="create"><section className="quick-create-page">
@@ -301,11 +308,11 @@ export default function QuickCreate() {
           {previewUrl && kind === "audio" && <div className="quick-create-audio"><span aria-hidden="true">◌</span><strong>{selected.name}</strong><audio src={previewUrl} controls preload="metadata" /></div>}
           {(!previewPlayable || !previewUrl) && <div className="quick-create-neutral"><span aria-hidden="true">۝</span><p>Your preview will appear when local preparation finishes.</p></div>}
           <div className="quick-create-preview-dim" aria-hidden="true" style={{ backgroundColor: `rgba(0, 0, 0, ${videoDimOpacity(captionEffects)})` }} />
-          <div className="quick-create-sample" style={{ top: `${positioning.y * 100}%`, gap: `${typography.translationSpacingBelowArabic}px`, transitionDuration: `${transitionSettings.fadeInMs}ms` }} aria-label="Sample caption placement. This is preview content, not detected Quran text." onPointerDown={moveCaption} onPointerMove={moveCaption} onPointerUp={() => setDragging(false)} onPointerCancel={() => setDragging(false)}>
+          <CaptionLogicalStage format={presentation.projectFormat}><div className="quick-create-sample" style={{ top: `${positioning.y * 100}%`, width: `${positioning.maxWidthPercent * 100}%`, gap: `${typography.translationSpacingBelowArabic}px`, transitionDuration: `${transitionSettings.fadeInMs}ms`, visibility: sampleLayout ? "visible" : "hidden" }} aria-label="Sample caption placement. This is preview content, not detected Quran text." onPointerDown={moveCaption} onPointerMove={moveCaption} onPointerUp={() => setDragging(false)} onPointerCancel={() => setDragging(false)}>
             <span>Sample preview</span>
-            <p dir="rtl" lang="ar" style={{ color: typography.textColor, fontFamily: `${quranFont.family}, ${quranFont.fallbackFamily}`, fontSize: `${typography.arabicFontSize}px`, opacity: typography.arabicOpacity, WebkitTextStroke: outline ? `${outline}px ${typography.arabicOutlineColor}` : "0 transparent", textShadow: shadow ? `0 2px ${shadow}px rgba(0,0,0,${typography.arabicShadowStrength})` : "none" }}>{sampleWords.map((word, index) => { const state = sampleWordState(index); const presentation = resolveWordHighlightPresentation({ baseTextColor: typography.textColor, highlightColor: typography.wordHighlightColor, intensity: typography.wordHighlightIntensity, isHighlighted: state === "current", state }); return <span data-sample-word-state={state} style={{ color: presentation.color, opacity: presentation.opacity, textShadow: presentation.glowBlurPx ? `0 0 ${presentation.glowBlurPx}px ${presentation.glowColor}` : undefined }} key={`${word}-${index}`}>{word}{index < sampleWords.length - 1 ? " " : ""}</span>; })}</p>
-            {typography.translationVisible && <small style={{ color: effectiveTranslationColor(typography), fontFamily: typography.translationFontFamily, fontSize: `${typography.translationFontSize}px`, fontWeight: typography.translationFontWeight, fontStyle: typography.translationItalic ? "italic" : "normal", opacity: typography.translationOpacity, WebkitTextStroke: typography.translationOutlineEnabled ? `${typography.translationOutlineWidth}px ${typography.translationOutlineColor}` : "0 transparent", textShadow: typography.translationShadowEnabled ? `0 2px ${typography.translationShadowBlur}px rgba(0,0,0,${typography.translationShadowStrength})` : "none" }}>{CANONICAL_BASMALAH_TRANSLATION}</small>}
-          </div>
+            <p dir="rtl" lang="ar" style={{ color: typography.textColor, fontFamily: `${quranFont.family}, ${quranFont.fallbackFamily}`, fontSize: `${typography.arabicFontSize}px`, lineHeight: `${sampleLayout?.metrics.arabicLineHeight ?? typography.arabicFontSize * typography.arabicLineSpacing}px`, opacity: typography.arabicOpacity, WebkitTextStroke: outline ? `${outline}px ${typography.arabicOutlineColor}` : "0 transparent", textShadow: shadow ? `0 2px ${shadow}px rgba(0,0,0,${typography.arabicShadowStrength})` : "none" }}>{sampleLayout?.arabicLines.map((line, lineIndex) => <span className="caption-text-line" key={`sample-arabic-${lineIndex}`}>{line.words.map((word, index) => { const state = word.state; const wordPresentation = resolveWordHighlightPresentation({ baseTextColor: typography.textColor, highlightColor: typography.wordHighlightColor, intensity: typography.wordHighlightIntensity, isHighlighted: state === "current", state }); return <span data-sample-word-state={state} style={{ color: wordPresentation.color, opacity: wordPresentation.opacity, textShadow: wordPresentation.glowBlurPx ? `0 0 ${wordPresentation.glowBlurPx}px ${wordPresentation.glowColor}` : undefined }} key={`${word.text}-${index}`}>{index ? " " : ""}{word.text}</span>; })}</span>)}</p>
+            {typography.translationVisible && <small style={{ color: effectiveTranslationColor(typography), fontFamily: typography.translationFontFamily, fontSize: `${typography.translationFontSize}px`, lineHeight: `${sampleLayout?.metrics.translationLineHeight ?? typography.translationFontSize * 1.25}px`, fontWeight: typography.translationFontWeight, fontStyle: typography.translationItalic ? "italic" : "normal", opacity: typography.translationOpacity, WebkitTextStroke: typography.translationOutlineEnabled ? `${typography.translationOutlineWidth}px ${typography.translationOutlineColor}` : "0 transparent", textShadow: typography.translationShadowEnabled ? `0 2px ${typography.translationShadowBlur}px rgba(0,0,0,${typography.translationShadowStrength})` : "none" }}>{sampleLayout?.translationLines.map((line, index) => <span className="caption-text-line" key={`sample-translation-${index}`}>{line.text}</span>)}</small>}
+          </div></CaptionLogicalStage>
         </div>}
         {selected && <div className="quick-create-file"><div><strong>{selected.name}</strong><span>{(selected.size / 1024 / 1024).toFixed(1)} MB · Prepared locally on this device</span></div><label><input type="file" accept={MEDIA_FILE_ACCEPT} onChange={selectFile} />Choose another</label></div>}
       </div>
