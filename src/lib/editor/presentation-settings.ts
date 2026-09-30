@@ -17,6 +17,8 @@ import type { ProjectFormat } from "../schemas/project.ts";
 export const PRE_GENERATION_PRESENTATION_SECTIONS = ["layout", "quran", "translation", "effects", "toggles"] as const;
 export type PreGenerationPresentationSection = (typeof PRE_GENERATION_PRESENTATION_SECTIONS)[number];
 export const DEFAULT_PRE_GENERATION_PRESENTATION_SECTION: PreGenerationPresentationSection = "layout";
+export const CREATE_CAPTION_WIDTH_MIN_PERCENT = 0.7;
+export const CREATE_CAPTION_WIDTH_MAX_PERCENT = 0.96;
 
 export type CaptionPresentationSettings = {
   projectFormat: ProjectFormat;
@@ -47,6 +49,21 @@ export function presentationForFormat(current: CaptionPresentationSettings, form
     ...current,
     projectFormat: { ...format },
     positioning: clampCaptionPositioning(current.positioning, format),
+  };
+}
+
+/** Keep Quick Create's linked Arabic and translation captions on the shared width model. */
+export function presentationWithCaptionWidth(current: CaptionPresentationSettings, requestedWidthPercent: number): CaptionPresentationSettings {
+  const widthPercent = Number.isFinite(requestedWidthPercent)
+    ? Math.min(CREATE_CAPTION_WIDTH_MAX_PERCENT, Math.max(CREATE_CAPTION_WIDTH_MIN_PERCENT, requestedWidthPercent))
+    : current.positioning.maxWidthPercent;
+  return {
+    ...current,
+    positioning: {
+      ...current.positioning,
+      maxWidthPercent: widthPercent,
+      translationMaxWidthPercent: widthPercent,
+    },
   };
 }
 

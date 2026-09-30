@@ -144,6 +144,7 @@ test("pre-generation presentation survives persistence and legacy projects recei
   assert.deepEqual(restored.captionEffects, { videoDimLevel: 28 });
   assert.deepEqual(restored.transitionSettings, selected.transitionSettings);
   assert.equal(restored.positioning.y, 0.61);
+  assert.equal(restored.positioning.maxWidthPercent, 0.9);
   assert.equal(restored.showVerseNumber, true);
 
   const legacy = { ...project(), captionEffects: undefined, typography: { ...DEFAULT_TYPOGRAPHY, translationFontWeight: undefined, translationItalic: undefined } } as unknown as SavedProject;
@@ -157,6 +158,16 @@ test("pre-generation presentation survives persistence and legacy projects recei
   assert.deepEqual(loadSavedProject(withoutTransition).transitionSettings, DEFAULT_TRANSITION_SETTINGS);
   const explicitFade = { ...project(), transitionSettings: { ...DEFAULT_TRANSITION_SETTINGS, type: "fade", blurFadeEnabled: false, fadeInMs: 350, fadeOutMs: 350 } };
   assert.deepEqual(loadSavedProject(explicitFade).transitionSettings, explicitFade.transitionSettings);
+
+  const selectedWidth = project({ positioning: { ...DEFAULT_CAPTION_POSITIONING, maxWidthPercent: 0.94, translationMaxWidthPercent: 0.94 } });
+  const hydratedWidth = loadSavedProject(serializeSavedProject(selectedWidth));
+  assert.equal(hydratedWidth.positioning.maxWidthPercent, 0.94);
+  assert.equal(hydratedWidth.positioning.translationMaxWidthPercent, 0.94);
+
+  const legacyPositioning = { ...DEFAULT_CAPTION_POSITIONING } as Partial<SavedProject["positioning"]>;
+  delete legacyPositioning.maxWidthPercent;
+  const legacyWidth = loadSavedProject(project({ positioning: legacyPositioning as SavedProject["positioning"] }));
+  assert.equal(legacyWidth.positioning.maxWidthPercent, 0.9);
 });
 
 test("source verification accepts matching metadata and reports mismatch without attaching it silently", () => {

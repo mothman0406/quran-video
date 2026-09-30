@@ -8,8 +8,11 @@ import {
   DEFAULT_PRE_GENERATION_PRESENTATION_SECTION,
   FULL_AYAH_DISPLAY_INHERENT,
   PRE_GENERATION_PRESENTATION_SECTIONS,
+  CREATE_CAPTION_WIDTH_MAX_PERCENT,
+  CREATE_CAPTION_WIDTH_MIN_PERCENT,
   defaultCaptionPresentationSettings,
   presentationForFormat,
+  presentationWithCaptionWidth,
   videoDimOpacity,
 } from "../src/lib/editor/presentation-settings.ts";
 import { exportFormatForQuality } from "../src/lib/export/quality.ts";
@@ -18,7 +21,9 @@ const quickCreate = readFileSync(new URL("../src/components/quick-create.tsx", i
 const editorWorkspace = readFileSync(new URL("../src/components/editor-workspace.tsx", import.meta.url), "utf8");
 const editorClient = readFileSync(new URL("../src/components/editor-client.tsx", import.meta.url), "utf8");
 const composedPreview = readFileSync(new URL("../src/components/composed-video-preview.tsx", import.meta.url), "utf8");
+const videosDashboard = readFileSync(new URL("../src/components/videos-dashboard.tsx", import.meta.url), "utf8");
 const offlineRenderer = readFileSync(new URL("../src/lib/export/offline-webcodecs.ts", import.meta.url), "utf8");
+const exportConfig = readFileSync(new URL("../src/lib/export/config.ts", import.meta.url), "utf8");
 
 test("Layout is the default and the five pre-generation sections stay ordered", () => {
   assert.equal(DEFAULT_PRE_GENERATION_PRESENTATION_SECTION, "layout");
@@ -34,6 +39,8 @@ test("Layout is the default and the five pre-generation sections stay ordered", 
 test("presentation defaults are complete, clean, and preserve the existing create choices", () => {
   const value = defaultCaptionPresentationSettings();
   assert.equal(value.projectFormat.preset, "vertical");
+  assert.equal(value.positioning.maxWidthPercent, 0.9);
+  assert.equal(value.positioning.translationMaxWidthPercent, 0.9);
   assert.equal(value.typography.quranStyle, "uthmani");
   assert.equal(value.typography.arabicFontSize, DEFAULT_TYPOGRAPHY.arabicFontSize);
   assert.equal(value.typography.textColor, "#ffffff");
@@ -56,12 +63,16 @@ test("switching sections and formats preserves presentation values and adds 4:5 
   customized.typography.arabicFontSize = 52;
   customized.typography.translationItalic = true;
   customized.typography.translationSpacingBelowArabic = 17;
+  customized.positioning.maxWidthPercent = 0.94;
+  customized.positioning.translationMaxWidthPercent = 0.94;
   customized.captionEffects.videoDimLevel = 24;
   customized.showVerseNumber = true;
   const portrait = presentationForFormat(customized, PROJECT_FORMATS.portrait);
   assert.equal(portrait.typography.arabicFontSize, 52);
   assert.equal(portrait.typography.translationItalic, true);
   assert.equal(portrait.typography.translationSpacingBelowArabic, 17);
+  assert.equal(portrait.positioning.maxWidthPercent, 0.94);
+  assert.equal(portrait.positioning.translationMaxWidthPercent, 0.94);
   assert.equal(portrait.captionEffects.videoDimLevel, 24);
   assert.equal(portrait.showVerseNumber, true);
   assert.deepEqual(portrait.projectFormat, { preset: "portrait", width: 1080, height: 1350, label: "4:5 portrait", aspectRatio: 4 / 5 });
@@ -70,11 +81,25 @@ test("switching sections and formats preserves presentation values and adds 4:5 
 });
 
 test("all requested controls write the one shared presentation state", () => {
-  for (const label of ["Caption vertical position", "Text spacing", "Quran font", "Quran caption size", "Quran color", "Word highlight color", "Translation language", "Translation font", "Translation size", "Translation weight", "Italic", "Translation color", "Match highlight color", "Video dim level", "Outline width", "Outline color picker", "Shadow intensity", "Caption fade duration", "Translation", "Ayah numbers", "Full Ayah is always enabled", "Word highlighting", "Reset presentation defaults"]) {
+  for (const label of ["Caption vertical position", "Caption width", "Text spacing", "Quran font", "Quran caption size", "Quran color", "Word highlight color", "Translation language", "Translation font", "Translation size", "Translation weight", "Italic", "Translation color", "Match highlight color", "Video dim level", "Outline width", "Outline color picker", "Shadow intensity", "Caption fade duration", "Translation", "Ayah numbers", "Full Ayah is always enabled", "Word highlighting", "Reset presentation defaults"]) {
     assert.match(quickCreate, new RegExp(label));
   }
   assert.match(quickCreate, /\["vertical", "square", "portrait", "landscape"\]/);
   assert.match(quickCreate, /setPresentation\(defaultCaptionPresentationSettings\(\)\)/);
+});
+
+test("Create caption width uses the existing normalized positioning fields and clamps to its safe range", () => {
+  assert.equal(CREATE_CAPTION_WIDTH_MIN_PERCENT, 0.7);
+  assert.equal(CREATE_CAPTION_WIDTH_MAX_PERCENT, 0.96);
+  const initial = defaultCaptionPresentationSettings();
+  const selected = presentationWithCaptionWidth(initial, 0.94);
+  assert.equal(selected.positioning.maxWidthPercent, 0.94);
+  assert.equal(selected.positioning.translationMaxWidthPercent, 0.94);
+  assert.equal(presentationWithCaptionWidth(initial, 0.1).positioning.maxWidthPercent, 0.7);
+  assert.equal(presentationWithCaptionWidth(initial, 2).positioning.maxWidthPercent, 0.96);
+  assert.equal(presentationWithCaptionWidth(selected, Number.NaN).positioning.maxWidthPercent, 0.94);
+  assert.match(quickCreate, /width: `\$\{positioning\.maxWidthPercent \* 100\}%`/);
+  assert.doesNotMatch(quickCreate, /createCaptionWidth|exportCaptionWidth|previewCaptionWidth/);
 });
 
 test("create sample uses canonical Basmallah and demonstrates every highlight state", () => {
@@ -113,6 +138,12 @@ test("Generate receives the exact preview presentation fields and all render pat
   assert.match(offlineRenderer, /videoDimOpacity\(request\.captionEffects\)/);
   assert.match(editorWorkspace, /videoDimOpacity\(captionEffects\)/);
   assert.match(editorClient, /setCaptionEffects\(project\.captionEffects\)/);
+  assert.match(editorClient, /setPositioning\(project\.positioning\)/);
+  assert.match(editorClient, /value=\{positioning\.maxWidthPercent\}/);
+  assert.match(videosDashboard, /positioning: card\.project\.positioning/);
+  assert.match(composedPreview, /positioning=\{project\.positioning\}/);
+  assert.match(exportConfig, /positioning: \{ \.\.\.input\.positioning \}/);
+  assert.match(offlineRenderer, /drawExportCaptions\(context, request,/);
 });
 
 test("the advanced editor keeps its original navigation and does not receive pre-generation panels", () => {
