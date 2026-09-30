@@ -205,6 +205,26 @@ export async function generateVideoCaptions(input: VideoGenerationInput): Promis
     reason: aligned.reason ?? null,
     resultingStartAyah: firstAlignedKey ? Number(firstAlignedKey.split(":")[1]) : null,
     resultingEndAyah: lastAlignedKey ? Number(lastAlignedKey.split(":")[1]) : null,
+    finalAlignmentInterval: useFastConformer ? completeRange.outerTimingRefinement && {
+      startMs: completeRange.outerTimingRefinement.intervalStartMs,
+      endMs: completeRange.outerTimingRefinement.intervalEndMs,
+    } : null,
+    outerTimingRefinement: useFastConformer ? completeRange.outerTimingRefinement : null,
+    firstAlignedTokenStartMs: aligned.alignment.words[0]?.startMs ?? null,
+    finalAlignedTokenEndMs: aligned.alignment.words.at(-1)?.endMs ?? null,
+    ayahTimings: aligned.ayahTimings,
+    alignmentWordsFirst: aligned.alignment.words.slice(0, 60).map((word) => ({
+      verseKey: word.verseKey,
+      canonicalWordIndex: word.canonicalWordIndex,
+      startMs: word.startMs,
+      endMs: word.endMs,
+    })),
+    alignmentWordsLast: aligned.alignment.words.slice(-60).map((word) => ({
+      verseKey: word.verseKey,
+      canonicalWordIndex: word.canonicalWordIndex,
+      startMs: word.startMs,
+      endMs: word.endMs,
+    })),
   });
   const analysis = analyzeTranscript(primaryTranscript, {
     audioAnalysis: transcriptResult.audioAnalysis,

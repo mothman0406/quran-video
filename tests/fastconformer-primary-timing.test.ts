@@ -28,6 +28,25 @@ test("FastConformer is the sole authoritative automatic timing engine", () => {
   assert.deepEqual(analysis.verseBoundaries.map((item) => [item.verseKey, item.startMs, item.endMs]), [["93:1", 1_631, 3_070], ["93:2", 3_070, 5_948]]);
 });
 
+test("a proven outer onset expands only the first ayah envelope and preserves its first word timing", () => {
+  const aligned = result([["93:1", 1_000, 3_070], ["93:2", 3_070, 5_948]]);
+  aligned.firstCanonicalWordStartMs = 1_100;
+  aligned.alignment.words = aligned.alignment.words.map((word, index) => index === 0
+    ? { ...word, startMs: 1_100, endMs: 1_200 }
+    : word);
+  aligned.outerTimingRefinement = {
+    intervalStartMs: 1_000,
+    intervalEndMs: 5_948,
+    acceptedCanonicalIdentityUnchanged: true,
+    start: { edge: "start", localizedBoundaryMs: 1_100, searchLimitMs: 1_000, refinedBoundaryMs: 1_000, expanded: true, reason: "expanded-canonical-boundary", proof: null },
+    end: { edge: "end", localizedBoundaryMs: 5_948, searchLimitMs: 5_948, refinedBoundaryMs: 5_948, expanded: false, reason: "already-at-evidence-limit", proof: null },
+  };
+  const analysis = analyze(aligned);
+  assert.equal(analysis.timingFailure, null);
+  assert.equal(analysis.verseBoundaries[0]?.startMs, 1_000);
+  assert.equal(analysis.authoritativeTimingEngine?.wordTimings[0]?.startMs, 1_100);
+});
+
 test("FastConformer structural failure is typed and recoverable, with no fallback captions", () => {
   const analysis = analyze(result([], { status: "unavailable", alignmentComplete: false, rawLogits: null, frameCount: null, ayahTimings: [], alignment: { status: "unavailable", reason: "asset failure", canonicalWords: [], targetTokens: [], words: [], verses: [], pauses: [], audibleRepetitions: [], frameCount: 0, frameDurationMs: 0 } }));
   assert.equal(analysis.authoritativeTimingEngine, null);

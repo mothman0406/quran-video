@@ -57,6 +57,10 @@ import {
   selectApplicableCoreBoundaries,
   sliceCtcLogits,
 } from "./quran-core-boundary-localizer.ts";
+import {
+  refineQuranOuterTiming,
+  type QuranOuterTimingRefinement,
+} from "./quran-outer-timing-refinement.ts";
 export {
   FASTCONFORMER_MODEL,
   FASTCONFORMER_MODEL_ARTIFACT,
@@ -217,6 +221,8 @@ export type FastConformerResult = {
   wordEndPolicy?: "ctc-transition-boundary" | "first-aligned-token";
   /** Development-only CTC transition evidence. Never requested by production timing. */
   transitionBoundaryWords?: readonly CtcTransitionBoundaryWord[];
+  /** Timing-only evidence for the accepted range's acoustic envelope. */
+  outerTimingRefinement?: QuranOuterTimingRefinement;
   alignment: CtcForcedAlignmentResult;
   performance: {
     modelArtifactBytes: number;
@@ -263,6 +269,7 @@ export type FastConformerCompleteRangeResult = {
   canonicalSpan: ReturnType<typeof canonicalSpanFromExactRange>;
   boundaryLocalization: QuranBoundaryLocalization | null;
   edgeVerification: QuranEdgeVerification | null;
+  outerTimingRefinement: QuranOuterTimingRefinement | null;
   alignment: FastConformerResult | null;
   reuse: {
     pcmReused: true;
@@ -1014,7 +1021,7 @@ export function createCompleteRangeFastConformerRunner(
       edgeInferenceCount: 0,
     };
     if (!coreDecision.accepted || !coreDecision.core) {
-      return { status: "rejected", reason: coreDecision.reason, coreDecision, exactRange: null, canonicalSpan: null, boundaryLocalization: null, edgeVerification: null, alignment: null, reuse: baseReuse };
+      return { status: "rejected", reason: coreDecision.reason, coreDecision, exactRange: null, canonicalSpan: null, boundaryLocalization: null, edgeVerification: null, outerTimingRefinement: null, alignment: null, reuse: baseReuse };
     }
     const startedAt = performance.now();
     try {
@@ -1072,7 +1079,7 @@ export function createCompleteRangeFastConformerRunner(
       const wholeCoreComplete = wholeCore?.status === "complete" && wholeCore.targetTokens.length === coreEncoded.targetTokens.length;
       const boundaryLocalization: QuranBoundaryLocalization = { start: startLocation, end: endLocation, coreStartMs, coreEndMs, wholeCoreComplete };
       if (!wholeCoreComplete || coreStartMs === null || coreEndMs === null) {
-        return { status: "rejected", reason: "incomplete-whole-core-alignment", coreDecision, exactRange: null, canonicalSpan: null, boundaryLocalization, edgeVerification: null, alignment: null, reuse: { ...baseReuse, modelSessionReused: memoryWarm, fullRecordingLogitsReused: true } };
+        return { status: "rejected", reason: "incomplete-whole-core-alignment", coreDecision, exactRange: null, canonicalSpan: null, boundaryLocalization, edgeVerification: null, outerTimingRefinement: null, alignment: null, reuse: { ...baseReuse, modelSessionReused: memoryWarm, fullRecordingLogitsReused: true } };
       }
 
       const startEvidence = core.startAyah > 1 ? await verifyAdjacentEdge({
@@ -1089,8 +1096,21 @@ export function createCompleteRangeFastConformerRunner(
       const canonicalSpan = canonicalSpanFromExactRange(exactRange);
       if (!finalVerses.length || !canonicalSpan) throw new Error("The exact Quran range could not be expanded canonically.");
       const encoded = encodeFastConformerWords(canonicalCtcWords(finalVerses), loaded.assets.tokenTable, loaded.assets.vocabulary, loaded.assets.quranText);
-      const finalStartMs = completed.start.extended || core.startAyah === 1 ? firstSpeechMs : coreStartMs;
-      const finalEndMs = completed.end.extended || core.endAyah === surahAyahCount ? finalSpeechMs : coreEndMs;
+      const localizedFinalStartMs = completed.start.extended || core.startAyah === 1 ? firstSpeechMs : coreStartMs;
+      const localizedFinalEndMs = completed.end.extended || core.endAyah === surahAyahCount ? finalSpeechMs : coreEndMs;
+      const outerTimingRefinement = refineQuranOuterTiming({
+        localizedStartMs: localizedFinalStartMs,
+        localizedEndMs: localizedFinalEndMs,
+        audioStartMs: 0,
+        audioEndMs: durationMs,
+        logits: fullLogits,
+        canonicalWords: encoded.canonicalWords,
+        targetTokens: encoded.targetTokens,
+        blankTokenId: BLANK_TOKEN_ID,
+        speechRegions,
+      });
+      const finalStartMs = outerTimingRefinement.intervalStartMs;
+      const finalEndMs = outerTimingRefinement.intervalEndMs;
       const finalLogits = sliceCtcLogits(fullLogits, 0, durationMs, finalStartMs, finalEndMs);
       if (!finalLogits) throw new Error("The exact Quran range has no usable VAD-constrained alignment interval.");
       const finalLogitValues = finalLogits.values instanceof Float32Array ? finalLogits.values : Float32Array.from(finalLogits.values);
@@ -1109,10 +1129,18 @@ export function createCompleteRangeFastConformerRunner(
       const transitionBoundaryWords = ctcAlignment.status === "complete"
         ? deriveCtcTransitionBoundaryWords(ctcAlignment.canonicalWords, ctcAlignment.targetTokens, finalLogits, { blankTokenId: BLANK_TOKEN_ID, startMs: finalStartMs, endMs: finalEndMs }) ?? undefined
         : undefined;
-      const alignment = transitionBoundaryWords ? {
+      const wordAlignment = transitionBoundaryWords ? {
         ...ctcAlignment,
         words: ctcAlignment.words.map((word, index) => ({ ...word, endMs: transitionBoundaryWords[index]?.endMs ?? word.endMs })),
       } : ctcAlignment;
+      const alignment = wordAlignment.status === "complete" ? {
+        ...wordAlignment,
+        verses: wordAlignment.verses.map((verse, index, verses) => ({
+          ...verse,
+          startMs: index === 0 ? finalStartMs : verse.startMs,
+          endMs: index === verses.length - 1 ? finalEndMs : verse.endMs,
+        })),
+      } : wordAlignment;
       const alignmentMs = Math.round(performance.now() - alignmentStartedAt);
       const forcedAlignmentMeanScore = alignment.status === "complete" && alignment.words.length
         ? Number((alignment.words.reduce((sum, word) => sum + word.confidence, 0) / alignment.words.length).toFixed(4))
@@ -1158,6 +1186,7 @@ export function createCompleteRangeFastConformerRunner(
         }),
         rawLogits: { frames: finalLogits.frames, vocabularySize: finalLogits.vocabularySize, blankTokenId: BLANK_TOKEN_ID, frameDurationMs: Number(((finalEndMs - finalStartMs) / finalLogits.frames).toFixed(4)) },
         wordEndPolicy: "ctc-transition-boundary",
+        outerTimingRefinement,
         alignment,
         performance: {
           modelArtifactBytes: FASTCONFORMER_MODEL_BYTES,
@@ -1188,6 +1217,7 @@ export function createCompleteRangeFastConformerRunner(
         canonicalSpan,
         boundaryLocalization,
         edgeVerification: { start: completed.start, end: completed.end },
+        outerTimingRefinement,
         alignment: fastConformerResult,
         reuse: { ...baseReuse, modelSessionReused: memoryWarm, fullRecordingLogitsReused: true, edgeInferenceCount },
       };
@@ -1200,6 +1230,7 @@ export function createCompleteRangeFastConformerRunner(
         canonicalSpan: null,
         boundaryLocalization: null,
         edgeVerification: null,
+        outerTimingRefinement: null,
         alignment: null,
         reuse: baseReuse,
       };

@@ -2799,8 +2799,14 @@ export function selectAuthoritativeTimingEngine(input: {
       if (timings[0]!.startMs < 0 || timings.at(-1)!.endMs > input.sourceDurationMs) {
         reasons.push("FastConformer passage boundaries fall outside the source media duration.");
       }
-      if (fastConformer.firstCanonicalWordStartMs !== timings[0]!.startMs) {
+      const refinedStartMs = fastConformer.outerTimingRefinement?.intervalStartMs;
+      if (refinedStartMs === undefined && fastConformer.firstCanonicalWordStartMs !== timings[0]!.startMs) {
         reasons.push("FastConformer first ayah does not start at its first canonical word.");
+      }
+      if (refinedStartMs !== undefined && (timings[0]!.startMs !== refinedStartMs
+        || fastConformer.firstCanonicalWordStartMs === null
+        || fastConformer.firstCanonicalWordStartMs < refinedStartMs)) {
+        reasons.push("FastConformer first ayah does not preserve its proven outer timing refinement.");
       }
     }
     for (let index = 1; index < timings.length; index += 1) {
