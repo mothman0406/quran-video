@@ -264,7 +264,7 @@ export const ProjectSchema = z.strictObject({
   captionEffects: CaptionEffectsSchema.default({ videoDimLevel: 0 }),
   /** Presentation/export rate. Canonical caption and word timings remain source time. */
   playbackRate: z.union([z.literal(0.5), z.literal(0.75), z.literal(1), z.literal(1.25), z.literal(1.5), z.literal(2)]).default(1),
-  showVerseNumber: z.boolean().default(false),
+  showVerseNumber: z.boolean().default(true),
   createdAt: z.string().min(1),
   updatedAt: z.string().min(1),
 });

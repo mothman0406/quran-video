@@ -1,5 +1,21 @@
 # Status
 
+## Current milestone: Default verse numbers and refreshed homepage captures
+
+Complete in implementation and validation:
+
+- Unified new-project, Create, reset, schema, and missing-legacy behavior on
+  the existing `showVerseNumber` presentation field with verse numbers on by
+  default. Explicitly saved off/on choices continue to hydrate unchanged and
+  the same field continues through editor, Watch, and export.
+- Replaced the primary editor, matching before/after, and Cinematic homepage
+  stills with the supplied QuranCaptions captures. The Cinematic card uses a
+  centered 9:16 crop that keeps the reciter, Arabic caption, translation, and
+  decorative ayah number visible; the other three style cards are unchanged.
+- Preserved the Ibrahim Al Gambi CC BY attribution and the responsive Next.js
+  image treatment. No recognition, timing, ingestion, alignment, export, or
+  resize-control architecture changed.
+
 ## Current milestone: Fragmented MP4 duration authority
 
 Complete in implementation and media-preparation validation:
