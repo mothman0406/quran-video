@@ -85,10 +85,11 @@ test("legacy seconds alignment payloads migrate to exact milliseconds once", () 
   assert.throws(() => validateSavedProject({ ...migrated, verseAlignments: [{ ...migrated.verseAlignments[0], invalid: true }] }), /unrecognized|invalid/i);
 });
 
-test("missing legacy verse-number state receives the new default without overwriting false", () => {
+test("legacy verse-number hydration defaults missing state on and preserves explicit off and on", () => {
   const legacy = { ...project(), showVerseNumber: undefined } as unknown as SavedProject;
   assert.equal(loadSavedProject(legacy).showVerseNumber, true);
   assert.equal(loadSavedProject(project({ showVerseNumber: false })).showVerseNumber, false);
+  assert.equal(loadSavedProject(project({ showVerseNumber: true })).showVerseNumber, true);
 });
 
 test("playback rate defaults legacy projects to 1x and persists supported selections", async () => {

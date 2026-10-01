@@ -36,7 +36,7 @@ test("Layout is the default and the five pre-generation sections stay ordered", 
   assert.match(quickCreate, /activeSection === "toggles"/);
 });
 
-test("presentation defaults are complete, clean, and preserve the existing create choices", () => {
+test("new Create projects and presentation reset default verse numbers on", () => {
   const value = defaultCaptionPresentationSettings();
   assert.equal(value.projectFormat.preset, "vertical");
   assert.equal(value.positioning.maxWidthPercent, 0.9);
@@ -50,7 +50,7 @@ test("presentation defaults are complete, clean, and preserve the existing creat
   assert.equal(value.typography.translationTextColor, "#ffffff");
   assert.equal(value.typography.translationOpacity, 1);
   assert.equal(value.typography.translationMatchHighlightColor, false);
-  assert.equal(value.showVerseNumber, false);
+  assert.equal(value.showVerseNumber, true);
   assert.deepEqual(value.captionEffects, DEFAULT_CAPTION_EFFECTS);
   assert.equal(value.transitionSettings.fadeInMs, 225);
   assert.equal(value.transitionSettings.type, "blur-fade");
@@ -144,6 +144,14 @@ test("Generate receives the exact preview presentation fields and all render pat
   assert.match(composedPreview, /positioning=\{project\.positioning\}/);
   assert.match(exportConfig, /positioning: \{ \.\.\.input\.positioning \}/);
   assert.match(offlineRenderer, /drawExportCaptions\(context, request,/);
+});
+
+test("Create, editor, Watch, and export consume the same verse-number field", () => {
+  assert.match(quickCreate, /const \{ positioning, typography, transitionSettings, captionEffects, showVerseNumber \} = presentation/);
+  assert.match(editorClient, /DEFAULT_CAPTION_PRESENTATION\.showVerseNumber/);
+  assert.match(editorClient, /showVerseNumber=\{showVerseNumber\}/);
+  assert.match(composedPreview, /showVerseNumber=\{project\.showVerseNumber\}/);
+  assert.match(exportConfig, /showVerseNumber: input\.showVerseNumber/);
 });
 
 test("the advanced editor keeps its original navigation and does not receive pre-generation panels", () => {

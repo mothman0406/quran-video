@@ -1,6 +1,7 @@
 import {
   DEFAULT_CAPTION_BACKGROUND,
   DEFAULT_CAPTION_EFFECTS,
+  DEFAULT_CAPTION_PRESENTATION,
   DEFAULT_TRANSITION_SETTINGS,
   DEFAULT_TYPOGRAPHY,
   clampCaptionPositioning,
@@ -38,9 +39,7 @@ export function defaultCaptionPresentationSettings(format: ProjectFormat = DEFAU
     captionBackground: { ...DEFAULT_CAPTION_BACKGROUND },
     transitionSettings: { ...DEFAULT_TRANSITION_SETTINGS },
     captionEffects: { ...DEFAULT_CAPTION_EFFECTS },
-    // Quick Create historically starts without inline ayah markers. The
-    // editor's independent new-project default remains unchanged.
-    showVerseNumber: false,
+    showVerseNumber: DEFAULT_CAPTION_PRESENTATION.showVerseNumber,
   };
 }
 

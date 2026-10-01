@@ -87,8 +87,8 @@ test("landing uses the optimized first-party QuranCaptions demo assets without i
 
   assert.match(landing, /import Image from "next\/image"/);
   assert.match(landing, /src="\/landing\/demo\/hero-editor\.png"/);
-  assert.match(landing, /width=\{1200\} height=\{886\}/);
-  assert.match(landing, /QuranCaptions editor showing Surah Ar-Rahman captions and ayah timeline/);
+  assert.match(landing, /width=\{2048\} height=\{1182\}/);
+  assert.match(landing, /QuranCaptions editor with Arabic captions, translation and ayah timeline/);
   assert.doesNotMatch(imports, /recognition|fastconformer|EditorWorkspace/i);
   for (const asset of requiredAssets) {
     const image = readFileSync(fromRoot("public/landing/demo", asset));
@@ -106,6 +106,7 @@ test("showcase uses the four final first-party vertical captures", () => {
   assert.deepEqual(LANDING_SHOWCASE.map((example) => example.description), ["Arabic-first with a clean, distraction-free layout.", "Arabic and English composed together in one frame.", "Follow the recitation word by word with read-so-far color.", "Polished Arabic focus for social-first Quran videos."]);
   assert.deepEqual(LANDING_SHOWCASE.map((example) => example.src), ["/landing/demo/style-minimal.png", "/landing/demo/style-translation.png", "/landing/demo/style-word-highlight.png", "/landing/demo/style-cinematic.png"]);
   assert.ok(LANDING_SHOWCASE.every((example) => example.alt.length > 20));
+  assert.match(LANDING_SHOWCASE.find((example) => example.id === "cinematic")?.alt ?? "", /decorative ayah number/);
   assert.doesNotMatch(landing, /A caption treatment made for Quran recitation\./);
   assert.match(globals, /\.landing-showcase-grid \{ grid-template-columns:repeat\(4,minmax\(0,1fr\)\);/);
   assert.match(globals, /\.landing-showcase-frame > img \{ object-fit:cover; \}/);
