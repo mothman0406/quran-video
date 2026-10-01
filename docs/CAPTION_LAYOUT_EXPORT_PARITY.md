@@ -62,6 +62,31 @@ Quick Create exposes that existing normalized setting in its Layout controls at
 linked translation width follows the selected caption width. Legacy projects
 without an explicit maximum width hydrate to the unchanged 90% default.
 
+## Editor direct manipulation
+
+The advanced editor uses the same saved `positioning.maxWidthPercent` field for
+its width slider, numeric control, and editor-only selection box. A selected
+linked Arabic/translation/transliteration block shows left, right, top, bottom,
+and four corner handles. Left/right and corners resize only available width in
+the 70%–96% safe range using a deterministic center anchor; they never alter
+Quran font size or content-driven height. Top/bottom drag the complete linked
+block's vertical anchor, so Arabic is neither cropped nor vertically scaled.
+
+Dragging inside the box updates normalized `positioning.x` and `positioning.y`
+within the existing safe bounds. Pointer capture keeps interactions continuous
+outside the box. The live editor state is updated on movement; the existing
+local safety checkpoint is debounced and history commits on pointer release.
+Selection UI is only rendered by editor-selected `CaptionPreview` instances,
+so Watch and Canvas/MP4 export receive the same presentation values but never
+the outline or handles.
+
+The prior width-slider route crash came from dereferencing a React synthetic
+event inside a deferred functional state updater. Under rapid input React had
+cleared `event.currentTarget`, producing `TypeError: Cannot read properties of
+null (reading 'value')`. Controls now capture the finite numeric value before
+scheduling state work; positioning normalization also rejects non-finite legacy
+input before calculating bounds.
+
 ## Font loading
 
 The Quran font remains `UthmanicHafs`, sourced from Quran Foundation's

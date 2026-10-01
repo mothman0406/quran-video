@@ -3338,3 +3338,30 @@ Verification: focused Create/default/range/state-flow, persistence/hydration,
 legacy fallback, editor/Watch/export, aspect-ratio, responsive wrapping, and
 timing/recognition invariance tests; Chrome 154 fixture preparation/playback;
 full test/typecheck/lint/build/diff checks at handoff.
+
+## Current milestone: Reliable caption resize controls
+
+Complete:
+
+- Fixed the rapid Caption Width crash: the Create slider previously read
+  `event.currentTarget.value` inside a deferred state updater, after React had
+  cleared the synthetic event. Chrome reproduced the resulting null-property
+  TypeError and route error screen. Controls now capture their numeric value
+  before scheduling the update, and width/position normalization rejects
+  non-finite inputs.
+- Added an editor-only selection outline around the linked caption block, with
+  all eight standard handles. Dragging the block writes the existing normalized
+  `positioning.x`/`positioning.y`; left/right and corners write the same
+  `positioning.maxWidthPercent` value used by sliders, Watch, and export.
+- Direct width editing uses the established 70%–96% safe range and a
+  deterministic center anchor. It never changes Quran font size, Arabic line
+  height, Quran text, word highlighting, or timing. Top/bottom handles move
+  the linked block vertically rather than introduce clipping or vertical scale.
+- Pointer capture, cancel/lost-capture cleanup, history transactions, and the
+  existing 900ms local checkpoint keep drags responsive without an autosave
+  storm. Selection UI only exists in editor-selected previews and is excluded
+  from Watch and Canvas/MP4 export.
+
+Verification: focused slider, pointer-model, bounds, clamp, all-aspect-ratio,
+and legacy-width tests; Chrome rapid-slider regression; full final checks are
+recorded at milestone handoff.

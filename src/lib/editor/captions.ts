@@ -328,7 +328,13 @@ export function clampNormalizedPosition(value: number, minimum = 0.06, maximum =
 }
 
 export function captionPositionBounds(format: ProjectFormat, maxWidthPercent = DEFAULT_CAPTION_POSITIONING.maxWidthPercent): { x: [number, number]; y: [number, number] } {
-  const horizontalInset = Math.min(0.46, Math.max(0.06, maxWidthPercent / 2));
+  // Persisted projects and controlled inputs should already be finite, but
+  // bounds are also used while React is reconciling interactive controls.
+  // Never let an incomplete numeric edit turn every position into NaN.
+  const safeWidth = Number.isFinite(maxWidthPercent)
+    ? Math.min(0.96, Math.max(0.2, maxWidthPercent))
+    : DEFAULT_CAPTION_POSITIONING.maxWidthPercent;
+  const horizontalInset = Math.min(0.46, Math.max(0.06, safeWidth / 2));
   const socialBottom = format.preset === "vertical" ? 0.82 : 0.94;
   const minimumY = 0.06;
   return { x: [horizontalInset, 1 - horizontalInset], y: [minimumY, socialBottom] };
@@ -369,9 +375,15 @@ export function linkedCaptionStackLayout(
 }
 
 export function clampCaptionPositioning(positioning: CaptionPositioning, format: ProjectFormat): CaptionPositioning {
-  const bounds = captionPositionBounds(format, positioning.maxWidthPercent);
-  const next = { ...positioning };
-  next.translationMaxWidthPercent = Math.min(0.96, Math.max(0.2, positioning.translationMaxWidthPercent ?? positioning.maxWidthPercent));
+  const maxWidthPercent = Number.isFinite(positioning.maxWidthPercent)
+    ? Math.min(0.96, Math.max(0.2, positioning.maxWidthPercent))
+    : DEFAULT_CAPTION_POSITIONING.maxWidthPercent;
+  const translationWidth = positioning.translationMaxWidthPercent ?? maxWidthPercent;
+  const translationMaxWidthPercent = Number.isFinite(translationWidth)
+    ? Math.min(0.96, Math.max(0.2, translationWidth))
+    : maxWidthPercent;
+  const bounds = captionPositionBounds(format, maxWidthPercent);
+  const next = { ...positioning, maxWidthPercent, translationMaxWidthPercent };
   next.x = clampNormalizedPosition(positioning.x, bounds.x[0], bounds.x[1]);
   next.y = clampNormalizedPosition(positioning.y, bounds.y[0], bounds.y[1]);
   next.translationX = clampNormalizedPosition(positioning.translationX, bounds.x[0], bounds.x[1]);

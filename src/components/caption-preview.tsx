@@ -11,9 +11,10 @@ import type { MediaPlaybackClock } from "@/lib/editor/playback-clock";
 import CaptionLogicalStage from "@/components/caption-logical-stage";
 import { captionLogicalFormat, measureCaptionLayout } from "@/lib/editor/caption-layout";
 import { ensurePresentationFontsLoaded } from "@/lib/quran/font-loading";
+import type { CaptionResizeEdge } from "@/lib/editor/caption-manipulation";
 
 export type CaptionObject = "arabic" | "translation" | "transliteration";
-export type CaptionResizeEdge = "left" | "right";
+export type { CaptionResizeEdge } from "@/lib/editor/caption-manipulation";
 
 type CaptionPreviewProps = {
   currentTimeMs: number;
@@ -193,23 +194,22 @@ function CaptionPreview({
         translationPositioning: translationStyleState.positioning,
         transliteration: hasTransliteration ? segment.transliteration ?? null : null,
       }) : null;
-      const objectClass = (kind: CaptionObject) => `caption-object ${selectedSegmentId === segment.id && selectedObject === kind ? "caption-object-selected" : ""}`;
-      const handles = (kind: CaptionObject) => selectedSegmentId === segment.id && selectedObject === kind ? <>
-        <button aria-label={`Resize ${kind} text box from left`} className="caption-handle caption-handle-left" type="button" onPointerDown={(event) => onResizePointerDown(event, kind, "left")} onPointerMove={onPointerMove} onPointerUp={onPointerUp} />
-        <button aria-label={`Resize ${kind} text box from right`} className="caption-handle caption-handle-right" type="button" onPointerDown={(event) => onResizePointerDown(event, kind, "right")} onPointerMove={onPointerMove} onPointerUp={onPointerUp} />
-        <span className="caption-handle caption-handle-top-left" aria-hidden="true" />
-        <span className="caption-handle caption-handle-top-right" aria-hidden="true" />
-        <span className="caption-handle caption-handle-bottom-left" aria-hidden="true" />
-        <span className="caption-handle caption-handle-bottom-right" aria-hidden="true" />
+      const isLinked = segmentPositioning.translationPositionLinked;
+      const isSelected = selectedSegmentId === segment.id && selectedObject === "arabic";
+      const objectClass = (kind: CaptionObject) => `caption-object ${!isLinked && selectedSegmentId === segment.id && selectedObject === kind ? "caption-object-selected" : ""}`;
+      const handles = (kind: CaptionObject, selected: boolean) => selected ? <>
+        {(["left", "right", "top", "bottom", "top-left", "top-right", "bottom-left", "bottom-right"] as const).map((edge) => <button key={edge} aria-label={`Resize ${kind} text box from ${edge}`} className={`caption-handle caption-handle-${edge}`} type="button" onPointerDown={(event) => onResizePointerDown(event, kind, edge)} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} onLostPointerCapture={onPointerUp} />)}
       </> : null;
       const arabicObject = (linked: boolean) => <div
         className={`${objectClass("arabic")}${linked ? " caption-object-linked" : ""}`}
         data-caption-object="arabic"
         style={linked ? { width: "100%" } : { ...background, left: `${segmentPositioning.x * 100}%`, top: `${segmentPositioning.y * 100}%`, width: arabicWidth }}
-        onPointerDown={(event) => onObjectPointerDown(event, segment, "arabic")}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onClick={(event) => { event.stopPropagation(); onSelectObject(segment, "arabic"); }}
+        onPointerDown={linked ? undefined : (event) => onObjectPointerDown(event, segment, "arabic")}
+        onPointerMove={linked ? undefined : onPointerMove}
+        onPointerUp={linked ? undefined : onPointerUp}
+        onPointerCancel={linked ? undefined : onPointerUp}
+        onLostPointerCapture={linked ? undefined : onPointerUp}
+        onClick={linked ? undefined : (event) => { event.stopPropagation(); onSelectObject(segment, "arabic"); }}
       >
         <p className="pointer-events-none" dir="rtl" lang="ar" style={{ ...styleText("arabic", segmentTypography), color: segmentTypography.textColor, fontFamily: quranFontDefinitions[segmentTypography.quranStyle].family, fontSize: segmentTypography.arabicFontSize, lineHeight: `${layout?.metrics.arabicLineHeight ?? segmentTypography.arabicFontSize * segmentTypography.arabicLineSpacing}px`, opacity: segmentTypography.arabicOpacity, visibility: layout ? "visible" : "hidden" }}><span data-caption-arabic-text>{layout?.arabicLines.map((line, lineIndex) => <span className="caption-text-line" data-caption-line={lineIndex} key={`${segment.id}-arabic-line-${lineIndex}`}>{line.words.map((word: ArabicPresentationWord, index: number) => <Fragment key={`${segment.id}-${word.kind}-${lineIndex}-${index}`}>
           {index > 0 && (word.kind === "verse-number" ? "\u00a0" : " ")}
@@ -218,19 +218,21 @@ function CaptionPreview({
             return <span data-caption-quran-word={word.kind === "quran-word" ? "true" : undefined} data-caption-word-highlighted={word.highlighted ? "true" : "false"} data-caption-word-state={word.state} style={{ color: presentation.color, opacity: presentation.opacity, textShadow: presentation.glowBlurPx ? `0 0 ${presentation.glowBlurPx}px ${presentation.glowColor}` : undefined }}>{word.text}</span>;
           })()}
         </Fragment>)}</span>)}</span></p>
-        {handles("arabic")}
+        {handles("arabic", !linked && selectedSegmentId === segment.id && selectedObject === "arabic")}
       </div>;
       const translationObject = (linked: boolean) => hasTranslation && <div
         className={`${objectClass("translation")}${linked ? " caption-object-linked" : ""}`}
         data-caption-object="translation"
         style={linked ? { width: "100%" } : { ...background, left: `${translationStyleState.positioning.translationX * 100}%`, top: `${translationStyleState.positioning.translationY * 100}%`, width: translationWidth }}
-        onPointerDown={(event) => onObjectPointerDown(event, segment, "translation")}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onClick={(event) => { event.stopPropagation(); onSelectObject(segment, "translation"); }}
+        onPointerDown={linked ? undefined : (event) => onObjectPointerDown(event, segment, "translation")}
+        onPointerMove={linked ? undefined : onPointerMove}
+        onPointerUp={linked ? undefined : onPointerUp}
+        onPointerCancel={linked ? undefined : onPointerUp}
+        onLostPointerCapture={linked ? undefined : onPointerUp}
+        onClick={linked ? undefined : (event) => { event.stopPropagation(); onSelectObject(segment, "translation"); }}
       >
         <p className="pointer-events-none" style={{ ...translationStyle, lineHeight: `${layout?.metrics.translationLineHeight ?? translationStyleState.typography.translationFontSize * 1.25}px`, visibility: layout ? "visible" : "hidden" }}>{layout?.translationLines.map((line, index) => <span className="caption-text-line" data-caption-line={index} key={`${segment.id}-translation-line-${index}`}>{line.text}</span>)}</p>
-        {handles("translation")}
+        {handles("translation", !linked && selectedSegmentId === segment.id && selectedObject === "translation")}
       </div>;
       const transliterationObject = (linked: boolean) => hasTransliteration && <div
         className={`caption-object caption-object-transliteration${linked ? " caption-object-linked" : ""}`}
@@ -241,12 +243,19 @@ function CaptionPreview({
       </div>;
       return <div key={segment.id} ref={registerLayer(segment.id)} className="absolute inset-0 pointer-events-none" data-caption-segment={segment.id} data-caption-opacity="0" style={{ opacity: 0, visibility: "hidden", willChange: "opacity, filter" }}>
         {segmentPositioning.translationPositionLinked ? <div
-          className="caption-linked-stack"
+          className={`caption-linked-stack${isSelected ? " caption-linked-stack-selected" : ""}`}
         style={{ ...background, left: `${segmentPositioning.x * 100}%`, top: `${layout ? linkedCaptionStackLayout(logicalFormat, segmentPositioning.y, logicalFormat.height, layout.totalHeight + (segmentBackground.enabled ? segmentBackground.verticalPadding * 2 : 0)).centerY * 100 : segmentPositioning.y * 100}%`, width: arabicWidth, gap: `${segmentTypography.translationSpacingBelowArabic}px` }}
+        onPointerDown={(event) => onObjectPointerDown(event, segment, "arabic")}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        onLostPointerCapture={onPointerUp}
+        onClick={(event) => { event.stopPropagation(); onSelectObject(segment, "arabic"); }}
         >
           {arabicObject(true)}
           {translationObject(true)}
           {transliterationObject(true)}
+          {isSelected && <div className="caption-selection-box" aria-label="Selected linked caption block">{handles("arabic", true)}</div>}
         </div> : <>
           {arabicObject(false)}
           {translationObject(false)}
