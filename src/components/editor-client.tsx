@@ -52,7 +52,6 @@ import {
   resetCaptionSegmentTiming,
   resetTypography as resetTypographyDefaults,
   resizeCaptionBoundary,
-  resizeCaptionWidth,
   splitCaptionSegment,
   updateCaptionTranslationSegment,
   updateCaptionPosition,
@@ -98,6 +97,7 @@ import type { QuranContentResponse } from "@/lib/quran/content";
 import type { QuranTranslation } from "@/lib/quran/translations";
 import { localTranscriptionSupport } from "@/lib/recognition/support";
 import { type CaptionObject, type CaptionResizeEdge } from "@/components/caption-preview";
+import { captionPositioningFromPointer } from "@/lib/editor/caption-manipulation";
 import EditorWorkspace from "@/components/editor-workspace";
 import {
   basmalahDiagnosticsEnabled,
@@ -377,6 +377,8 @@ export default function Home() {
   const timelineRef = useRef<HTMLDivElement>(null);
   const canvasInteraction = useRef<{
     kind: CaptionObject;
+    segmentId: string | null;
+    useSegmentStyle: boolean;
     mode: "drag" | "resize";
     edge?: CaptionResizeEdge;
     pointerX: number;
@@ -2061,17 +2063,22 @@ export default function Home() {
   }
   const handleObjectPointerDown = useCallback(
     (event: PointerEvent<HTMLDivElement>, segment: CaptionSegment, kind: CaptionObject) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
       event.stopPropagation();
       setSelectedSegmentId(segment.id);
       setSelectedObject(kind);
       setRightInspectorMode(rightInspectorModeForSelection("caption"));
       if (selectedSegmentId !== segment.id) setStyleScope("all");
+      const useSegmentStyle = styleScope === "segment" && selectedSegmentId === segment.id;
       canvasInteraction.current = {
         kind,
+        segmentId: segment.id,
+        useSegmentStyle,
         mode: "drag",
         pointerX: event.clientX,
         pointerY: event.clientY,
-        positioning: { ...(styleScope === "segment" && selectedSegmentId ? (() => { const segment = segments.find((item) => item.id === selectedSegmentId); return segment ? resolveCaptionLayerStyle(captionStyleFromState(typography, positioning, captionBackground, transitionSettings), segment.styleOverrides, kind).positioning : positioning; })() : positioning), translationPositionLinked: false },
+        positioning: { ...(useSegmentStyle ? resolveCaptionLayerStyle(captionStyleFromState(typography, positioning, captionBackground, transitionSettings), segment.styleOverrides, kind).positioning : positioning) },
       };
       beginProjectHistoryTransaction();
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -2080,16 +2087,22 @@ export default function Home() {
   );
   const handleResizePointerDown = useCallback(
     (event: PointerEvent<HTMLButtonElement>, kind: CaptionObject, edge: CaptionResizeEdge) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
       event.stopPropagation();
       setSelectedObject(kind);
       setRightInspectorMode(rightInspectorModeForSelection("caption"));
+      const useSegmentStyle = styleScope === "segment" && Boolean(selectedSegmentId);
+      const target = useSegmentStyle ? segments.find((item) => item.id === selectedSegmentId) : null;
       canvasInteraction.current = {
         kind,
+        segmentId: target?.id ?? selectedSegmentId,
+        useSegmentStyle: Boolean(target),
         mode: "resize",
         edge,
         pointerX: event.clientX,
         pointerY: event.clientY,
-        positioning: { ...(styleScope === "segment" && selectedSegmentId ? (() => { const segment = segments.find((item) => item.id === selectedSegmentId); return segment ? resolveCaptionLayerStyle(captionStyleFromState(typography, positioning, captionBackground, transitionSettings), segment.styleOverrides, kind).positioning : positioning; })() : positioning), translationPositionLinked: false },
+        positioning: { ...(target ? resolveCaptionLayerStyle(captionStyleFromState(typography, positioning, captionBackground, transitionSettings), target.styleOverrides, kind).positioning : positioning) },
       };
       beginProjectHistoryTransaction();
       event.currentTarget.setPointerCapture(event.pointerId);
@@ -2101,11 +2114,12 @@ export default function Home() {
       const interaction = canvasInteraction.current;
       const rect = previewRef.current?.getBoundingClientRect();
       if (!interaction || !rect) return;
+      event.preventDefault();
       const dx = (event.clientX - interaction.pointerX) / rect.width;
       const dy = (event.clientY - interaction.pointerY) / rect.height;
       const positioningKind = interaction.kind === "arabic" ? "arabic" : "translation";
       const savePositioning = (previous: CaptionPositioning, next: CaptionPositioning) => {
-        if (styleScope !== "segment" || !selectedSegmentId) {
+        if (!interaction.useSegmentStyle || !interaction.segmentId) {
           updateProjectHistory((current) => ({ ...current, positioning: next }), true);
           return;
         }
@@ -2113,22 +2127,14 @@ export default function Home() {
           .filter((key) => next[key] !== previous[key])
           .map((key) => [key, next[key]])) as Partial<CaptionPositioning>;
         if (!Object.keys(changed).length) return;
-        const layer: CaptionLayer = selectedObject ?? "arabic";
-        updateProjectHistory((current) => ({ ...current, segments: current.segments.map((segment) => segment.id === selectedSegmentId
+        const layer: CaptionLayer = interaction.kind === "translation" ? "translation" : "arabic";
+        updateProjectHistory((current) => ({ ...current, segments: current.segments.map((segment) => segment.id === interaction.segmentId
           ? { ...segment, styleOverrides: patchCaptionLayerStyleOverrides(segment.styleOverrides, layer, { positioning: changed }) }
           : segment) }), true);
       };
-      if (interaction.mode === "drag") {
-        const start = interaction.positioning;
-        savePositioning(start, updateCaptionPosition(start, positioningKind, interaction.kind === "arabic" ? start.x + dx : start.translationX + dx, interaction.kind === "arabic" ? start.y + dy : start.translationY + dy, projectFormat));
-      } else {
-        const startWidth = positioningKind === "arabic" ? interaction.positioning.maxWidthPercent : (interaction.positioning.translationMaxWidthPercent ?? interaction.positioning.maxWidthPercent);
-        const direction = interaction.edge === "left" ? -1 : 1;
-        const nextWidth = startWidth + direction * dx * 2;
-        savePositioning(interaction.positioning, resizeCaptionWidth(interaction.positioning, positioningKind, nextWidth, projectFormat));
-      }
+      savePositioning(interaction.positioning, captionPositioningFromPointer({ positioning: interaction.positioning, mode: interaction.mode, edge: interaction.edge, deltaX: dx, deltaY: dy, format: projectFormat, kind: positioningKind }));
     },
-    [projectFormat, selectedObject, selectedSegmentId, styleScope],
+    [projectFormat],
   );
   const handleObjectPointerUp = useCallback(() => {
     canvasInteraction.current = null;
@@ -4090,23 +4096,29 @@ export default function Home() {
                     <label className="mt-2 block text-xs">
                       Maximum width
                       <input
-                        className="mt-1 w-full rounded-lg border px-2 py-1"
-                        type="number"
-                        min="0.2"
-                        max="1"
+                        aria-label="Caption width"
+                        className="mt-1 w-full"
+                        type="range"
+                        min="0.7"
+                        max="0.96"
                         step="0.01"
                         value={positioning.maxWidthPercent}
-                        onChange={(event) =>
-                          setPositioning((current) =>
-                            clampCaptionPositioning(
-                              {
-                                ...current,
-                                maxWidthPercent: Number(event.target.value),
-                              },
-                              projectFormat,
-                            ),
-                          )
-                        }
+                        onChange={(event) => {
+                          const maxWidthPercent = Number(event.currentTarget.value);
+                          updateProjectHistory((current) => ({ ...current, positioning: clampCaptionPositioning({ ...current.positioning, maxWidthPercent, ...(current.positioning.translationPositionLinked ? { translationMaxWidthPercent: maxWidthPercent } : {}) }, current.projectFormat) }));
+                        }}
+                      />
+                      <input
+                        className="mt-1 w-full rounded-lg border px-2 py-1"
+                        type="number"
+                        min="0.7"
+                        max="0.96"
+                        step="0.01"
+                        value={positioning.maxWidthPercent}
+                        onChange={(event) => {
+                          const maxWidthPercent = Number(event.currentTarget.value);
+                          updateProjectHistory((current) => ({ ...current, positioning: clampCaptionPositioning({ ...current.positioning, maxWidthPercent, ...(current.positioning.translationPositionLinked ? { translationMaxWidthPercent: maxWidthPercent } : {}) }, current.projectFormat) }));
+                        }}
                       />
                     </label>
                     <label className="mt-2 flex items-center gap-2 text-sm">
