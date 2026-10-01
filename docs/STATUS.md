@@ -1,5 +1,38 @@
 # Status
 
+## Current milestone: Fragmented MP4 duration authority
+
+Complete in implementation and media-preparation validation:
+
+- Fixed fragmented MP4 ingestion without changing recognition, VAD,
+  localization, alignment, or caption timing. Inspection previously trusted
+  Mediabunny `getDurationFromMetadata()`. The regression file's initialization
+  metadata ended at 139.767 ms, so that value allocated a 2,240-frame
+  canonical buffer even though `AudioSampleSink` enumerated the full track.
+  Later decoded samples were silently outside the output buffer.
+- Inspection now uses Mediabunny `computeDuration()` over the selected primary
+  audio/video tracks. This derives the final packet/sample end timestamp and
+  is independent of container layout, filename, extension, MIME, encoder, and
+  device. Preferred output must have the exact canonical frame count implied
+  by that authoritative duration.
+- The local 42,293,520-byte fragmented fixture has one small `moov` followed
+  by nine `moof`/`mdat` pairs. Its metadata duration is 139.767 ms, but its
+  1,734 AAC packets end at 36.989521 seconds. The conventional A/B file has the
+  same 1,734 audio and 888 video packets and reports 36.989521 seconds through
+  both metadata and sample timing.
+- Actual `/create?debugMedia=1` Chrome QA reports 36,990 ms, 591,840 16 kHz
+  mono frames, preferred WebCodecs, and no FFmpeg fallback for both A/B files.
+  Their canonical PCM SHA-256 values are identical
+  (`09d6b913458dd7025b0b5009226172f7a6cf24c696ee64dc68b0f3e87c407f1b`).
+  The retained 154,990,091-byte QuickTime MOV remains Ready to generate at
+  33,033 ms with all 1,548 audio samples decoded through the preferred path.
+- Generate on the fragmented fixture reached `/videos` with the full PCM. The
+  unchanged recognizer and alignment completed Surah 55:1-9, producing a Ready
+  video rather than the former no-credible-speech failure. No recognition
+  setting or implementation changed.
+
+Details: `docs/MEDIA_COMPATIBILITY.md`.
+
 ## Current milestone: Real landing-page Quran demo assets
 
 Complete in implementation and validation:

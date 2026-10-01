@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { writePlanarAudioToCanonicalPcm } from "../src/lib/recognition/local-audio-decode.ts";
-import { MediaCompatibilityError, routeMediaCompatibility, type MediaInspection } from "../src/lib/media-compatibility.ts";
+import { canonicalPcmMatchesDuration, canonicalRecognitionFrameCount, writePlanarAudioToCanonicalPcm } from "../src/lib/recognition/local-audio-decode.ts";
+import { authoritativeMediaDurationMs, MediaCompatibilityError, routeMediaCompatibility, type MediaInspection } from "../src/lib/media-compatibility.ts";
 import { selectRecognitionAudioPath, selectedAudioMap } from "../src/lib/recognition/local-media-compatibility.ts";
 import { runDeterministicRecognitionAudioRouter } from "../src/lib/recognition/media-preparation-router.ts";
 
@@ -87,6 +87,38 @@ test("planar audio converges to the canonical mono 16 kHz amplitude contract", (
   assert.deepEqual(Array.from(output), [0, 0, 0, 0]);
 });
 
+test("fragmented MP4 duration uses the complete sample timeline instead of first-fragment metadata", () => {
+  const metadataDurationSeconds = 0.13976666666666668;
+  const completeSampleTimelineSeconds = 36.98952083333333;
+  assert.equal(authoritativeMediaDurationMs(completeSampleTimelineSeconds), 36_990);
+  assert.notEqual(authoritativeMediaDurationMs(completeSampleTimelineSeconds), Math.round(metadataDurationSeconds * 1_000));
+  assert.equal(canonicalRecognitionFrameCount(36_990), 591_840);
+});
+
+test("conventional MP4 keeps its complete sample-timeline duration", () => {
+  assert.equal(authoritativeMediaDurationMs(36.98952083333333), 36_990);
+});
+
+test("fragmented and conventional containers with equivalent samples have duration and PCM parity", () => {
+  const fragmentedDurationMs = authoritativeMediaDurationMs(36.98952083333333)!;
+  const conventionalDurationMs = authoritativeMediaDurationMs(36.98952083333333)!;
+  assert.equal(fragmentedDurationMs, conventionalDurationMs);
+  assert.equal(canonicalRecognitionFrameCount(fragmentedDurationMs), canonicalRecognitionFrameCount(conventionalDurationMs));
+});
+
+test("canonical PCM must cover the authoritative sample-derived duration exactly", () => {
+  const durationMs = 36_990;
+  const frameCount = canonicalRecognitionFrameCount(durationMs);
+  assert.equal(canonicalPcmMatchesDuration({ sampleRate: 16_000, frameCount, channelBuffers: [new ArrayBuffer(frameCount * 4)] }, durationMs), true);
+  assert.equal(canonicalPcmMatchesDuration({ sampleRate: 16_000, frameCount: 2_240, channelBuffers: [new ArrayBuffer(2_240 * 4)] }, durationMs), false);
+});
+
+test("invalid packet timelines cannot become a duration authority", () => {
+  assert.equal(authoritativeMediaDurationMs(0), undefined);
+  assert.equal(authoritativeMediaDurationMs(Number.NaN), undefined);
+  assert.equal(authoritativeMediaDurationMs(Number.POSITIVE_INFINITY), undefined);
+});
+
 test("production preparation demuxes audio without a whole-file copy or video decode", () => {
   const decode = readFileSync("src/lib/recognition/local-audio-decode.ts", "utf8");
   const compatibility = readFileSync("src/lib/recognition/local-media-compatibility.ts", "utf8");
@@ -94,6 +126,9 @@ test("production preparation demuxes audio without a whole-file copy or video de
   assert.match(decode, /input\.getAudioTracks\(\)/);
   assert.doesNotMatch(decode, /source\.arrayBuffer\(\)/);
   assert.doesNotMatch(decode, /VideoSampleSink|VideoDecoder/);
+  assert.match(compatibility, /input\.computeDuration/);
+  assert.doesNotMatch(compatibility, /getDurationFromMetadata/);
+  assert.match(compatibility, /canonicalPcmMatchesDuration/);
   assert.match(compatibility, /"-vn"/);
   assert.match(compatibility, /selectedAudioMap\(inspection\)/);
 });

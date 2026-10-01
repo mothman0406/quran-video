@@ -70,6 +70,12 @@ export function recognitionPcmBytes(durationMs?: number): number {
   return Math.max(0, Math.round(durationMs ?? 0)) * 16_000 * Float32Array.BYTES_PER_ELEMENT / 1_000;
 }
 
+/** Converts an exact media packet/sample end timestamp into the app's millisecond timeline. */
+export function authoritativeMediaDurationMs(computedDurationSeconds: number): number | undefined {
+  if (!Number.isFinite(computedDurationSeconds) || computedDurationSeconds <= 0) return undefined;
+  return Math.round(computedDurationSeconds * 1_000);
+}
+
 export function canSafelyNormalizeFullVideo(fileSize: number, inspection: MediaInspection): boolean {
   const pixels = Math.max(0, inspection.width ?? 0) * Math.max(0, inspection.height ?? 0);
   return fileSize <= MAX_FULL_NORMALIZATION_BYTES
