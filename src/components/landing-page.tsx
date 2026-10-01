@@ -1,10 +1,9 @@
 import Link from "next/link";
 import Image from "next/image";
 import LandingAuthActions from "@/components/landing-auth-actions";
-import type { MarketingQuranDemo } from "@/lib/landing/marketing-demo";
-import { LANDING_SHOWCASE, type LandingShowcaseAsset } from "@/lib/landing/showcase-assets";
+import { LANDING_SHOWCASE } from "@/lib/landing/showcase-assets";
 
-type LandingPageProps = { demos: MarketingQuranDemo[]; showcaseAssets: LandingShowcaseAsset[]; authenticated: boolean };
+type LandingPageProps = { authenticated: boolean };
 
 const features = [
   ["Quran-aware detection", "Identify a recited passage before you begin editing."],
@@ -34,35 +33,20 @@ const comparisons = [
   ["Finishing", "General subtitle editing", "Quran-specific visual editing"],
 ] as const;
 
-function QuranCaption({ arabic, highlighted = false }: { arabic: string; highlighted?: boolean }) {
-  const words = arabic.split(/\s+/u);
-  return <p className="landing-arabic" dir="rtl" lang="ar">{words.map((word, index) => <span className={highlighted && index < Math.ceil(words.length * 0.55) ? "landing-word-highlight" : undefined} key={`${word}-${index}`}>{word} </span>)}</p>;
-}
-
-function FinishedVideoFallback({ arabic, style }: { arabic: string; style: (typeof LANDING_SHOWCASE)[number]["id"] }) {
-  return <div className={`landing-finished-example landing-finished-example-${style}`}>
-    {style === "minimal" && <QuranCaption arabic={arabic} />}
-    {style === "translation" && <><QuranCaption arabic={arabic} /><p className="landing-finished-translation">Translation in a balanced bilingual layout.</p></>}
-    {style === "highlight" && <QuranCaption arabic={arabic} highlighted />}
-    {style === "cinematic" && <><span className="landing-verse-reference">112:1</span><QuranCaption arabic={arabic} /></>}
-  </div>;
-}
-
-function FinishedVideoExample({ example, arabic, asset }: { example: (typeof LANDING_SHOWCASE)[number]; arabic: string; asset?: LandingShowcaseAsset }) {
+function FinishedVideoExample({ example }: { example: (typeof LANDING_SHOWCASE)[number] }) {
   return <article className="landing-showcase-card">
     <div className="landing-showcase-frame">
-      {asset ? <Image src={asset.src} alt={`${example.title} finished Quran video example`} width={1080} height={1920} sizes="(max-width: 600px) 78vw, (max-width: 850px) 42vw, 270px" /> : <FinishedVideoFallback arabic={arabic} style={example.id} />}
+      <Image src={example.src} alt={example.alt} width={1080} height={1920} sizes="(max-width: 600px) 44vw, (max-width: 850px) 42vw, 280px" />
     </div>
     <div className="landing-showcase-copy"><h3>{example.title}</h3><p>{example.description}</p><span>{example.chip}</span></div>
   </article>;
 }
 
-function EditorScreenshot({ priority = false, className = "" }: { priority?: boolean; className?: string }) {
-  return <Image className={className} src="/landing/editor-demo.png" alt="Quran AutoCaption editor showing a vertical recitation video, synchronized Quran captions, timeline, waveform, and subtitle controls." width={1649} height={954} priority={priority} sizes="(max-width: 600px) 100vw, (max-width: 1180px) calc(100vw - 48px), 1180px" />;
+function EditorScreenshot({ priority = false }: { priority?: boolean }) {
+  return <Image src="/landing/demo/hero-editor.png" alt="QuranCaptions editor showing Surah Ar-Rahman captions and ayah timeline" width={1200} height={886} priority={priority} sizes="(max-width: 600px) calc(100vw - 32px), (max-width: 1200px) calc(100vw - 48px), 1200px" />;
 }
 
-export default function LandingPage({ demos, showcaseAssets, authenticated }: LandingPageProps) {
-  const [morning, night, unity, eternal] = demos;
+export default function LandingPage({ authenticated }: LandingPageProps) {
   const year = new Date().getFullYear();
 
   return <main className="landing-page">
@@ -75,7 +59,7 @@ export default function LandingPage({ demos, showcaseAssets, authenticated }: La
     <section className="landing-hero" aria-labelledby="landing-title">
       <div className="landing-hero-copy">
         <p className="landing-eyebrow"><span />Made for Quran recitation</p>
-        <h1 id="landing-title">Beautiful Quran captions,<br />automatically synced to your recitation.</h1>
+        <h1 id="landing-title">Beautiful Quran captions, <br />automatically synced to your recitation.</h1>
         <p className="landing-lede">Upload your recitation and get canonical Quran text, translation, word-level synchronization, and a video ready to edit and export.</p>
         <div className="landing-actions"><Link className="landing-primary-cta" href="/create">Start creating free <span aria-hidden="true">→</span></Link><a className="landing-secondary-cta" href="#how-it-works">See how it works <span aria-hidden="true">↓</span></a></div>
         <p className="landing-microcopy">No sign-up required to start.</p>
@@ -93,16 +77,17 @@ export default function LandingPage({ demos, showcaseAssets, authenticated }: La
     <section className="landing-section landing-before-after" aria-labelledby="before-after-title">
       <div className="landing-section-heading"><p className="landing-eyebrow">From raw to ready</p><h2 id="before-after-title">Give a recitation the presentation it deserves.</h2><p>Use the same source frame, then bring in Quran text, translation, and word guidance.</p></div>
       <div className="landing-comparison-visuals">
-        <article className="landing-before-card"><span className="landing-card-kicker">Before</span><div className="landing-raw-video"><span>RAW SOURCE</span><i /></div><p>Recitation video, ready to work with.</p></article>
+        <article className="landing-before-card"><span className="landing-card-kicker">Before</span><div className="landing-comparison-frame"><Image src="/landing/demo/before-landscape.png" alt="Original Quran recitation footage before captions" width={1920} height={1080} sizes="(max-width: 600px) calc(100vw - 62px), (max-width: 1200px) calc((100vw - 138px) / 2), 535px" /></div><p>Recitation video, ready to work with.</p></article>
         <span className="landing-before-after-arrow" aria-hidden="true">→</span>
-        <article className="landing-after-card"><span className="landing-card-kicker">After</span><div className="landing-finished-video"><QuranCaption arabic={eternal.arabic} highlighted /><p>Translation ready for your editor.</p><span>112:1</span></div><p>Canonical text and editable video captions.</p></article>
+        <article className="landing-after-card"><span className="landing-card-kicker">After</span><div className="landing-comparison-frame"><Image src="/landing/demo/after-landscape.png" alt="Quran recitation with Arabic captions and English translation" width={1920} height={1080} sizes="(max-width: 600px) calc(100vw - 62px), (max-width: 1200px) calc((100vw - 138px) / 2), 535px" /></div><p>Canonical text and editable video captions.</p></article>
       </div>
+      <p className="landing-demo-credit">Recitation: <a href="https://www.youtube.com/watch?v=Pah1-oBpq58" target="_blank" rel="noreferrer">Ibrahim Al Gambi, Taraweeh (Surah Ar-Rahman)</a>, licensed CC BY. Clipped and captioned with QuranCaptions.</p>
     </section>
 
     <section className="landing-section landing-editor-showcase" aria-labelledby="editor-title">
       <div className="landing-section-heading"><p className="landing-eyebrow">Edit with clarity</p><h2 id="editor-title">Everything you need to finish the video.</h2><p>Preview your video, refine Quran captions, and work directly with the timeline.</p></div>
       <div className="landing-editor-product-shot"><EditorScreenshot /></div>
-      <div className="landing-editor-detail-grid"><article><div className="landing-editor-detail-crop landing-editor-detail-preview"><EditorScreenshot /></div><h3>Word-level highlighting</h3><p>Guide viewers through the active words as the recitation progresses.</p></article><article><div className="landing-editor-detail-crop landing-editor-detail-timeline"><EditorScreenshot /></div><h3>Quran-aware timeline</h3><p>See caption blocks, video, and waveform together while you refine timing.</p></article><article><div className="landing-editor-detail-crop landing-editor-detail-inspector"><EditorScreenshot /></div><h3>Full subtitle control</h3><p>Adjust translation, typography, highlighting, and placement in context.</p></article></div>
+      <div className="landing-editor-detail-grid"><article><div className="landing-editor-detail-crop"><Image src="/landing/demo/feature-word-highlighting.png" alt="Arabic and English captions with word-level highlighting in the QuranCaptions preview" width={630} height={352} sizes="(max-width: 600px) calc(100vw - 32px), (max-width: 850px) 31vw, 382px" /></div><h3>Word-level highlighting</h3><p>Guide viewers through the active words as the recitation progresses.</p></article><article><div className="landing-editor-detail-crop"><Image src="/landing/demo/feature-timeline.png" alt="Quran-aware caption timeline with video and audio tracks" width={630} height={285} sizes="(max-width: 600px) calc(100vw - 32px), (max-width: 850px) 31vw, 382px" /></div><h3>Quran-aware timeline</h3><p>See caption blocks, video, and waveform together while you refine timing.</p></article><article><div className="landing-editor-detail-crop"><Image src="/landing/demo/feature-subtitle-control.png" alt="Subtitle controls for Quran text, word highlighting, and caption layout" width={279} height={600} sizes="(max-width: 600px) calc(100vw - 32px), (max-width: 850px) 31vw, 382px" /></div><h3>Full subtitle control</h3><p>Adjust translation, typography, highlighting, and placement in context.</p></article></div>
     </section>
 
     <section className="landing-section landing-features" id="features" aria-labelledby="features-title">
@@ -118,7 +103,7 @@ export default function LandingPage({ demos, showcaseAssets, authenticated }: La
 
     <section className="landing-section landing-showcase" aria-labelledby="showcase-title">
       <div className="landing-section-heading"><p className="landing-eyebrow">Make it yours</p><h2 id="showcase-title">One recitation. Make it yours.</h2><p>Choose how Quran text, translation, highlighting, and layout appear in the finished video.</p></div>
-      <div className="landing-showcase-grid">{LANDING_SHOWCASE.map((example, index) => <FinishedVideoExample key={example.id} example={example} arabic={[morning, night, unity, eternal][index].arabic} asset={showcaseAssets.find((asset) => asset.id === example.id)} />)}</div>
+      <div className="landing-showcase-grid">{LANDING_SHOWCASE.map((example) => <FinishedVideoExample key={example.id} example={example} />)}</div>
     </section>
 
     <section className="landing-final-cta" aria-labelledby="final-title"><p className="landing-eyebrow">Ready when you are</p><h2 id="final-title">Turn your recitation into a finished Quran video.</h2><p>No sign-up required to start.</p><Link className="landing-primary-cta" href="/create">Start creating free <span aria-hidden="true">→</span></Link></section>
