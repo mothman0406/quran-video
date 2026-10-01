@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import LandingPage from "@/components/landing-page";
-import { getMarketingQuranDemo } from "@/lib/landing/marketing-demo";
-import { getLandingShowcaseAssets } from "@/lib/landing/showcase-assets";
 import { createSupabaseServerClient, supabaseServerConfigured } from "@/lib/supabase/server";
 
 export const metadata: Metadata = {
@@ -38,5 +36,5 @@ async function landingAuthenticated(): Promise<boolean> {
 
 export default async function HomePage() {
   const authenticated = await landingAuthenticated();
-  return <LandingPage demos={getMarketingQuranDemo()} showcaseAssets={getLandingShowcaseAssets()} authenticated={authenticated} />;
+  return <LandingPage authenticated={authenticated} />;
 }

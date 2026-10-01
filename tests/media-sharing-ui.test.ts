@@ -9,7 +9,7 @@ const landing = readFileSync("src/components/landing-page.tsx", "utf8");
 
 test("the customer editor has no reachable YouTube surface or platform guide", () => {
   assert.doesNotMatch(workspace, /youtube/i);
-  assert.doesNotMatch(landing, /youtube/i);
+  assert.doesNotMatch(landing.replace("https://www.youtube.com/watch?v=Pah1-oBpq58", ""), /youtube/i);
   assert.doesNotMatch(readFileSync("src/lib/editor/social-platform-guides.ts", "utf8"), /youtube/i);
 });
 

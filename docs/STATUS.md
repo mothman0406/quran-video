@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Real landing-page Quran demo assets
+
+Complete in implementation and validation:
+
+- Integrated the real licensed Quran recitation demo throughout the landing
+  page and replaced the former bedroom/editor and generic placeholder examples.
+- Added the matching editor, feature, before/after, and four vertical style
+  captures with responsive Next.js image handling and semantic alt text.
+- Added a subtle CC BY recitation credit beside the before/after media.
+- Deferred style-card video playback to a separate performance-aware
+  enhancement; the landing page uses the final still captures for now.
+
 ## Current milestone: Quran outer timing refinement
 
 Complete in implementation, focused safety coverage, both real fixtures,

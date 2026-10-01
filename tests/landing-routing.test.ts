@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 import { getMarketingQuranDemo, MARKETING_DEMO_VERSE_KEYS } from "../src/lib/landing/marketing-demo.ts";
 import { getVerse } from "../src/lib/quran/local.ts";
-import { getLandingShowcaseAssets, LANDING_SHOWCASE } from "../src/lib/landing/showcase-assets.ts";
+import { LANDING_SHOWCASE } from "../src/lib/landing/showcase-assets.ts";
 
 const fromRoot = (...parts: string[]) => resolve(process.cwd(), ...parts);
 
@@ -69,28 +69,57 @@ test("global document scrolling is available to the landing page while the edito
   assert.match(globals, /\.editor-body \{ grid-template-columns:var\(--left-panel-width,var\(--sidebar-left-width\)\) 10px minmax\(0,1fr\) 10px var\(--right-panel-width,var\(--sidebar-right-width\)\); \}/);
 });
 
-test("landing uses an optimized first-party editor image without importing the editor runtime", () => {
+test("landing uses the optimized first-party QuranCaptions demo assets without importing the editor runtime", () => {
   const landing = readFileSync(fromRoot("src/components/landing-page.tsx"), "utf8");
   const imports = landing.split("\n").filter((line) => line.startsWith("import ")).join("\n");
-  const editorImage = readFileSync(fromRoot("public/landing/editor-demo.png"));
+  const requiredAssets = [
+    "hero-editor.png",
+    "feature-word-highlighting.png",
+    "feature-timeline.png",
+    "feature-subtitle-control.png",
+    "before-landscape.png",
+    "after-landscape.png",
+    "style-minimal.png",
+    "style-translation.png",
+    "style-word-highlight.png",
+    "style-cinematic.png",
+  ];
 
   assert.match(landing, /import Image from "next\/image"/);
-  assert.match(landing, /src="\/landing\/editor-demo\.png"/);
-  assert.match(landing, /width=\{1649\} height=\{954\}/);
-  assert.match(landing, /Quran AutoCaption editor showing a vertical recitation video/);
+  assert.match(landing, /src="\/landing\/demo\/hero-editor\.png"/);
+  assert.match(landing, /width=\{1200\} height=\{886\}/);
+  assert.match(landing, /QuranCaptions editor showing Surah Ar-Rahman captions and ayah timeline/);
   assert.doesNotMatch(imports, /recognition|fastconformer|EditorWorkspace/i);
-  assert.ok(editorImage.length > 100_000, "editor screenshot should be a real high-detail static image");
+  for (const asset of requiredAssets) {
+    const image = readFileSync(fromRoot("public/landing/demo", asset));
+    assert.ok(image.length > 100_000, `${asset} should be a real static image`);
+    assert.match(landing + JSON.stringify(LANDING_SHOWCASE), new RegExp(`/landing/demo/${asset.replace(".", "\\.")}`));
+  }
+  assert.doesNotMatch(landing, /editor-demo\.png|landing-raw-video|landing-finished-video|FinishedVideoFallback/);
 });
 
-test("showcase supports supplied first-party captures and its canonical fallback styles are distinct", () => {
+test("showcase uses the four final first-party vertical captures", () => {
   const landing = readFileSync(fromRoot("src/components/landing-page.tsx"), "utf8");
   const globals = readFileSync(fromRoot("src/app/globals.css"), "utf8");
 
   assert.deepEqual(LANDING_SHOWCASE.map((example) => example.title), ["Minimal", "Translation", "Word Highlight", "Cinematic"]);
   assert.deepEqual(LANDING_SHOWCASE.map((example) => example.description), ["Arabic-first with a clean, distraction-free layout.", "Arabic and English composed together in one frame.", "Follow the recitation word by word with read-so-far color.", "Polished Arabic focus for social-first Quran videos."]);
-  assert.equal(getLandingShowcaseAssets().length, 0, "no unreviewed showcase captures should be assumed present");
+  assert.deepEqual(LANDING_SHOWCASE.map((example) => example.src), ["/landing/demo/style-minimal.png", "/landing/demo/style-translation.png", "/landing/demo/style-word-highlight.png", "/landing/demo/style-cinematic.png"]);
+  assert.ok(LANDING_SHOWCASE.every((example) => example.alt.length > 20));
   assert.doesNotMatch(landing, /A caption treatment made for Quran recitation\./);
-  assert.doesNotMatch(landing, /https?:\/\//i, "landing product visuals must not source competitor or third-party URLs");
   assert.match(globals, /\.landing-showcase-grid \{ grid-template-columns:repeat\(4,minmax\(0,1fr\)\);/);
+  assert.match(globals, /\.landing-showcase-frame > img \{ object-fit:cover; \}/);
   assert.match(globals, /@media \(prefers-reduced-motion:reduce\)/);
+});
+
+test("landing renders the licensed recitation attribution and semantic demo alt text", () => {
+  const landing = readFileSync(fromRoot("src/components/landing-page.tsx"), "utf8");
+
+  assert.match(landing, /Recitation: <a href="https:\/\/www\.youtube\.com\/watch\?v=Pah1-oBpq58"/);
+  assert.match(landing, /Ibrahim Al Gambi, Taraweeh \(Surah Ar-Rahman\)<\/a>, licensed CC BY\. Clipped and captioned with QuranCaptions\./);
+  assert.match(landing, /alt="Original Quran recitation footage before captions"/);
+  assert.match(landing, /alt="Quran recitation with Arabic captions and English translation"/);
+  assert.match(landing, /alt="Arabic and English captions with word-level highlighting in the QuranCaptions preview"/);
+  assert.match(landing, /alt="Quran-aware caption timeline with video and audio tracks"/);
+  assert.match(landing, /alt="Subtitle controls for Quran text, word highlighting, and caption layout"/);
 });
