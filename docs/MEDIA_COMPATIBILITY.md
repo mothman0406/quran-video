@@ -22,14 +22,23 @@ only an explicit Retry may repeat preparation.
 Media compatibility owns decoder selection. Quran identification and timing
 receive one authoritative PCM and never compare decoder-derived Quran
 passages. A source whose inspected audio track is browser-decodable first uses
-Web Audio, followed by explicit deterministic downmix/resampling to 16 kHz
+Mediabunny selected-track demux and WebCodecs, followed by explicit
+deterministic downmix/resampling to 16 kHz
 mono. Sample rate alone, including 44.1 kHz and other fractional conversions,
 does not initialize FFmpeg. Empty, malformed, or non-finite native PCM is
 rejected before recognition and uses the same compatibility fallback as a
 native decode failure.
 
+Duration is authoritative only after Mediabunny computes the final packet end
+timestamp of the selected primary audio/video timeline. Container duration
+metadata is not used to size recognition PCM because initialization metadata
+can cover only an initial fragment in fragmented media. The preferred decoder
+still consumes the selected audio track once, and its canonical frame count
+must exactly match the sample-derived duration before recognition. This rule
+is container-, filename-, MIME-, encoder-, and device-independent.
+
 FFmpeg audio-only extraction is selected only when the inspected audio track
-is not browser-decodable, Web Audio actually fails, or Web Audio produces
+is not browser-decodable, WebCodecs actually fails, or WebCodecs produces
 unusable PCM. These are media facts; Quran confidence, a proposed surah, CTC
 scores, coverage, and passage acceptance never participate. Exactly one
 selected canonical PCM enters one top-level Quran identification call, and
@@ -41,9 +50,15 @@ The picker accepts `video/*`, `audio/*`, and common explicit extensions includin
 
 ## Native first
 
-On selection, the app reads local container metadata with Mediabunny before changing the current editor source. It checks that media is readable, whether an audio track is present, the basic codecs and duration when available, browser playback viability, and recognition-audio decoder support. Supported media continues efficiently through Web Audio regardless of coded sample rate; decode failure or invalid canonical PCM triggers the compatibility rule above. Mediabunny remains the inspector and capability probe, not a third production audio decoder.
+On selection, the app reads the local container and computes its primary-track
+packet timeline with Mediabunny before changing the current editor source. It
+checks that media is readable, whether an audio track is present, the basic
+codecs and exact sample-derived duration, browser playback viability, and
+recognition-audio decoder support. Supported media continues efficiently
+through the preferred WebCodecs path regardless of coded sample rate; decode
+failure or invalid canonical PCM triggers the compatibility rule above.
 
-If the original video can play but Web Audio cannot decode its recognition track, Quran AutoCaption keeps that original video as the preview and export source. It lazily loads a single-thread FFmpeg-WASM runtime, first opens and decodes a one-second **audio-only** probe, then maps only the first audio stream (`-map 0:a:0 -vn`) to mono 16 kHz float PCM for the local recognition worker. `-vn` makes the no-video-decode requirement explicit: a browser-playable HEVC/H.264 video stream cannot block AAC audio extraction. The PCM has the source media timeline; it is not percentage-rebased or used to alter caption timing.
+If the original video can play but WebCodecs cannot decode its recognition track, Quran AutoCaption keeps that original video as the preview and export source. It lazily loads a single-thread FFmpeg-WASM runtime, first opens and decodes a one-second **audio-only** probe, then maps only the first audio stream (`-map 0:a:0 -vn`) to mono 16 kHz float PCM for the local recognition worker. `-vn` makes the no-video-decode requirement explicit: a browser-playable HEVC/H.264 video stream cannot block AAC audio extraction. The PCM has the source media timeline; it is not percentage-rebased or used to alter caption timing.
 
 If playback itself is unavailable, production first evaluates exact local
 transmux. It requires a parseable MOV/ISOBMFF source with primary AVC/H.264 and
@@ -101,7 +116,7 @@ The app ships only the two core runtime files with the deployment: `/ffmpeg/ffmp
 
 Before FFmpeg initializes, the fallback lazily imports the wrapper, validates the core JS response, and validates that the WASM response is successful, `application/wasm`, and begins with the WASM magic bytes. It then calls `FFmpeg.load({ coreURL, wasmURL })`: there is no `classWorkerURL` override (the wrapper worker is bundled) and no `workerURL` (this is not the multi-thread core). This identifies an HTML fallback/404 masquerading as WASM before initialization. `scripts/check-ffmpeg-assets.mjs` runs before and after `next build` and verifies both published core files byte-for-byte against their installed UMD package sources.
 
-There is no blanket picker or native-source byte limit. Browser playback and the normal Web Audio path retain the selected `File` and an object URL; neither requires a whole-file JavaScript copy simply to play or exist. The compatibility preflight routes before applying any resource policy.
+There is no blanket picker or native-source byte limit. Browser playback and the normal WebCodecs path retain the selected `File` and an object URL; neither requires a whole-file JavaScript copy simply to play or exist. The compatibility preflight routes before applying any resource policy.
 
 For recognition-only fallback, FFmpeg mounts the selected `File` with Emscripten `WORKERFS`. The pinned single-thread core includes WORKERFS and runs in FFmpeg's worker context, where its FileReaderSync-backed mount reads the selected `File` on demand. The browser transfers File/Blob metadata to the worker rather than `file.arrayBuffer()` bytes, and FFmpeg reads the required ranges while demuxing the mapped audio stream. This avoids a duplicate full source ArrayBuffer and MEMFS input, including the irrelevant high-bitrate video payload. The retained costs are the original File, FFmpeg decoder working memory, and the generated recognition PCM. Recognition PCM is bounded at 256 MiB (about 70 minutes at 16 kHz mono float); this is an audio-workload bound, not a source-video byte cap. Temporary PCM output and the WorkerFS mount are released immediately after the worker receives the PCM.
 

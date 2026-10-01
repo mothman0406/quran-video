@@ -9,6 +9,15 @@ export type DecodedAudioChannels = {
 
 export const RECOGNITION_SAMPLE_RATE = 16_000;
 
+export function canonicalRecognitionFrameCount(durationMs: number): number {
+  return Math.ceil(durationMs * RECOGNITION_SAMPLE_RATE / 1_000);
+}
+
+export function canonicalPcmMatchesDuration(decoded: DecodedAudioChannels, durationMs: number): boolean {
+  return decoded.sampleRate === RECOGNITION_SAMPLE_RATE
+    && decoded.frameCount === canonicalRecognitionFrameCount(durationMs);
+}
+
 export type DemuxedAudioDecodeOptions = {
   trackId: number;
   durationMs: number;
@@ -97,7 +106,7 @@ export async function decodeDemuxedAudioToCanonicalPcm(
   options: DemuxedAudioDecodeOptions,
 ): Promise<DecodedAudioChannels> {
   if (options.signal?.aborted) throw new DOMException("Media preparation cancelled.", "AbortError");
-  const frameCount = Math.ceil(options.durationMs * RECOGNITION_SAMPLE_RATE / 1_000);
+  const frameCount = canonicalRecognitionFrameCount(options.durationMs);
   if (!Number.isSafeInteger(frameCount) || frameCount <= 0) throw new Error("Audio duration is unusable.");
   const mono = new Float32Array(frameCount);
   const input = new Input({ source: new BlobSource(source), formats: ALL_FORMATS });

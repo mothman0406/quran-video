@@ -3,7 +3,7 @@ import {
   BlobSource,
   Input,
 } from "mediabunny";
-import { compatibilityErrorFromUnknown, MAX_RECOGNITION_PCM_BYTES, MediaCompatibilityError, recognitionPcmBytes, routeMediaCompatibility, type MediaCompatibilityRoute, type MediaInspection } from "../media-compatibility.ts";
+import { authoritativeMediaDurationMs, compatibilityErrorFromUnknown, MAX_RECOGNITION_PCM_BYTES, MediaCompatibilityError, recognitionPcmBytes, routeMediaCompatibility, type MediaCompatibilityRoute, type MediaInspection } from "../media-compatibility.ts";
 import type { MediaKind } from "../editor/media.ts";
 import type { DecodedAudioChannels } from "./local-audio-decode.ts";
 import { mediaDebug, mediaDebugEnabled, visibleFileExtension } from "./media-debug.ts";
@@ -130,14 +130,14 @@ async function inspectTracks(file: File, signal?: AbortSignal): Promise<MediaIns
   signal?.addEventListener("abort", abortInput, { once: true });
   try {
     if (!await input.canRead()) throw new MediaCompatibilityError("unreadable");
-    const [format, audioTracks, audioTrack, videoTrack, duration, mimeType] = await Promise.all([
+    const [format, audioTracks, audioTrack, videoTrack, mimeType] = await Promise.all([
       input.getFormat(),
       input.getAudioTracks(),
       input.getPrimaryAudioTrack(),
       input.getPrimaryVideoTrack(),
-      input.getDurationFromMetadata(),
       input.getMimeType(),
     ]);
+    const duration = await input.computeDuration([audioTrack, videoTrack].filter((track) => track !== null));
     const [audioCodec, videoCodec, nativeRecognitionAudio, browserPlayback, width, height, audioSampleRate, audioChannels] = await Promise.all([
       audioTrack?.getCodec() ?? null,
       videoTrack?.getCodec() ?? null,
@@ -157,7 +157,7 @@ async function inspectTracks(file: File, signal?: AbortSignal): Promise<MediaIns
       hasAudio: Boolean(audioTrack),
       browserPlayback,
       nativeRecognitionAudio,
-      durationMs: duration == null ? undefined : Math.round(duration * 1_000),
+      durationMs: authoritativeMediaDurationMs(duration),
       width,
       height,
       videoCodec,
@@ -687,7 +687,7 @@ export async function prepareRecognitionAudio(
       if (state === "compatibility-fallback") onPreparation?.({ stage: "preparing-converter" });
     },
     preparePreferred: async () => {
-      const { decodeDemuxedAudioToCanonicalPcm } = await import("./local-audio-decode.ts");
+      const { canonicalPcmMatchesDuration, decodeDemuxedAudioToCanonicalPcm } = await import("./local-audio-decode.ts");
       try {
         const pcm = await withMediaPreparationTimeout("Browser audio decoding", 120_000, (timeoutSignal) => decodeDemuxedAudioToCanonicalPcm(file, {
           trackId: inspection.selectedAudioTrackId!, durationMs: inspection.durationMs!, signal: timeoutSignal,
@@ -695,6 +695,7 @@ export async function prepareRecognitionAudio(
           onMetrics: (metrics) => mediaDebug("browser-audio-preparation-timing", metrics),
         }), signal);
         if (!isUsableCanonicalRecognitionPcm(pcm)) throw new Error("Browser canonical PCM is unusable.");
+        if (!canonicalPcmMatchesDuration(pcm, inspection.durationMs!)) throw new Error("Browser canonical PCM duration does not match the inspected sample timeline.");
         onPreparation?.({ stage: "preparing-audio", sourceDurationMs: inspection.durationMs, complete: true });
         return pcm;
       } catch (error) {
