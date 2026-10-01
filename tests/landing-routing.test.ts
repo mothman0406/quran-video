@@ -73,7 +73,7 @@ test("landing uses the optimized first-party QuranCaptions demo assets without i
   const landing = readFileSync(fromRoot("src/components/landing-page.tsx"), "utf8");
   const imports = landing.split("\n").filter((line) => line.startsWith("import ")).join("\n");
   const requiredAssets = [
-    "hero-editor.png",
+    "editor-real-project.png",
     "feature-word-highlighting.png",
     "feature-timeline.png",
     "feature-subtitle-control.png",
@@ -86,9 +86,9 @@ test("landing uses the optimized first-party QuranCaptions demo assets without i
   ];
 
   assert.match(landing, /import Image from "next\/image"/);
-  assert.match(landing, /src="\/landing\/demo\/hero-editor\.png"/);
+  assert.match(landing, /src="\/landing\/demo\/editor-real-project\.png"/);
   assert.match(landing, /width=\{2048\} height=\{1182\}/);
-  assert.match(landing, /QuranCaptions editor with Arabic captions, translation and ayah timeline/);
+  assert.match(landing, /QuranCaptions editor showing Arabic captions, English translation, and ayah timeline/);
   assert.doesNotMatch(imports, /recognition|fastconformer|EditorWorkspace/i);
   for (const asset of requiredAssets) {
     const image = readFileSync(fromRoot("public/landing/demo", asset));

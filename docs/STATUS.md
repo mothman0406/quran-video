@@ -1,5 +1,17 @@
 # Status
 
+## Current milestone: Homepage editor screenshot mapping
+
+Complete in implementation:
+
+- Imported the supplied editor screenshot unchanged as
+  `public/landing/demo/editor-real-project.png`.
+- The top editor showcase and the "Edit with clarity" product image both use
+  the same `EditorScreenshot` source, preserve the screenshot's intrinsic
+  2048×1182 aspect ratio, and retain the existing responsive presentation.
+- No before/after, style-card, feature-card, navigation, or editor behavior
+  assets changed.
+
 ## Current milestone: Default verse numbers and refreshed homepage captures
 
 Complete in implementation and validation:

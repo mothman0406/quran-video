@@ -43,7 +43,7 @@ function FinishedVideoExample({ example }: { example: (typeof LANDING_SHOWCASE)[
 }
 
 function EditorScreenshot({ priority = false }: { priority?: boolean }) {
-  return <Image src="/landing/demo/hero-editor.png" alt="QuranCaptions editor with Arabic captions, translation and ayah timeline" width={2048} height={1182} priority={priority} sizes="(max-width: 600px) calc(100vw - 32px), (max-width: 1200px) calc(100vw - 48px), 1200px" />;
+  return <Image src="/landing/demo/editor-real-project.png" alt="QuranCaptions editor showing Arabic captions, English translation, and ayah timeline" width={2048} height={1182} priority={priority} sizes="(max-width: 600px) calc(100vw - 32px), (max-width: 1200px) calc(100vw - 48px), 1200px" />;
 }
 
 export default function LandingPage({ authenticated }: LandingPageProps) {
